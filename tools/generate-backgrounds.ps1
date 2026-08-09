@@ -398,15 +398,15 @@ for ($gy = 0; $gy -lt $H; $gy += 90) { $g.DrawLine($pen, 0, $gy, $W, $gy) }
 $pen.Dispose()
 # the emblem: eight-panel umbrella canopy — scalloped outer edges,
 # panels meeting at a sharp center point, red/white alternating, red up
-$er = 185.0; $ex2 = 1390.0; $ey2 = 330.0
+$er = 205.0; $ex2 = 1390.0; $ey2 = 330.0
 for ($k = 0; $k -lt 8; $k++) {
   $a0 = ([math]::PI / 180) * (45 * $k - 112.5)
   $a1 = $a0 + [math]::PI / 4
   $am = ($a0 + $a1) / 2
   $t0x = $ex2 + $er * [math]::Cos($a0); $t0y = $ey2 + $er * [math]::Sin($a0)
   $t1x = $ex2 + $er * [math]::Cos($a1); $t1y = $ey2 + $er * [math]::Sin($a1)
-  # scallop: bezier bulging outward through the panel's mid-angle
-  $mx2 = $ex2 + $er * 1.24 * [math]::Cos($am); $my2 = $ey2 + $er * 1.24 * [math]::Sin($am)
+  # canopy sag: edges dip inward between rib tips, like a real umbrella
+  $mx2 = $ex2 + $er * 0.84 * [math]::Cos($am); $my2 = $ey2 + $er * 0.84 * [math]::Sin($am)
   $path = New-Object System.Drawing.Drawing2D.GraphicsPath
   $path.AddLine([single]$ex2, [single]$ey2, [single]$t0x, [single]$t0y)
   $path.AddBezier([single]$t0x, [single]$t0y, [single]$mx2, [single]$my2, [single]$mx2, [single]$my2, [single]$t1x, [single]$t1y)
@@ -424,7 +424,7 @@ for ($k = 0; $k -lt 8; $k++) {
   $am = ($a0 + $a1) / 2
   $t0x = $ex2 + $er * [math]::Cos($a0); $t0y = $ey2 + $er * [math]::Sin($a0)
   $t1x = $ex2 + $er * [math]::Cos($a1); $t1y = $ey2 + $er * [math]::Sin($a1)
-  $mx2 = $ex2 + $er * 1.24 * [math]::Cos($am); $my2 = $ey2 + $er * 1.24 * [math]::Sin($am)
+  $mx2 = $ex2 + $er * 0.84 * [math]::Cos($am); $my2 = $ey2 + $er * 0.84 * [math]::Sin($am)
   $pen = New-Object System.Drawing.Pen((C 255 8 9 12), 4)
   $g.DrawLine($pen, [single]$ex2, [single]$ey2, [single]$t0x, [single]$t0y)
   $g.DrawBezier($pen, [single]$t0x, [single]$t0y, [single]$mx2, [single]$my2, [single]$mx2, [single]$my2, [single]$t1x, [single]$t1y)
