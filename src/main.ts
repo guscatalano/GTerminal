@@ -148,9 +148,13 @@ const aiTitles: Record<string, string> = JSON.parse(
 function saveAiTitles() {
   localStorage.setItem("gterm-ai-titles", JSON.stringify(aiTitles));
 }
-// Shell-reported titles that carry no information (every pwsh tab reports
-// the same exe path); these fall through to the cwd-based label.
-const BORING_TITLE = /pwsh|powershell|cmd\.exe|^Administrator: |^Windows PowerShell$/i;
+// Shell-reported titles that carry no information: the bare shell exe
+// path/name (every pwsh tab reports the same one), the Administrator
+// banner variant, default shell banners, or a bare filesystem path (the
+// cwd-based label handles directories better). A title that merely
+// CONTAINS a shell name (e.g. "Claude Code — pwsh") is kept.
+const BORING_TITLE =
+  /^(Administrator:\s*)?([A-Za-z]:\\[^|—-]*\\)?(pwsh|powershell|cmd)(\.exe)?$|^Windows PowerShell$|^Command Prompt$|^[A-Za-z]:\\\S*$/i;
 
 function cwdParts(id: number): string[] {
   const cwd = lastInfo.get(id)?.cwd;
