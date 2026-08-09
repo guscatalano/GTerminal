@@ -301,6 +301,7 @@ pub fn run_daemon() {
 
     spawn_flush_thread(sessions.clone());
     spawn_purge_thread(sessions.clone());
+    spawn_child_monitor(sessions.clone());
 
     for conn in listener.incoming() {
         if let Ok(stream) = conn {
@@ -380,6 +381,73 @@ fn spawn_flush_thread(sessions: Sessions) {
     });
 }
 
+/// Tear down a live session whose shell has ended (typed `exit`, crash,
+/// or kill): notify any attached client, and within the grace window park
+/// it as restorable trash instead of deleting the checkpoint.
+fn end_session(sessions: &Sessions, id: u32) {
+    let mut state = sessions.lock().unwrap();
+    let mut deleted = false;
+    if let Some(mut s) = state.live.remove(&id) {
+        if let Some((_, mut w)) = s.attached.take() {
+            let _ = write_line(&mut w, &json!({"ev": "exit"}));
+        }
+        let _ = s.child.kill();
+        if let Some(grace) = grace_ms() {
+            let meta = Meta {
+                id,
+                created_ms: s.created_ms,
+                cwd: s.cwd.clone(),
+                running: Vec::new(),
+            };
+            let _ = std::fs::create_dir_all(sessions_dir());
+            let _ = std::fs::write(
+                meta_path(id),
+                serde_json::to_string(&meta).expect("serialize"),
+            );
+            let _ = std::fs::write(ring_path(id), &s.ring);
+            state.cold.insert(
+                id,
+                ColdSession {
+                    created_ms: s.created_ms,
+                    cwd: s.cwd,
+                    running: Vec::new(),
+                    expires: Some(now_ms() + grace),
+                },
+            );
+        } else {
+            deleted = true;
+        }
+    }
+    drop(state);
+    if deleted {
+        delete_persist(id);
+    }
+    exit_if_idle(sessions);
+}
+
+/// ConPTY's output pipe does NOT EOF when the shell exits (conhost keeps
+/// it open), so a typed `exit` is invisible to the reader thread. Poll the
+/// child processes directly to notice ended shells.
+fn spawn_child_monitor(sessions: Sessions) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(1));
+        let ended: Vec<u32> = {
+            let mut state = sessions.lock().unwrap();
+            state
+                .live
+                .iter_mut()
+                .filter_map(|(id, s)| match s.child.try_wait() {
+                    Ok(Some(_)) => Some(*id),
+                    _ => None,
+                })
+                .collect()
+        };
+        for id in ended {
+            end_session(&sessions, id);
+        }
+    });
+}
+
 /// Enforce the "oops" grace windows: hard-kill soft-killed sessions and
 /// delete trashed checkpoints once their time is up.
 fn spawn_purge_thread(sessions: Sessions) {
@@ -425,6 +493,10 @@ fn exit_if_idle(sessions: &Sessions) {
     let state = sessions.lock().unwrap();
     if state.live.is_empty() && state.cold.is_empty() {
         let _ = std::fs::remove_file(port_file());
+        // Give in-flight replies (e.g. the final kill's ok) time to reach
+        // their sockets: process::exit tears connections down with an RST
+        // that can discard just-written data.
+        std::thread::sleep(Duration::from_millis(200));
         std::process::exit(0);
     }
 }
@@ -726,43 +798,9 @@ fn start_session(
                 }
             }
         }
-        // Shell exited on its own (or was killed). Within the grace window
-        // the checkpoint sticks around as a restorable "trash" session — an
-        // accidental `exit` can be undone; afterwards it is purged for real.
-        let mut state = sessions.lock().unwrap();
-        if let Some(mut s) = state.live.remove(&id) {
-            if let Some((_, mut w)) = s.attached.take() {
-                let _ = write_line(&mut w, &json!({"ev": "exit"}));
-            }
-            let _ = s.child.kill();
-            if let Some(grace) = grace_ms() {
-                let meta = Meta {
-                    id,
-                    created_ms: s.created_ms,
-                    cwd: s.cwd.clone(),
-                    running: Vec::new(),
-                };
-                let _ = std::fs::create_dir_all(sessions_dir());
-                let _ = std::fs::write(
-                    meta_path(id),
-                    serde_json::to_string(&meta).expect("serialize"),
-                );
-                let _ = std::fs::write(ring_path(id), &s.ring);
-                state.cold.insert(
-                    id,
-                    ColdSession {
-                        created_ms: s.created_ms,
-                        cwd: s.cwd,
-                        running: Vec::new(),
-                        expires: Some(now_ms() + grace),
-                    },
-                );
-            } else {
-                delete_persist(id);
-            }
-        }
-        drop(state);
-        exit_if_idle(&sessions);
+        // PTY stream ended (master dropped or conhost died): tear down the
+        // session if the child monitor hasn't already.
+        end_session(&sessions, id);
     });
 
     Ok(())

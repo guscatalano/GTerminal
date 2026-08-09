@@ -416,6 +416,12 @@ function setActive(id: number) {
   fitTab(tab);
   tab.term.focus();
   refreshChrome();
+  // Re-assert focus after the chrome rebuild settles so a click in the
+  // sidebar (or anywhere in the bar) always ends with the terminal ready
+  // to type into.
+  requestAnimationFrame(() => {
+    if (activeId === id && !renameActive) tab.term.focus();
+  });
 }
 
 function fitTab(tab: Tab) {
@@ -809,9 +815,25 @@ function showContextMenu(x: number, y: number, items: CtxItem[]) {
   ctxMenu.style.top = `${Math.min(y, window.innerHeight - ctxMenu.offsetHeight - 8)}px`;
 }
 
+/// Rename wherever the tab is actually visible: the sidebar row when the
+/// sidebar is on (the tab bar is display:none there — editing its hidden
+/// label looks like nothing happened), the tab button otherwise.
+function renameTabAnywhere(id: number) {
+  if (app.classList.contains("sidebar-on")) {
+    const el = sidebarList.querySelector<HTMLElement>(
+      `.side-row[data-id="${id}"] .side-label`
+    );
+    if (el) {
+      renameSession(id, el);
+      return;
+    }
+  }
+  renameTab(id);
+}
+
 function showTabContextMenu(x: number, y: number, id: number) {
   const current = groupState.assign[id];
-  const items: CtxItem[] = [{ label: "Rename tab", action: () => renameTab(id) }, "sep"];
+  const items: CtxItem[] = [{ label: "Rename tab", action: () => renameTabAnywhere(id) }, "sep"];
   for (const g of groupState.groups) {
     if (g.id === current) continue;
     items.push({ label: `Add to "${g.name}"`, color: g.color, action: () => assignToGroup(id, g.id) });
@@ -1144,6 +1166,9 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
   const sessions =
     prefetched ?? (await invoke<SessionInfo[]>("list_sessions").catch(() => []));
   if (version !== sidebarVersion) return;
+  // Re-check after the await: a rename may have started while fetching,
+  // and rebuilding now would destroy its input mid-edit.
+  if (renameActive) return;
 
   // Skip the DOM rebuild when nothing changed — the 5s poll would
   // otherwise churn the sidebar (and hitch the renderer) while typing.
@@ -1167,6 +1192,7 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
   ) => {
     const row = document.createElement("div");
     row.className = "side-row" + (isActive ? " active" : "");
+    row.dataset.id = String(id);
     const d = document.createElement("span");
     d.className = `side-dot ${dotClass}`;
     d.textContent = dot;

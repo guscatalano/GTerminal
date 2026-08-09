@@ -57,7 +57,12 @@ npm run tauri build   # package installer
 npm run test:typing   # typing correctness + echo latency regression test
 ```
 
-`test:typing` runs against an isolated daemon (scratch state dir): it burst-types a payload character-by-character and asserts the shell received it intact, then measures per-keystroke echo latency (budget: p50 < 50ms, p95 < 150ms; typical: p50 ≈ 1–2ms).
+`npm test` runs both suites against isolated daemons (scratch state dirs, never your real sessions):
+
+- **typing**: burst-types a payload char-by-char and asserts intact arrival, then measures per-keystroke echo latency (budget p50 < 50ms / p95 < 150ms; typical p50 ≈ 1–2ms).
+- **lifecycle**: create/attach, scrollback replay, cwd tracking, detach-keeps-alive, soft-kill grace + restore-cancels-kill, double-kill-is-hard, typed-exit-to-trash, trash resurrection, and full reboot survival (daemon force-killed, sessions restored cold with scrollback + cwd).
+
+Every new feature should land with coverage in one of these suites.
 
 ## Known limitations
 
