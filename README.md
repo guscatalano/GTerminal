@@ -17,8 +17,15 @@ A lightweight terminal for Windows with tmux-style session persistence: closing 
 | Reboot | Sessions restored cold: cwd + scrollback, fresh shell |
 | `exit` in the shell | Session genuinely ends |
 | ⟳ menu / `Ctrl+Shift+Z` | Restore (or kill) detached sessions |
+| – / `Ctrl+Shift+H` | Park a tab as a pill in the bar; click to bring back |
+| `Ctrl+Shift+B` | Toggle the session sidebar (all sessions: open/hidden/cold) |
+| Double-click tab | Rename it (custom names stick) |
+| Right-click tab | Context menu: rename, tab groups, hide/detach/kill |
+| Right-click terminal | Copy selection / paste (Windows Terminal style) |
 | `Ctrl+Shift+T` · `Ctrl+Tab` | New tab · cycle tabs |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste |
+
+Tabs shrink browser-style as they multiply; overflow collapses into a `+N` menu. Tabs can be organized into colored, collapsible groups (right-click a tab); groups and names persist across restarts and reboots.
 
 ## Development
 

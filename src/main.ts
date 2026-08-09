@@ -56,9 +56,66 @@ function saveTitle(id: number, title: string) {
   titles[id] = title;
   localStorage.setItem("gterm-titles", JSON.stringify(titles));
 }
-function titleOf(id: number): string {
-  return titles[id] ?? `Session ${id}`;
+
+// User-given names win over shell-reported titles and never get overwritten.
+const customTitles: Record<string, string> = JSON.parse(
+  localStorage.getItem("gterm-names") ?? "{}"
+);
+function saveCustomTitles() {
+  localStorage.setItem("gterm-names", JSON.stringify(customTitles));
 }
+function titleOf(id: number): string {
+  return customTitles[id] ?? titles[id] ?? `Session ${id}`;
+}
+
+// ── tab groups (Chrome-style: colored, collapsible) ─────────────────────
+interface TabGroup {
+  id: string;
+  name: string;
+  color: string;
+  collapsed: boolean;
+}
+const GROUP_COLORS = ["#61afef", "#98c379", "#e5c07b", "#e06c75", "#c678dd", "#56b6c2"];
+const groupState: { groups: TabGroup[]; assign: Record<string, string> } = JSON.parse(
+  localStorage.getItem("gterm-groups") ?? '{"groups":[],"assign":{}}'
+);
+function saveGroups() {
+  localStorage.setItem("gterm-groups", JSON.stringify(groupState));
+}
+function groupById(gid: string | undefined): TabGroup | undefined {
+  return groupState.groups.find((g) => g.id === gid);
+}
+function groupOf(id: number): TabGroup | undefined {
+  return groupById(groupState.assign[id]);
+}
+function createGroup(): TabGroup {
+  const g: TabGroup = {
+    id: (crypto.randomUUID?.() ?? String(Date.now())) as string,
+    name: `Group ${groupState.groups.length + 1}`,
+    color: GROUP_COLORS[groupState.groups.length % GROUP_COLORS.length],
+    collapsed: false,
+  };
+  groupState.groups.push(g);
+  return g;
+}
+function assignToGroup(id: number, gid: string) {
+  groupState.assign[id] = gid;
+  saveGroups();
+  refreshChrome();
+}
+function removeFromGroup(id: number) {
+  delete groupState.assign[id];
+  pruneGroups();
+  saveGroups();
+  refreshChrome();
+}
+function pruneGroups() {
+  const used = new Set(Object.values(groupState.assign));
+  groupState.groups = groupState.groups.filter((g) => used.has(g.id));
+}
+
+// Insertion order of tabs; grouping reorders members to sit together.
+let tabOrder: number[] = [];
 
 const THEME = {
   background: "#0f1115",
@@ -85,7 +142,7 @@ const THEME = {
 };
 
 function orderedIds(): number[] {
-  return [...tabbar.children].map((el) => Number((el as HTMLElement).dataset.id));
+  return [...tabbar.querySelectorAll<HTMLElement>(".tab")].map((el) => Number(el.dataset.id));
 }
 
 function setActive(id: number) {
@@ -222,7 +279,7 @@ async function createTab(attachId?: number) {
   button.dataset.id = String(id);
   const label = document.createElement("span");
   label.className = "tab-label";
-  label.textContent = titles[id] ?? "PowerShell";
+  label.textContent = customTitles[id] ?? titles[id] ?? "PowerShell";
   const hide = document.createElement("button");
   hide.className = "tab-close";
   hide.textContent = "–";
@@ -233,6 +290,7 @@ async function createTab(attachId?: number) {
   close.title = "Detach tab — session keeps running (Ctrl+Shift+W)";
   button.append(label, hide, close);
   tabbar.appendChild(button);
+  tabOrder.push(id);
 
   const tab: Tab = { id, term, fit, pane, button, label };
   tabs.set(id, tab);
@@ -243,17 +301,44 @@ async function createTab(attachId?: number) {
   button.addEventListener("auxclick", (e) => {
     if (e.button === 1) closeTab(id);
   });
+  button.addEventListener("dblclick", (e) => {
+    if (e.target === label) renameTab(id);
+  });
+  button.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showTabContextMenu(e.clientX, e.clientY, id);
+  });
   hide.addEventListener("click", () => hideTab(id));
   close.addEventListener("click", () => closeTab(id));
+
+  // Right-click in the terminal: copy the selection if there is one,
+  // otherwise paste — Windows Terminal behavior. (The WebView2 default
+  // context menu is suppressed globally.)
+  pane.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    const sel = term.getSelection();
+    if (sel) {
+      navigator.clipboard.writeText(sel).catch(() => {});
+      term.clearSelection();
+    } else {
+      navigator.clipboard
+        .readText()
+        .then((text) => text && invoke("write_session", { id, data: text }))
+        .catch(() => {});
+    }
+  });
 
   term.onData((data) => {
     invoke("write_session", { id, data }).catch(() => {});
   });
   term.onTitleChange((title) => {
     if (title.trim()) {
-      label.textContent = title;
       saveTitle(id, title);
-      refreshChrome();
+      if (!customTitles[id]) {
+        label.textContent = title;
+        refreshChrome();
+      }
     }
   });
   term.attachCustomKeyEventHandler(makeShortcutHandler(() => id));
@@ -276,6 +361,7 @@ function removeTab(id: number, closeWindowIfLast = true) {
   const tab = tabs.get(id);
   if (!tab) return;
   tabs.delete(id);
+  tabOrder = tabOrder.filter((t) => t !== id);
   const ids = orderedIds();
   const i = ids.indexOf(id);
   tab.term.dispose();
@@ -327,15 +413,204 @@ async function killSession(id: number) {
   await invoke("kill_session", { id }).catch(() => {});
   hidden.delete(id);
   saveHidden();
+  delete groupState.assign[id];
+  pruneGroups();
+  saveGroups();
   refreshChrome();
 }
 
 // ───────────────────────── chrome: menus, pills, overflow, sidebar ──────────
 
+const ctxMenu = document.createElement("div");
+ctxMenu.className = "menu ctx";
+document.body.appendChild(ctxMenu);
+
 function closeMenus(except?: HTMLElement) {
-  for (const m of [restoreMenu, overflowMenu, hiddenMenu]) {
+  for (const m of [restoreMenu, overflowMenu, hiddenMenu, ctxMenu]) {
     if (m !== except) m.classList.remove("open");
   }
+}
+
+type CtxItem = { label: string; action: () => void; color?: string } | "sep";
+function showContextMenu(x: number, y: number, items: CtxItem[]) {
+  ctxMenu.innerHTML = "";
+  for (const it of items) {
+    if (it === "sep") {
+      const s = document.createElement("div");
+      s.className = "menu-sep";
+      ctxMenu.appendChild(s);
+      continue;
+    }
+    const row = menuRow(it.label, it.action);
+    if (it.color) {
+      const dot = document.createElement("span");
+      dot.className = "menu-dot";
+      dot.style.background = it.color;
+      row.prepend(dot);
+    }
+    ctxMenu.appendChild(row);
+  }
+  closeMenus(ctxMenu);
+  ctxMenu.classList.add("open");
+  ctxMenu.style.left = `${Math.min(x, window.innerWidth - ctxMenu.offsetWidth - 8)}px`;
+  ctxMenu.style.top = `${Math.min(y, window.innerHeight - ctxMenu.offsetHeight - 8)}px`;
+}
+
+function showTabContextMenu(x: number, y: number, id: number) {
+  const current = groupState.assign[id];
+  const items: CtxItem[] = [{ label: "Rename tab", action: () => renameTab(id) }, "sep"];
+  for (const g of groupState.groups) {
+    if (g.id === current) continue;
+    items.push({ label: `Add to "${g.name}"`, color: g.color, action: () => assignToGroup(id, g.id) });
+  }
+  items.push({
+    label: "New group with tab",
+    action: () => {
+      const g = createGroup();
+      assignToGroup(id, g.id);
+    },
+  });
+  if (current) {
+    items.push({ label: "Remove from group", action: () => removeFromGroup(id) });
+  }
+  items.push(
+    "sep",
+    { label: "Hide tab", action: () => hideTab(id) },
+    { label: "Detach tab", action: () => closeTab(id) },
+    { label: "Kill session", action: () => killAndClose(id) }
+  );
+  showContextMenu(x, y, items);
+}
+
+async function killAndClose(id: number) {
+  removeTab(id, false);
+  await killSession(id);
+  if (tabs.size === 0) await createTab();
+}
+
+/// Swap an element's text for an input; commit on Enter/blur, cancel on Esc.
+function inlineRename(el: HTMLElement, current: string, commit: (v: string | null) => void) {
+  const input = document.createElement("input");
+  input.className = "rename-input";
+  input.value = current;
+  el.replaceChildren(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = (val: string | null) => {
+    if (done) return;
+    done = true;
+    commit(val);
+  };
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") finish(input.value.trim() || null);
+    if (e.key === "Escape") finish(null);
+  });
+  input.addEventListener("blur", () => finish(input.value.trim() || null));
+}
+
+function renameTab(id: number) {
+  const tab = tabs.get(id);
+  if (!tab) return;
+  inlineRename(tab.label, titleOf(id), (v) => {
+    if (v) {
+      customTitles[id] = v;
+    } else if (v === null && !customTitles[id]) {
+      // cancelled, nothing to change
+    }
+    saveCustomTitles();
+    tab.label.textContent = titleOf(id);
+    refreshChrome();
+  });
+}
+
+/// Rebuild the tab bar in order: ungrouped tabs stay put; a group's chip and
+/// members sit together at the position of its first member. Collapsed
+/// groups hide their members (except the active tab, which stays visible).
+function layoutTabbar() {
+  const frag = document.createDocumentFragment();
+  const done = new Set<number>();
+  for (const id of tabOrder) {
+    if (done.has(id) || !tabs.has(id)) continue;
+    const g = groupOf(id);
+    if (g) {
+      const members = tabOrder.filter((m) => tabs.has(m) && groupState.assign[m] === g.id);
+      for (const m of members) done.add(m);
+      frag.appendChild(makeGroupChip(g, members.length));
+      for (const m of members) {
+        const b = tabs.get(m)!.button;
+        b.style.setProperty("--gc", g.color);
+        b.classList.add("grouped");
+        b.style.display = g.collapsed && m !== activeId ? "none" : "";
+        frag.appendChild(b);
+      }
+    } else {
+      done.add(id);
+      const b = tabs.get(id)!.button;
+      b.classList.remove("grouped");
+      b.style.removeProperty("--gc");
+      b.style.display = "";
+      frag.appendChild(b);
+    }
+  }
+  tabbar.replaceChildren(frag);
+}
+
+function makeGroupChip(g: TabGroup, count: number): HTMLElement {
+  const chip = document.createElement("div");
+  chip.className = "group-chip" + (g.collapsed ? " collapsed" : "");
+  chip.style.setProperty("--gc", g.color);
+  const name = document.createElement("span");
+  name.textContent = g.collapsed ? `${g.name} (${count})` : g.name;
+  chip.appendChild(name);
+  chip.title = g.collapsed ? "Expand group" : "Collapse group";
+  chip.addEventListener("click", () => {
+    if (!g.collapsed && activeId !== null && groupState.assign[activeId] === g.id) {
+      // Collapsing the active tab's group: move focus outside it first.
+      const outside = orderedIds().find((id) => groupState.assign[id] !== g.id);
+      if (outside !== undefined) setActive(outside);
+    }
+    g.collapsed = !g.collapsed;
+    saveGroups();
+    refreshChrome();
+  });
+  chip.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showContextMenu(e.clientX, e.clientY, [
+      {
+        label: "Rename group",
+        action: () =>
+          inlineRename(name, g.name, (v) => {
+            if (v) g.name = v;
+            saveGroups();
+            refreshChrome();
+          }),
+      },
+      {
+        label: "Change color",
+        color: g.color,
+        action: () => {
+          g.color = GROUP_COLORS[(GROUP_COLORS.indexOf(g.color) + 1) % GROUP_COLORS.length];
+          saveGroups();
+          refreshChrome();
+        },
+      },
+      {
+        label: "Ungroup",
+        action: () => {
+          for (const k of Object.keys(groupState.assign)) {
+            if (groupState.assign[k] === g.id) delete groupState.assign[k];
+          }
+          pruneGroups();
+          saveGroups();
+          refreshChrome();
+        },
+      },
+    ]);
+  });
+  return chip;
 }
 
 function menuRow(
@@ -372,13 +647,20 @@ function menuRow(
 const MIN_TAB_PX = 104; // tab min-width + gap
 const CHIP_PX = 60;
 function updateTabOverflow() {
-  const buttons = [...tabbar.children] as HTMLElement[];
   if (app.classList.contains("sidebar-on")) {
     overflowBtn.hidden = true;
     return;
   }
-  for (const b of buttons) b.style.display = "";
-  const avail = tabbar.clientWidth;
+  // Collapsed group members are already display:none from layout and are
+  // excluded; group chips eat into the available width.
+  const buttons = [...tabbar.querySelectorAll<HTMLElement>(".tab")].filter(
+    (b) => b.style.display !== "none"
+  );
+  const chipsW = [...tabbar.querySelectorAll<HTMLElement>(".group-chip")].reduce(
+    (a, c) => a + c.offsetWidth + 4,
+    0
+  );
+  const avail = tabbar.clientWidth - chipsW;
   let fit = Math.max(1, Math.floor(avail / MIN_TAB_PX));
   if (buttons.length <= fit) {
     overflowBtn.hidden = true;
@@ -493,28 +775,54 @@ async function renderSidebar() {
     sidebarList.appendChild(row);
   };
 
-  for (const id of orderedIds()) {
+  const addHeader = (name: string, color?: string) => {
+    const h = document.createElement("div");
+    h.className = "side-header";
+    if (color) {
+      const dot = document.createElement("span");
+      dot.className = "menu-dot";
+      dot.style.background = color;
+      h.appendChild(dot);
+    }
+    h.appendChild(document.createTextNode(name));
+    sidebarList.appendChild(h);
+  };
+
+  const openRow = (id: number) =>
     addRow("●", "open", titleOf(id), id === activeId, () => setActive(id), [
       ["–", "Hide (Ctrl+Shift+H)", () => hideTab(id)],
       ["×", "Detach (Ctrl+Shift+W)", () => closeTab(id)],
     ]);
-  }
-  for (const id of hidden) {
-    addRow("◌", "hidden", `${titleOf(id)}`, false, () => restoreHidden(id), [
+  const hiddenRow = (id: number) =>
+    addRow("◌", "hidden", titleOf(id), false, () => restoreHidden(id), [
       ["×", "Kill session", () => killSession(id)],
     ]);
-  }
-  for (const s of sessions) {
-    if (tabs.has(s.id) || hidden.has(s.id)) continue;
-    const suffix = s.alive ? "" : " (cold)";
-    addRow("○", "cold", `${titleOf(s.id)}${suffix}`, false, () => createTab(s.id), [
+  const coldRow = (s: SessionInfo) =>
+    addRow("○", "cold", `${titleOf(s.id)}${s.alive ? "" : " (cold)"}`, false, () => createTab(s.id), [
       ["×", "Kill session", () => killSession(s.id)],
     ]);
+
+  const inGroup = (id: number, gid: string) => groupState.assign[id] === gid;
+  for (const g of groupState.groups) {
+    addHeader(g.name, g.color);
+    for (const id of orderedIds()) if (inGroup(id, g.id)) openRow(id);
+    for (const id of hidden) if (inGroup(id, g.id)) hiddenRow(id);
+    for (const s of sessions) {
+      if (!tabs.has(s.id) && !hidden.has(s.id) && inGroup(s.id, g.id)) coldRow(s);
+    }
+  }
+  const ungrouped = (id: number) => !groupById(groupState.assign[id]);
+  if (groupState.groups.length) addHeader("Ungrouped");
+  for (const id of orderedIds()) if (ungrouped(id)) openRow(id);
+  for (const id of hidden) if (ungrouped(id)) hiddenRow(id);
+  for (const s of sessions) {
+    if (!tabs.has(s.id) && !hidden.has(s.id) && ungrouped(s.id)) coldRow(s);
   }
 }
 
 function refreshChrome() {
   requestAnimationFrame(() => {
+    layoutTabbar();
     updateTabOverflow();
     renderHiddenPills();
     renderSidebar();
@@ -583,12 +891,15 @@ async function main() {
   });
   document.addEventListener("mousedown", (e) => {
     const target = e.target as Node;
-    for (const m of [restoreMenu, overflowMenu, hiddenMenu]) {
+    for (const m of [restoreMenu, overflowMenu, hiddenMenu, ctxMenu]) {
       if (m.classList.contains("open") && !m.contains(target)) {
         m.classList.remove("open");
       }
     }
   });
+  // Suppress the WebView2 default context menu everywhere ("Send to
+  // devices", "Web capture", etc.) — the app provides its own menus.
+  window.addEventListener("contextmenu", (e) => e.preventDefault());
   window.addEventListener("keydown", (e) => {
     if (e.ctrlKey && e.shiftKey && e.key.toUpperCase() === "T") {
       e.preventDefault();
@@ -617,6 +928,11 @@ async function main() {
     if (!known.has(h)) hidden.delete(h);
   }
   saveHidden();
+  for (const k of Object.keys(groupState.assign)) {
+    if (!known.has(Number(k))) delete groupState.assign[k];
+  }
+  pruneGroups();
+  saveGroups();
   for (const s of sessions) {
     if (!hidden.has(s.id)) await createTab(s.id);
   }

@@ -255,6 +255,84 @@ body,
   border-color: #4a5468;
 }
 
+/* ── tab groups ──────────────────────────────────────────────────────── */
+
+.group-chip {
+  display: flex;
+  align-items: center;
+  flex: none;
+  align-self: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--gc) 18%, #171a21);
+  border: 1px solid color-mix(in srgb, var(--gc) 55%, transparent);
+  color: var(--gc);
+  font: 600 11px "Segoe UI", sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
+.group-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.group-chip:hover {
+  background: color-mix(in srgb, var(--gc) 30%, #171a21);
+}
+
+.tab.grouped {
+  box-shadow: inset 0 2px 0 var(--gc);
+}
+
+.rename-input {
+  width: 100%;
+  border: 1px solid #4a5468;
+  border-radius: 4px;
+  background: #0f1115;
+  color: #d7dae0;
+  font: 12px "Segoe UI", sans-serif;
+  padding: 1px 4px;
+  outline: none;
+}
+
+.menu.ctx {
+  position: fixed;
+  top: auto;
+  right: auto;
+  min-width: 180px;
+  z-index: 100;
+}
+
+.menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: #2b3140;
+}
+
+.menu-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 8px;
+  flex: none;
+}
+
+.side-header {
+  display: flex;
+  align-items: center;
+  padding: 10px 10px 4px 10px;
+  color: #5c6370;
+  font: 600 11px "Segoe UI", sans-serif;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ── hidden pills ────────────────────────────────────────────────────── */
 
 #hiddenbar {
