@@ -17,6 +17,7 @@ interface Tab {
   button: HTMLElement;
   label: HTMLElement;
   icon: HTMLElement;
+  webgl?: WebglAddon;
 }
 
 interface SessionInfo {
@@ -458,35 +459,35 @@ function mkTheme(
 }
 
 const THEMES: Record<string, ThemeDef> = {
-  "one-dark": mkTheme("One Dark", "white", ['"Cascadia Mono", Consolas, monospace', 1.1, "bar"], "radial-gradient(ellipse 70% 50% at 30% 10%, rgba(97,175,239,0.18), transparent 60%), radial-gradient(ellipse 60% 50% at 80% 90%, rgba(198,120,221,0.14), transparent 60%), linear-gradient(170deg, #0d1016, #12161f)", "#0f1115", "#d7dae0", [
+  "one-dark": mkTheme("One Dark", "white", ['"Cascadia Mono", Consolas, monospace', 1.1, "bar"], "radial-gradient(ellipse 70% 50% at 30% 10%, rgba(97,175,239,0.35), transparent 60%), radial-gradient(ellipse 60% 50% at 80% 90%, rgba(198,120,221,0.28), transparent 60%), linear-gradient(170deg, #090b10, #182030)", "#0f1115", "#d7dae0", [
     "#1c1f26", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd", "#56b6c2", "#d7dae0",
     "#5c6370", "#ef7d85", "#a9d387", "#f0cd8a", "#74bdf7", "#d48ce8", "#67c5d0", "#f0f2f6",
   ]),
-  dracula: mkTheme("Dracula", "white", ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "block"], "radial-gradient(ellipse 65% 50% at 25% 15%, rgba(189,147,249,0.2), transparent 60%), radial-gradient(ellipse 55% 45% at 80% 85%, rgba(255,121,198,0.14), transparent 60%), linear-gradient(165deg, #1f2029, #2a2c3a)", "#282a36", "#f8f8f2", [
+  dracula: mkTheme("Dracula", "white", ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "block"], "radial-gradient(ellipse 65% 50% at 25% 15%, rgba(189,147,249,0.38), transparent 60%), radial-gradient(ellipse 55% 45% at 80% 85%, rgba(255,121,198,0.28), transparent 60%), linear-gradient(165deg, #17181f, #343a52)", "#282a36", "#f8f8f2", [
     "#21222c", "#ff5555", "#50fa7b", "#f1fa8c", "#bd93f9", "#ff79c6", "#8be9fd", "#f8f8f2",
     "#6272a4", "#ff6e6e", "#69ff94", "#ffffa5", "#d6acff", "#ff92df", "#a4ffff", "#ffffff",
   ]),
-  nord: mkTheme("Nord", "white", ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"], "radial-gradient(ellipse 75% 55% at 20% 0%, rgba(136,192,208,0.16), transparent 60%), radial-gradient(ellipse 60% 50% at 85% 95%, rgba(129,161,193,0.15), transparent 60%), linear-gradient(175deg, #272c36, #313846)", "#2e3440", "#d8dee9", [
+  nord: mkTheme("Nord", "white", ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"], "radial-gradient(ellipse 75% 55% at 20% 0%, rgba(136,192,208,0.3), transparent 60%), radial-gradient(ellipse 60% 50% at 85% 95%, rgba(129,161,193,0.28), transparent 60%), linear-gradient(175deg, #20242d, #3d4658)", "#2e3440", "#d8dee9", [
     "#3b4252", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#88c0d0", "#e5e9f0",
     "#4c566a", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#8fbcbb", "#eceff4",
   ]),
-  gruvbox: mkTheme("Gruvbox Dark", "white", ["Consolas, monospace", 1.1, "block"], "radial-gradient(ellipse 70% 50% at 25% 10%, rgba(215,153,33,0.16), transparent 60%), radial-gradient(ellipse 55% 45% at 80% 90%, rgba(204,36,29,0.1), transparent 60%), linear-gradient(170deg, #211f1d, #2b2724)", "#282828", "#ebdbb2", [
+  gruvbox: mkTheme("Gruvbox Dark", "white", ["Consolas, monospace", 1.1, "block"], "radial-gradient(ellipse 70% 50% at 25% 10%, rgba(215,153,33,0.3), transparent 60%), radial-gradient(ellipse 55% 45% at 80% 90%, rgba(204,36,29,0.22), transparent 60%), linear-gradient(170deg, #191715, #383028)", "#282828", "#ebdbb2", [
     "#282828", "#cc241d", "#98971a", "#d79921", "#458588", "#b16286", "#689d6a", "#a89984",
     "#928374", "#fb4934", "#b8bb26", "#fabd2f", "#83a598", "#d3869b", "#8ec07c", "#ebdbb2",
   ]),
-  "tokyo-night": mkTheme("Tokyo Night", "white", ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "bar"], "radial-gradient(ellipse 70% 50% at 30% 5%, rgba(122,162,247,0.2), transparent 60%), radial-gradient(ellipse 60% 45% at 80% 90%, rgba(187,154,247,0.16), transparent 55%), linear-gradient(170deg, #131420, #1b1c2e)", "#1a1b26", "#c0caf5", [
+  "tokyo-night": mkTheme("Tokyo Night", "white", ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "bar"], "radial-gradient(ellipse 70% 50% at 30% 5%, rgba(122,162,247,0.38), transparent 60%), radial-gradient(ellipse 60% 45% at 80% 90%, rgba(187,154,247,0.3), transparent 55%), linear-gradient(170deg, #0e0f1c, #262a4a)", "#1a1b26", "#c0caf5", [
     "#15161e", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#a9b1d6",
     "#414868", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#c0caf5",
   ]),
-  catppuccin: mkTheme("Catppuccin Mocha", "white", ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"], "radial-gradient(ellipse 70% 50% at 25% 10%, rgba(203,166,247,0.16), transparent 60%), radial-gradient(ellipse 60% 45% at 80% 90%, rgba(137,180,250,0.14), transparent 55%), linear-gradient(170deg, #191926, #232336)", "#1e1e2e", "#cdd6f4", [
+  catppuccin: mkTheme("Catppuccin Mocha", "white", ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"], "radial-gradient(ellipse 70% 50% at 25% 10%, rgba(203,166,247,0.3), transparent 60%), radial-gradient(ellipse 60% 45% at 80% 90%, rgba(137,180,250,0.28), transparent 55%), linear-gradient(170deg, #131320, #2e2e4d)", "#1e1e2e", "#cdd6f4", [
     "#45475a", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#bac2de",
     "#585b70", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#a6adc8",
   ]),
-  "solarized-dark": mkTheme("Solarized Dark", "white", ["Consolas, monospace", 1.1, "underline"], "radial-gradient(ellipse 75% 55% at 25% 5%, rgba(42,161,152,0.18), transparent 60%), radial-gradient(ellipse 60% 45% at 85% 95%, rgba(38,139,210,0.12), transparent 55%), linear-gradient(175deg, #00212b, #003644)", "#002b36", "#839496", [
+  "solarized-dark": mkTheme("Solarized Dark", "white", ["Consolas, monospace", 1.1, "underline"], "radial-gradient(ellipse 75% 55% at 25% 5%, rgba(42,161,152,0.34), transparent 60%), radial-gradient(ellipse 60% 45% at 85% 95%, rgba(38,139,210,0.26), transparent 55%), linear-gradient(175deg, #001a22, #00465a)", "#002b36", "#839496", [
     "#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198", "#eee8d5",
     "#002b36", "#cb4b16", "#586e75", "#657b83", "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
   ]),
-  "solarized-light": mkTheme("Solarized Light", "black", ["Consolas, monospace", 1.1, "underline"], "radial-gradient(ellipse 75% 55% at 25% 5%, rgba(181,137,0,0.12), transparent 60%), radial-gradient(ellipse 60% 45% at 85% 95%, rgba(38,139,210,0.08), transparent 55%), linear-gradient(175deg, #fdf6e3, #f1e9d2)", "#fdf6e3", "#657b83", [
+  "solarized-light": mkTheme("Solarized Light", "black", ["Consolas, monospace", 1.1, "underline"], "radial-gradient(ellipse 75% 55% at 25% 5%, rgba(181,137,0,0.22), transparent 60%), radial-gradient(ellipse 60% 45% at 85% 95%, rgba(38,139,210,0.16), transparent 55%), linear-gradient(175deg, #fdf6e3, #e9debe)", "#fdf6e3", "#657b83", [
     "#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198", "#eee8d5",
     "#002b36", "#cb4b16", "#586e75", "#657b83", "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
   ]),
@@ -508,6 +509,24 @@ THEMES.hermes = mkTheme(
 );
 THEMES.hermes.xterm.cursor = "#edff45";
 THEMES.hermes.xterm.selectionBackground = "#edff4540";
+
+// Nous (nousresearch brand book): ink on paper — photocopy grain over
+// off-white, black ink, Courier New (their lead font), and accents from
+// "The Blues of Nous" cyanotype palette.
+THEMES.nous = mkTheme(
+  "Nous",
+  "black",
+  ['"Courier New", Consolas, monospace', 1.2, "block"],
+  `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E") repeat, radial-gradient(100% 80% at 50% 0%, rgba(4,113,169,0.09), transparent 55%), radial-gradient(130% 100% at 50% 55%, transparent 55%, rgba(4,42,64,0.14) 100%), linear-gradient(180deg, #fbfaf7, #f1efe9)`,
+  "#f7f5f0",
+  "#141414",
+  [
+    "#141414", "#b3261e", "#1d6f42", "#8a6d00", "#0471a9", "#7b2d8b", "#0e7c86", "#f7f5f0",
+    "#5a5a5a", "#d64545", "#2c8f58", "#a8862a", "#2b93cc", "#9c4fae", "#26a0aa", "#ffffff",
+  ]
+);
+THEMES.nous.xterm.cursor = "#0471a9";
+THEMES.nous.xterm.selectionBackground = "#0471a935";
 
 let themeKey = "one-dark";
 function currentTheme(): ThemeDef {
@@ -546,11 +565,25 @@ function effXtermTheme(): ITheme {
   return bgActive() ? { ...t, background: "rgba(0, 0, 0, 0)" } : t;
 }
 
-/// Push current appearance settings into every open terminal.
+/// Push current appearance settings into every open terminal, switching
+/// renderers live: WebGL can't composite transparency, so tabs move to the
+/// DOM renderer while a background is active and back to WebGL without one.
 function applyAppearance() {
   applyBackground();
   const t = { xterm: effXtermTheme() };
+  const bg = bgActive();
   for (const tab of tabs.values()) {
+    if (bg && tab.webgl) {
+      tab.webgl.dispose();
+      tab.webgl = undefined;
+    } else if (!bg && !tab.webgl) {
+      try {
+        tab.webgl = new WebglAddon();
+        tab.term.loadAddon(tab.webgl);
+      } catch {
+        tab.webgl = undefined;
+      }
+    }
     tab.term.options.theme = t.xterm;
     tab.term.options.fontFamily = effFont();
     tab.term.options.fontSize = effFontSize();
@@ -735,11 +768,13 @@ async function createTab(attachId?: number, shell?: string) {
   term.open(pane);
   // The WebGL renderer can't composite transparency over a decorative
   // background; those tabs use the DOM renderer instead.
+  let webgl: WebglAddon | undefined;
   if (!bgActive()) {
     try {
-      term.loadAddon(new WebglAddon());
+      webgl = new WebglAddon();
+      term.loadAddon(webgl);
     } catch {
-      // WebGL unavailable; xterm falls back to the DOM renderer.
+      webgl = undefined; // WebGL unavailable; DOM renderer fallback.
     }
   }
   fit.fit();
@@ -788,7 +823,7 @@ async function createTab(attachId?: number, shell?: string) {
   tabOrder.push(id);
   saveOrder();
 
-  const tab: Tab = { id, term, fit, pane, button, label, icon };
+  const tab: Tab = { id, term, fit, pane, button, label, icon, webgl };
   tabs.set(id, tab);
 
   button.addEventListener("mousedown", (e) => {
