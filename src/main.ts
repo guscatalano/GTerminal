@@ -73,6 +73,8 @@ interface AppConfig {
   ai_flavor?: string;
   ai_auto_titles?: boolean;
   default_shell?: string;
+  title_mode?: string;
+  title_template?: string;
 }
 
 const SHELL_CHOICES: Array<[string, string]> = [
@@ -166,22 +168,62 @@ function shellDisplayName(id: number): string {
   }
 }
 
-function baseLabel(id: number): { text: string; fromCwd: boolean } {
-  if (customTitles[id]) return { text: customTitles[id], fromCwd: false };
-  if (aiTitles[id]) return { text: aiTitles[id], fromCwd: false };
-  const t = titles[id];
-  if (t && !BORING_TITLE.test(t)) return { text: t, fromCwd: false };
+/// The automatic part of the label, governed by the "Title style" setting.
+function autoLabel(id: number): { text: string; fromCwd: boolean } {
   const parts = cwdParts(id);
   const tail = parts[parts.length - 1];
   // The home directory's name (the username) makes a confusing label.
   const isHome = parts.length === 3 && parts[1].toLowerCase() === "users";
-  // A running program auto-labels the tab: "claude · GTerminal".
   const prog = (lastInfo.get(id)?.running ?? []).find((n) => !SHELLS.test(n));
-  if (prog) {
-    return { text: tail && !isHome ? `${prog} · ${tail}` : prog, fromCwd: false };
+  const t = titles[id];
+  const interesting = t && !BORING_TITLE.test(t) ? t : "";
+  const dirLabel = () =>
+    tail && !isHome
+      ? { text: tail, fromCwd: true }
+      : { text: shellDisplayName(id), fromCwd: false };
+
+  switch (config.title_mode ?? "smart") {
+    case "dir":
+      return dirLabel();
+    case "program":
+      return { text: prog ?? shellDisplayName(id), fromCwd: false };
+    case "shelltitle":
+      if (interesting) return { text: interesting, fromCwd: false };
+      return dirLabel();
+    case "custom": {
+      const vals: Record<string, string> = {
+        program: prog ?? "",
+        folder: tail && !isHome ? tail : "",
+        parent: parts.length >= 2 ? parts[parts.length - 2] : "",
+        path: lastInfo.get(id)?.cwd ?? "",
+        shell: shellDisplayName(id),
+        title: interesting,
+      };
+      const rendered = (config.title_template ?? "{program} · {folder}")
+        .replace(/\{(\w+)\}/g, (_, k: string) => vals[k] ?? "")
+        .split("·")
+        .map((p) => p.trim())
+        .filter(Boolean)
+        .join(" · ");
+      return rendered
+        ? { text: rendered.slice(0, 60), fromCwd: false }
+        : { text: shellDisplayName(id), fromCwd: false };
+    }
+    default: {
+      // smart: shell-set title, else program · folder, else directory.
+      if (interesting) return { text: interesting, fromCwd: false };
+      if (prog) {
+        return { text: tail && !isHome ? `${prog} · ${tail}` : prog, fromCwd: false };
+      }
+      return dirLabel();
+    }
   }
-  if (tail && !isHome) return { text: tail, fromCwd: true };
-  return { text: shellDisplayName(id), fromCwd: false };
+}
+
+function baseLabel(id: number): { text: string; fromCwd: boolean } {
+  if (customTitles[id]) return { text: customTitles[id], fromCwd: false };
+  if (aiTitles[id]) return { text: aiTitles[id], fromCwd: false };
+  return autoLabel(id);
 }
 
 // Duplicate labels get disambiguated: different directories sharing a tail
@@ -1777,6 +1819,42 @@ function buildSettingsPage() {
       config.cursor_blink = v === "on";
       changed();
     })
+  );
+
+  settingsSection("Tab titles");
+  settingRow(
+    "Title style",
+    "How tabs are labeled automatically. Your renames and AI-picked titles always override this.",
+    mkSelect(
+      [
+        ["smart", "Smart (program · folder, then directory)"],
+        ["dir", "Directory name"],
+        ["program", "Running program"],
+        ["shelltitle", "Shell-reported title"],
+        ["custom", "Custom template"],
+      ],
+      config.title_mode ?? "smart",
+      (v) => {
+        config.title_mode = v === "smart" ? undefined : v;
+        saveConfig();
+        updateLiveInfo();
+      }
+    )
+  );
+  const tplInput = document.createElement("input");
+  tplInput.className = "set-control set-wide";
+  tplInput.type = "text";
+  tplInput.placeholder = "{program} · {folder}";
+  tplInput.value = config.title_template ?? "";
+  tplInput.addEventListener("change", () => {
+    config.title_template = tplInput.value.trim() || undefined;
+    saveConfig();
+    updateLiveInfo();
+  });
+  settingRow(
+    "Custom template",
+    "Used when style is Custom. Placeholders: {program} {folder} {parent} {path} {shell} {title}. Join parts with ·",
+    tplInput
   );
 
   settingsSection("Sessions");
