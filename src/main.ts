@@ -29,8 +29,18 @@ const pending = new Map<number, string[]>();
 let activeId: number | null = null;
 
 const tabbar = document.getElementById("tabbar")!;
+const hiddenbar = document.getElementById("hiddenbar")!;
 const panes = document.getElementById("panes")!;
 const restoreMenu = document.getElementById("restore-menu")!;
+
+// Sessions the user parked with "hide" — detached in the daemon but shown
+// as pills in the tab bar. Persisted so they stay parked across restarts.
+const hidden = new Set<number>(
+  JSON.parse(localStorage.getItem("gterm-hidden") ?? "[]") as number[]
+);
+function saveHidden() {
+  localStorage.setItem("gterm-hidden", JSON.stringify([...hidden]));
+}
 
 // Session ids reset when the daemon restarts, so stale entries are harmless.
 const titles: Record<string, string> = JSON.parse(
@@ -113,6 +123,10 @@ function makeShortcutHandler(getId: () => number) {
         closeTab(getId());
         return false;
       }
+      if (key === "H") {
+        hideTab(getId());
+        return false;
+      }
       if (key === "Z") {
         restoreLast();
         return false;
@@ -179,8 +193,15 @@ async function createTab(attachId?: number) {
       id = await invoke<number>("create_session", { cols: term.cols, rows: term.rows });
     }
   } catch (err) {
-    term.writeln(`Failed to ${attachId !== undefined ? "restore" : "start"} session: ${err}`);
+    console.error(`Failed to ${attachId !== undefined ? "restore" : "start"} session:`, err);
+    term.dispose();
+    pane.remove();
     return;
+  }
+
+  if (hidden.delete(id)) {
+    saveHidden();
+    renderHiddenPills();
   }
 
   const button = document.createElement("div");
@@ -189,22 +210,27 @@ async function createTab(attachId?: number) {
   const label = document.createElement("span");
   label.className = "tab-label";
   label.textContent = titles[id] ?? "PowerShell";
+  const hide = document.createElement("button");
+  hide.className = "tab-close";
+  hide.textContent = "–";
+  hide.title = "Hide tab — park it aside, still running (Ctrl+Shift+H)";
   const close = document.createElement("button");
   close.className = "tab-close";
   close.textContent = "×";
   close.title = "Detach tab — session keeps running (Ctrl+Shift+W)";
-  button.append(label, close);
+  button.append(label, hide, close);
   tabbar.appendChild(button);
 
   const tab: Tab = { id, term, fit, pane, button, label };
   tabs.set(id, tab);
 
   button.addEventListener("mousedown", (e) => {
-    if (e.target !== close) setActive(id);
+    if (e.target !== close && e.target !== hide) setActive(id);
   });
   button.addEventListener("auxclick", (e) => {
     if (e.button === 1) closeTab(id);
   });
+  hide.addEventListener("click", () => hideTab(id));
   close.addEventListener("click", () => closeTab(id));
 
   term.onData((data) => {
@@ -232,7 +258,7 @@ async function createTab(attachId?: number) {
   setActive(id);
 }
 
-function removeTab(id: number) {
+function removeTab(id: number, closeWindowIfLast = true) {
   const tab = tabs.get(id);
   if (!tab) return;
   tabs.delete(id);
@@ -242,7 +268,7 @@ function removeTab(id: number) {
   tab.pane.remove();
   tab.button.remove();
   if (tabs.size === 0) {
-    getCurrentWindow().close();
+    if (closeWindowIfLast) getCurrentWindow().close();
     return;
   }
   if (activeId === id) {
@@ -256,6 +282,58 @@ function removeTab(id: number) {
 function closeTab(id: number) {
   invoke("detach_session", { id }).catch(() => {});
   removeTab(id);
+}
+
+// Hiding also detaches, but parks the session as a visible pill in the tab
+// bar for one-click restore. Hidden state survives app restarts.
+async function hideTab(id: number) {
+  if (!tabs.has(id)) return;
+  invoke("detach_session", { id }).catch(() => {});
+  hidden.add(id);
+  saveHidden();
+  removeTab(id, false);
+  renderHiddenPills();
+  if (tabs.size === 0) await createTab();
+}
+
+async function restoreHidden(id: number) {
+  const sessions = await invoke<SessionInfo[]>("list_sessions").catch(() => []);
+  if (sessions.some((s) => s.id === id)) {
+    await createTab(id);
+  } else {
+    // Session died while parked (e.g. killed elsewhere) — drop the pill.
+    hidden.delete(id);
+    saveHidden();
+    renderHiddenPills();
+  }
+}
+
+function renderHiddenPills() {
+  hiddenbar.innerHTML = "";
+  for (const id of hidden) {
+    const pill = document.createElement("div");
+    pill.className = "hidden-pill";
+    const label = document.createElement("span");
+    label.className = "hidden-pill-label";
+    label.textContent = titles[id] ?? `Session ${id}`;
+    label.title = "Restore hidden session";
+    const kill = document.createElement("button");
+    kill.className = "hidden-pill-kill";
+    kill.textContent = "×";
+    kill.title = "Kill session";
+    pill.append(label, kill);
+    pill.addEventListener("click", (e) => {
+      if (e.target === kill) return;
+      restoreHidden(id);
+    });
+    kill.addEventListener("click", async () => {
+      await invoke("kill_session", { id }).catch(() => {});
+      hidden.delete(id);
+      saveHidden();
+      renderHiddenPills();
+    });
+    hiddenbar.appendChild(pill);
+  }
 }
 
 async function renderRestoreMenu() {
@@ -332,10 +410,17 @@ async function main() {
     }
   });
 
-  // Reattach every surviving session from the daemon; fresh start otherwise.
+  // Reattach every surviving session from the daemon; sessions the user
+  // parked stay parked as pills. Fresh start otherwise.
   const sessions = await invoke<SessionInfo[]>("list_sessions").catch(() => []);
+  const known = new Set(sessions.map((s) => s.id));
+  for (const h of [...hidden]) {
+    if (!known.has(h)) hidden.delete(h);
+  }
+  saveHidden();
+  renderHiddenPills();
   for (const s of sessions) {
-    await createTab(s.id);
+    if (!hidden.has(s.id)) await createTab(s.id);
   }
   if (tabs.size === 0) await createTab();
 }
