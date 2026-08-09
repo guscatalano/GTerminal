@@ -390,7 +390,7 @@ Save $bmp $g "deusex.png"
 $rng = New-Object System.Random(1998)
 $bmp, $g = New-Canvas
 Fill-Vertical $g (C 255 12 13 16) (C 255 6 6 8)
-Glow $g 1430 470 560 (C 46 200 20 24)      # red containment glow
+Glow $g 1390 330 420 (C 46 200 20 24)      # red containment glow
 # containment floor grid
 $pen = New-Object System.Drawing.Pen((C 16 200 210 220), 1)
 for ($gx = 0; $gx -lt $W; $gx += 90) { $g.DrawLine($pen, $gx, 0, $gx, $H) }
@@ -398,7 +398,7 @@ for ($gy = 0; $gy -lt $H; $gy += 90) { $g.DrawLine($pen, 0, $gy, $W, $gy) }
 $pen.Dispose()
 # the emblem: eight-panel umbrella canopy — scalloped outer edges,
 # panels meeting at a sharp center point, red/white alternating, red up
-$er = 300.0; $ex2 = 1430.0; $ey2 = 470.0
+$er = 185.0; $ex2 = 1390.0; $ey2 = 330.0
 for ($k = 0; $k -lt 8; $k++) {
   $a0 = ([math]::PI / 180) * (45 * $k - 112.5)
   $a1 = $a0 + [math]::PI / 4
@@ -412,7 +412,7 @@ for ($k = 0; $k -lt 8; $k++) {
   $path.AddBezier([single]$t0x, [single]$t0y, [single]$mx2, [single]$my2, [single]$mx2, [single]$my2, [single]$t1x, [single]$t1y)
   $path.AddLine([single]$t1x, [single]$t1y, [single]$ex2, [single]$ey2)
   $path.CloseFigure()
-  $col = if ($k % 2 -eq 0) { C 215 205 22 30 } else { C 205 234 234 228 }
+  $col = if ($k % 2 -eq 0) { C 235 226 28 36 } else { C 225 242 242 236 }
   $b = New-Object System.Drawing.SolidBrush($col)
   $g.FillPath($b, $path); $b.Dispose()
   $path.Dispose()
@@ -425,7 +425,7 @@ for ($k = 0; $k -lt 8; $k++) {
   $t0x = $ex2 + $er * [math]::Cos($a0); $t0y = $ey2 + $er * [math]::Sin($a0)
   $t1x = $ex2 + $er * [math]::Cos($a1); $t1y = $ey2 + $er * [math]::Sin($a1)
   $mx2 = $ex2 + $er * 1.24 * [math]::Cos($am); $my2 = $ey2 + $er * 1.24 * [math]::Sin($am)
-  $pen = New-Object System.Drawing.Pen((C 255 8 9 12), 5)
+  $pen = New-Object System.Drawing.Pen((C 255 8 9 12), 4)
   $g.DrawLine($pen, [single]$ex2, [single]$ey2, [single]$t0x, [single]$t0y)
   $g.DrawBezier($pen, [single]$t0x, [single]$t0y, [single]$mx2, [single]$my2, [single]$mx2, [single]$my2, [single]$t1x, [single]$t1y)
   $pen.Dispose()
