@@ -396,21 +396,40 @@ $pen = New-Object System.Drawing.Pen((C 16 200 210 220), 1)
 for ($gx = 0; $gx -lt $W; $gx += 90) { $g.DrawLine($pen, $gx, 0, $gx, $H) }
 for ($gy = 0; $gy -lt $H; $gy += 90) { $g.DrawLine($pen, 0, $gy, $W, $gy) }
 $pen.Dispose()
-# the emblem: 8 alternating wedges, red and bone-white
+# the emblem: eight-panel umbrella canopy — scalloped outer edges,
+# panels meeting at a sharp center point, red/white alternating, red up
 $er = 300.0; $ex2 = 1430.0; $ey2 = 470.0
 for ($k = 0; $k -lt 8; $k++) {
-  $col = if ($k % 2 -eq 0) { C 120 190 22 28 } else { C 60 226 226 220 }
+  $a0 = ([math]::PI / 180) * (45 * $k - 112.5)
+  $a1 = $a0 + [math]::PI / 4
+  $am = ($a0 + $a1) / 2
+  $t0x = $ex2 + $er * [math]::Cos($a0); $t0y = $ey2 + $er * [math]::Sin($a0)
+  $t1x = $ex2 + $er * [math]::Cos($a1); $t1y = $ey2 + $er * [math]::Sin($a1)
+  # scallop: bezier bulging outward through the panel's mid-angle
+  $mx2 = $ex2 + $er * 1.24 * [math]::Cos($am); $my2 = $ey2 + $er * 1.24 * [math]::Sin($am)
+  $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $path.AddLine([single]$ex2, [single]$ey2, [single]$t0x, [single]$t0y)
+  $path.AddBezier([single]$t0x, [single]$t0y, [single]$mx2, [single]$my2, [single]$mx2, [single]$my2, [single]$t1x, [single]$t1y)
+  $path.AddLine([single]$t1x, [single]$t1y, [single]$ex2, [single]$ey2)
+  $path.CloseFigure()
+  $col = if ($k % 2 -eq 0) { C 215 205 22 30 } else { C 205 234 234 228 }
   $b = New-Object System.Drawing.SolidBrush($col)
-  $g.FillPie($b, ($ex2 - $er), ($ey2 - $er), (2 * $er), (2 * $er), (45 * $k + 22.5), 45.0)
-  $b.Dispose()
+  $g.FillPath($b, $path); $b.Dispose()
+  $path.Dispose()
 }
-# emblem rings
-$pen = New-Object System.Drawing.Pen((C 150 226 226 220), 3)
-$g.DrawEllipse($pen, ($ex2 - $er), ($ey2 - $er), (2 * $er), (2 * $er)); $pen.Dispose()
-$pen = New-Object System.Drawing.Pen((C 90 226 226 220), 2)
-$g.DrawEllipse($pen, ($ex2 - 96), ($ey2 - 96), 192, 192); $pen.Dispose()
-$b = New-Object System.Drawing.SolidBrush((C 210 12 13 16))
-$g.FillEllipse($b, ($ex2 - 92), ($ey2 - 92), 184, 184); $b.Dispose()
+# panel separation spokes + scallop outlines in the background ink
+for ($k = 0; $k -lt 8; $k++) {
+  $a0 = ([math]::PI / 180) * (45 * $k - 112.5)
+  $a1 = $a0 + [math]::PI / 4
+  $am = ($a0 + $a1) / 2
+  $t0x = $ex2 + $er * [math]::Cos($a0); $t0y = $ey2 + $er * [math]::Sin($a0)
+  $t1x = $ex2 + $er * [math]::Cos($a1); $t1y = $ey2 + $er * [math]::Sin($a1)
+  $mx2 = $ex2 + $er * 1.24 * [math]::Cos($am); $my2 = $ey2 + $er * 1.24 * [math]::Sin($am)
+  $pen = New-Object System.Drawing.Pen((C 255 8 9 12), 5)
+  $g.DrawLine($pen, [single]$ex2, [single]$ey2, [single]$t0x, [single]$t0y)
+  $g.DrawBezier($pen, [single]$t0x, [single]$t0y, [single]$mx2, [single]$my2, [single]$mx2, [single]$my2, [single]$t1x, [single]$t1y)
+  $pen.Dispose()
+}
 # hazard stripe bar along the bottom
 $stripeY = $H - 74
 $b = New-Object System.Drawing.SolidBrush((C 60 20 20 24)); $g.FillRectangle($b, 0, $stripeY, $W, 74); $b.Dispose()
