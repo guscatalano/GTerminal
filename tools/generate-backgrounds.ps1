@@ -266,106 +266,75 @@ for ($i = 0; $i -lt 5000; $i++) {
 }
 Save $bmp $g "nous.png"
 
-# ── Cyberpunk: the 2077 graphic identity — chrome-yellow glitch block,
-# cyan HUD chamfers, red warning glyph, seven-seg 2077 ──
+# ── Cyberpunk: key-art minimalism — flat chrome-yellow spine on the
+# right edge, glitch steps on its edge, chromatic fringe, black-on-yellow
+# schematic 2077, cyan partner dashes, vast dark negative space ──
 $rng = New-Object System.Random(2077)
 $bmp, $g = New-Canvas
-Fill-Vertical $g (C 255 14 14 19) (C 255 8 8 12)
-$cpY = @(252, 238, 10); $cpC = @(0, 240, 255); $cpR = @(255, 30, 70)
-Glow $g 1350 260 560 (C 34 252 238 10)
-# the yellow block: chamfered corner, cut by black displacement slices
-$panel = @(1060, 110, 1580, 440)   # x0 y0 x1 y1, bottom-left corner chamfered
-$b = New-Object System.Drawing.SolidBrush((C 245 252 238 10))
+Fill-Vertical $g (C 255 13 13 17) (C 255 8 8 11)
+# the yellow spine: full-height slab anchored to the right edge, its left
+# edge broken by displacement steps (out, in, out)
+$b = New-Object System.Drawing.SolidBrush((C 250 252 238 10))
 $g.FillPolygon($b, (MkPts @(
-  @($panel[0], $panel[1]), @($panel[2], $panel[1]), @($panel[2], $panel[3]),
-  @(($panel[0] + 70), $panel[3]), @($panel[0], ($panel[3] - 70)))))
+  @(1560, 0), @(1560, 260), @(1524, 260), @(1524, 332), @(1560, 332),
+  @(1560, 520), @(1596, 520), @(1596, 578), @(1560, 578),
+  @(1560, 788), @(1520, 788), @(1520, 848), @(1560, 848),
+  @(1560, $H), @($W, $H), @($W, 0))))
 $b.Dispose()
-# glitch slices: black cuts, yellow spurs jutting past the edges
-for ($i = 0; $i -lt 9; $i++) {
-  $gy = $panel[1] + 20 + $rng.Next(0, $panel[3] - $panel[1] - 40)
-  $gh = $rng.Next(6, 22)
-  $b = New-Object System.Drawing.SolidBrush((C 255 8 8 12))
-  $g.FillRectangle($b, ($panel[0] - 20), $gy, ($panel[2] - $panel[0] + 40), $gh); $b.Dispose()
-  $sx = $panel[0] + $rng.Next(-90, 60)
-  $sw = $rng.Next(200, 640)
-  $b = New-Object System.Drawing.SolidBrush((C 245 252 238 10))
-  $g.FillRectangle($b, $sx, $gy, $sw, $gh); $b.Dispose()
+# chromatic aberration fringes just off the edge (red near, cyan farther)
+$b = New-Object System.Drawing.SolidBrush((C 120 255 40 70)); $g.FillRectangle($b, 1548, 0, 4, $H); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 85 0 240 255)); $g.FillRectangle($b, 1538, 0, 3, $H); $b.Dispose()
+# echo fringes on the step notches
+foreach ($st in @(@(1524, 260, 72), @(1520, 788, 60))) {
+  $b = New-Object System.Drawing.SolidBrush((C 110 255 40 70)); $g.FillRectangle($b, ($st[0] - 10), $st[1], 4, $st[2]); $b.Dispose()
+  $b = New-Object System.Drawing.SolidBrush((C 80 0 240 255)); $g.FillRectangle($b, ($st[0] - 18), $st[1], 3, $st[2]); $b.Dispose()
 }
-# stray color slices around the frame (cyan + red interference)
-for ($i = 0; $i -lt 10; $i++) {
-  $gy = $rng.Next(60, $H - 60); $gh = $rng.Next(3, 8)
-  $cc = if ($rng.NextDouble() -lt 0.6) { $cpC } else { $cpR }
-  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(50, 130) $cc[0] $cc[1] $cc[2]))
-  $g.FillRectangle($b, $rng.Next(300, 1000), $gy, $rng.Next(160, 620), $gh); $b.Dispose()
-}
-# cyan HUD frame: chamfered rectangle with tick marks
-$hud = @(1060, 560, 1590, 950)
-$pen = New-Object System.Drawing.Pen((C 150 0 240 255), 2)
-$g.DrawLines($pen, (MkPts @(
-  @(($hud[0] + 46), $hud[1]), @($hud[2], $hud[1]), @($hud[2], ($hud[3] - 46)),
-  @(($hud[2] - 46), $hud[3]), @($hud[0], $hud[3]), @($hud[0], ($hud[1] + 46)),
-  @(($hud[0] + 46), $hud[1]))))
-$pen.Dispose()
-$pen = New-Object System.Drawing.Pen((C 110 0 240 255), 2)
-for ($k = 0; $k -lt 8; $k++) { $g.DrawLine($pen, (1100 + $k * 26), 588, (1100 + $k * 26), (588 + 12)) }
-$g.DrawLine($pen, 1080, 700, 1570, 700)
-$pen.Dispose()
-# signal bars + data blocks inside the HUD
-for ($k = 0; $k -lt 12; $k++) {
-  $bh = $rng.Next(10, 60)
-  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(70, 160) 0 240 255))
-  $g.FillRectangle($b, (1100 + $k * 38), (880 - $bh), 22, $bh); $b.Dispose()
-}
-for ($k = 0; $k -lt 5; $k++) {
-  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(50, 110) 0 240 255))
-  $g.FillRectangle($b, 1100, (730 + $k * 26), $rng.Next(90, 420), 12); $b.Dispose()
-}
-# red warning: triangle glyph on the HUD corner
-$pen = New-Object System.Drawing.Pen((C 220 255 30 70), 3)
-$g.DrawPolygon($pen, (MkPts @(@(1530, 610), @(1560, 662), @(1500, 662)))); $pen.Dispose()
-$b = New-Object System.Drawing.SolidBrush((C 220 255 30 70)); $g.FillRectangle($b, 1527, 628, 6, 18); $g.FillRectangle($b, 1527, 650, 6, 6); $b.Dispose()
-# seven-seg 2077 bottom-left, glitched
+# black-on-yellow: small seven-seg 2077 stacked vertically in the spine
 $segsFor = @{
   "2" = @("A", "B", "G", "E", "D"); "0" = @("A", "B", "C", "D", "E", "F"); "7" = @("A", "B", "C")
 }
-$dx0 = 330; $dy0 = 800; $dw = 96; $dh = 170; $thk = 20; $gap = 46
+$dw = 38; $dh = 62; $thk = 9
 $digits = @("2", "0", "7", "7")
 for ($di = 0; $di -lt $digits.Count; $di++) {
-  $ox = $dx0 + $di * ($dw + $gap)
+  $ox = 1568; $oy = 120 + $di * 88
   foreach ($sg in $segsFor[$digits[$di]]) {
-    $b = New-Object System.Drawing.SolidBrush((C 215 252 238 10))
+    $b = New-Object System.Drawing.SolidBrush((C 235 12 12 14))
     switch ($sg) {
-      "A" { $g.FillRectangle($b, $ox, $dy0, $dw, $thk) }
-      "B" { $g.FillRectangle($b, ($ox + $dw - $thk), $dy0, $thk, [int]($dh / 2)) }
-      "C" { $g.FillRectangle($b, ($ox + $dw - $thk), ($dy0 + [int]($dh / 2)), $thk, [int]($dh / 2)) }
-      "D" { $g.FillRectangle($b, $ox, ($dy0 + $dh - $thk), $dw, $thk) }
-      "E" { $g.FillRectangle($b, $ox, ($dy0 + [int]($dh / 2)), $thk, [int]($dh / 2)) }
-      "F" { $g.FillRectangle($b, $ox, $dy0, $thk, [int]($dh / 2)) }
-      "G" { $g.FillRectangle($b, $ox, ($dy0 + [int](($dh - $thk) / 2)), $dw, $thk) }
+      "A" { $g.FillRectangle($b, $ox, $oy, $dw, $thk) }
+      "B" { $g.FillRectangle($b, ($ox + $dw - $thk), $oy, $thk, [int]($dh / 2)) }
+      "C" { $g.FillRectangle($b, ($ox + $dw - $thk), ($oy + [int]($dh / 2)), $thk, [int]($dh / 2)) }
+      "D" { $g.FillRectangle($b, $ox, ($oy + $dh - $thk), $dw, $thk) }
+      "E" { $g.FillRectangle($b, $ox, ($oy + [int]($dh / 2)), $thk, [int]($dh / 2)) }
+      "F" { $g.FillRectangle($b, $ox, $oy, $thk, [int]($dh / 2)) }
+      "G" { $g.FillRectangle($b, $ox, ($oy + [int](($dh - $thk) / 2)), $dw, $thk) }
     }
     $b.Dispose()
   }
 }
-# one glitch cut through the digits
-$b = New-Object System.Drawing.SolidBrush((C 255 8 8 12))
-$g.FillRectangle($b, ($dx0 - 30), ($dy0 + 74), 700, 16); $b.Dispose()
-$b = New-Object System.Drawing.SolidBrush((C 215 252 238 10))
-$g.FillRectangle($b, ($dx0 + 24), ($dy0 + 74), 560, 16); $b.Dispose()
-$b = New-Object System.Drawing.SolidBrush((C 140 0 240 255))
-$g.FillRectangle($b, ($dx0 - 60), ($dy0 + 74), 70, 16); $b.Dispose()
-# faint barcode strip near the left edge
-for ($k = 0; $k -lt 40; $k++) {
-  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(20, 60) 252 238 10))
-  $g.FillRectangle($b, (300 + $k * 7), 140, $rng.Next(2, 6), 90); $b.Dispose()
+# schematic dashes + chip below the digits, still black-on-yellow
+$b = New-Object System.Drawing.SolidBrush((C 225 12 12 14))
+$g.FillRectangle($b, 1568, 508, 38, 8)
+$g.FillRectangle($b, 1568, 530, 24, 8)
+$g.FillRectangle($b, 1568, 552, 30, 8)
+$g.FillRectangle($b, 1568, 584, 38, 22)
+$b.Dispose()
+# cyan partner dashes hugging the spine's dark side
+for ($k = 0; $k -lt 6; $k++) {
+  $b = New-Object System.Drawing.SolidBrush((C 170 0 240 255))
+  $g.FillRectangle($b, 1478, (140 + $k * 26), 26, 9); $b.Dispose()
 }
-# scanlines + grain
+$b = New-Object System.Drawing.SolidBrush((C 170 255 40 70)); $g.FillRectangle($b, 1478, 320, 26, 6); $b.Dispose()
+# lone cyan schematic tick low on the dark field, echoing the duo
+$b = New-Object System.Drawing.SolidBrush((C 90 0 240 255)); $g.FillRectangle($b, 1290, 942, 214, 2); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 150 0 240 255)); $g.FillRectangle($b, 1290, 938, 30, 10); $b.Dispose()
+# subtle scanlines + grain
 for ($y = 0; $y -lt $H; $y += 4) {
-  $pen = New-Object System.Drawing.Pen((C 26 0 0 0), 1)
+  $pen = New-Object System.Drawing.Pen((C 15 0 0 0), 1)
   $g.DrawLine($pen, 0, $y, $W, $y); $pen.Dispose()
 }
-for ($i = 0; $i -lt 3000; $i++) {
+for ($i = 0; $i -lt 2200; $i++) {
   $tone = if ($rng.NextDouble() -lt 0.5) { 255 } else { 0 }
-  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(5, 13) $tone $tone $tone))
+  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(4, 11) $tone $tone $tone))
   $g.FillRectangle($b, $rng.Next(0, $W), $rng.Next(0, $H), 1, 1); $b.Dispose()
 }
 Save $bmp $g "cyberpunk.png"
