@@ -534,7 +534,7 @@ THEMES.hermes = mkTheme(
   "Hermes",
   "white",
   ['"Cascadia Mono", Consolas, monospace', 1.15, "block"],
-  `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E") repeat, radial-gradient(90% 70% at 50% 35%, rgba(237,255,69,0.07), transparent 55%), radial-gradient(140% 110% at 50% 50%, transparent 45%, rgba(0,0,110,0.6) 100%), linear-gradient(0deg, #0000f2, #0000f2)`,
+  `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E") repeat, url("/backgrounds/hermes.png") center / cover no-repeat, linear-gradient(0deg, #0000f2, #0000f2)`,
   "#0000f2",
   "#f5f5f5",
   [
@@ -552,7 +552,7 @@ THEMES.nous = mkTheme(
   "Nous",
   "black",
   ['"Courier New", Consolas, monospace', 1.2, "block"],
-  `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E") repeat, radial-gradient(100% 80% at 50% 0%, rgba(4,113,169,0.09), transparent 55%), radial-gradient(130% 100% at 50% 55%, transparent 55%, rgba(4,42,64,0.14) 100%), linear-gradient(180deg, #fbfaf7, #f1efe9)`,
+  `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E") repeat, url("/backgrounds/nous.png") center / cover no-repeat, linear-gradient(180deg, #fbfaf7, #f1efe9)`,
   "#f7f5f0",
   "#141414",
   [
@@ -765,6 +765,9 @@ function effXtermTheme(): ITheme {
 /// DOM renderer while a background is active and back to WebGL without one.
 function applyAppearance() {
   applyBackground();
+  // Keep the chrome font in sync with the effective terminal font (theme
+  // font, or the user's font-family override).
+  document.documentElement.style.setProperty("--ui-font", effFont());
   const t = { xterm: effXtermTheme() };
   const bg = bgActive();
   for (const tab of tabs.values()) {
@@ -798,7 +801,7 @@ function applyTheme(key: string) {
   root.setProperty("--tint", t.tint);
   root.setProperty("--accent", t.xterm.blue!);
   root.setProperty("--danger", t.xterm.red!);
-  applyAppearance();
+  applyAppearance(); // also refreshes --ui-font from the theme's font
   config.theme = themeKey;
   saveConfig();
 }

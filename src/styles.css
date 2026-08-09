@@ -863,6 +863,25 @@ input.set-control {
   max-width: 220px;
 }
 
+/* The settings/history pages take on the theme's font, so each theme's
+   personality carries beyond the terminal. --ui-font is set from JS. */
+#settings-page .settings-h1,
+#settings-page .settings-section-title,
+#settings-page .setting-title,
+#settings-page .setting-desc,
+#settings-page .set-control,
+#settings-page .set-btn,
+#history-page .settings-h1,
+#history-page #history-search,
+#history-page .hist-when,
+#history-page .hist-shell,
+#history-page .hist-size,
+#history-page .hist-empty,
+#history-viewer-bar,
+#history-viewer-bar button {
+  font-family: var(--ui-font, "Segoe UI", sans-serif);
+}
+
 /* Session templates editor: full-width rows under their setting label. */
 .setting:has(.tpl-list) {
   flex-direction: column;

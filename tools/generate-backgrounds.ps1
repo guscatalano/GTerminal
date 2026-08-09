@@ -176,4 +176,81 @@ while ($gy -lt $H) {
 }
 Save $bmp $g "synthwave.png"
 
+# ── Hermes: International Klein Blue field, chartreuse registration marks ──
+$rng = New-Object System.Random(1960)
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 26 26 252) (C 255 0 0 150)
+Glow $g 960 180 700 (C 16 237 255 69)          # faint chartreuse halo up top
+foreach ($cx in @(@(0,0), @($W,0), @(0,$H), @($W,$H))) {
+  Glow $g $cx[0] $cx[1] 520 (C 80 0 0 90)      # deepen the corners
+}
+# large circle outlines
+$pen = New-Object System.Drawing.Pen((C 150 237 255 69), 2)
+$g.DrawEllipse($pen, (1400 - 250), (290 - 250), 500, 500); $pen.Dispose()
+$pen = New-Object System.Drawing.Pen((C 55 237 255 69), 1)
+$g.DrawEllipse($pen, (1400 - 400), (290 - 400), 800, 800); $pen.Dispose()
+# registration cross marks on a loose grid
+$pen = New-Object System.Drawing.Pen((C 70 237 255 69), 1)
+for ($gx = 120; $gx -lt $W; $gx += 240) {
+  for ($gy = 100; $gy -lt $H; $gy += 240) {
+    $g.DrawLine($pen, $gx - 7, $gy, $gx + 7, $gy)
+    $g.DrawLine($pen, $gx, $gy - 7, $gx, $gy + 7)
+  }
+}
+$pen.Dispose()
+# rule lines + accent square at their crossing
+$pen = New-Object System.Drawing.Pen((C 100 237 255 69), 1)
+$g.DrawLine($pen, 0, 760, $W, 760); $pen.Dispose()
+$pen = New-Object System.Drawing.Pen((C 55 237 255 69), 1)
+$g.DrawLine($pen, 430, 0, 430, $H); $pen.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 220 237 255 69)); $g.FillRectangle($b, 425, 755, 11, 11); $b.Dispose()
+# stars + film grain
+for ($i = 0; $i -lt 220; $i++) {
+  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(20, 70) 240 245 255))
+  $g.FillEllipse($b, $rng.Next(0, $W), $rng.Next(0, $H), $rng.Next(1, 3), $rng.Next(1, 3)); $b.Dispose()
+}
+for ($i = 0; $i -lt 5000; $i++) {
+  $tone = if ($rng.NextDouble() -lt 0.5) { 255 } else { 0 }
+  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(6, 16) $tone $tone $tone))
+  $g.FillRectangle($b, $rng.Next(0, $W), $rng.Next(0, $H), 1, 1); $b.Dispose()
+}
+Save $bmp $g "hermes.png"
+
+# ── Nous: cyanotype blueprint diagram on warm paper ──
+$rng = New-Object System.Random(1842)
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 251 250 247) (C 255 238 235 228)
+# faint drafting grid
+$pen = New-Object System.Drawing.Pen((C 12 4 113 169), 1)
+for ($gx = 0; $gx -lt $W; $gx += 160) { $g.DrawLine($pen, $gx, 0, $gx, $H) }
+for ($gy = 0; $gy -lt $H; $gy += 160) { $g.DrawLine($pen, 0, $gy, $W, $gy) }
+$pen.Dispose()
+# cyanotype exposure blots
+Glow $g 260 880 430 (C 34 4 113 169)
+Glow $g 90 110 300 (C 20 26 60 100)
+# concentric survey circles with spokes
+$ccx = 1450; $ccy = 320
+for ($r = 70; $r -le 370; $r += 60) {
+  $pen = New-Object System.Drawing.Pen((C 70 4 113 169), 1)
+  $g.DrawEllipse($pen, $ccx - $r, $ccy - $r, 2 * $r, 2 * $r); $pen.Dispose()
+}
+$pen = New-Object System.Drawing.Pen((C 30 4 113 169), 1)
+for ($k = 0; $k -lt 12; $k++) {
+  $ang = $k * [math]::PI / 6
+  $g.DrawLine($pen, $ccx, $ccy, $ccx + [int](370 * [math]::Cos($ang)), $ccy + [int](370 * [math]::Sin($ang)))
+}
+$pen.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 140 4 113 169)); $g.FillEllipse($b, $ccx - 4, $ccy - 4, 8, 8); $b.Dispose()
+# measure line with ticks
+$pen = New-Object System.Drawing.Pen((C 80 4 113 169), 1)
+$g.DrawLine($pen, 120, 170, 640, 170)
+for ($gx = 120; $gx -le 640; $gx += 40) { $g.DrawLine($pen, $gx, 166, $gx, 178) }
+$pen.Dispose()
+# paper grain
+for ($i = 0; $i -lt 5000; $i++) {
+  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(5, 12) 70 60 50))
+  $g.FillRectangle($b, $rng.Next(0, $W), $rng.Next(0, $H), 1, 1); $b.Dispose()
+}
+Save $bmp $g "nous.png"
+
 "done -> $out"
