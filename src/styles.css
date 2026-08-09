@@ -675,3 +675,10 @@ input.set-control {
 .pane .xterm {
   height: 100%;
 }
+
+/* xterm.css hardcodes a black viewport background, which paints over the
+   decorative background when the terminal is transparent. The visible
+   terminal background comes from the theme / #panes art instead. */
+.pane .xterm .xterm-viewport {
+  background-color: transparent !important;
+}
