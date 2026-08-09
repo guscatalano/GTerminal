@@ -66,6 +66,9 @@ pub struct SessionInfo {
     /// Programs currently running inside the session (exe names), for
     /// tab icons and restore hints.
     pub running: Vec<String>,
+    /// Current working directory (from the OSC 9;9 prompt hook), used
+    /// for distinctive tab labels.
+    pub cwd: String,
 }
 
 /// The "oops I screwed up" window: killed sessions keep their process
@@ -477,6 +480,7 @@ fn conn_loop(
                                 alive: true,
                                 expires_ms: s.doomed_until,
                                 running: Vec::new(),
+                                cwd: s.cwd.clone(),
                             },
                             s.child_pid,
                         )
@@ -490,6 +494,7 @@ fn conn_loop(
                                 alive: false,
                                 expires_ms: s.expires,
                                 running: s.running.clone(),
+                                cwd: s.cwd.clone(),
                             },
                             None,
                         )

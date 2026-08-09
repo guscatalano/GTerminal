@@ -25,7 +25,11 @@ interface SessionInfo {
   alive: boolean;
   expires_ms: number | null;
   running: string[];
+  cwd?: string;
 }
+
+// Latest per-session info from the daemon (cwd, running), for labels.
+const lastInfo = new Map<number, SessionInfo>();
 
 // Icon for whatever is running inside a session, by program name.
 const ICON_RULES: Array<[RegExp, string]> = [
@@ -119,8 +123,20 @@ const customTitles: Record<string, string> = JSON.parse(
 function saveCustomTitles() {
   localStorage.setItem("gterm-names", JSON.stringify(customTitles));
 }
+// Shell-reported titles that carry no information (every pwsh tab reports
+// the same exe path); these fall through to the cwd-based label.
+const BORING_TITLE = /pwsh|powershell|cmd\.exe|^Administrator: |^Windows PowerShell$/i;
+
 function titleOf(id: number): string {
-  return customTitles[id] ?? titles[id] ?? `Session ${id}`;
+  if (customTitles[id]) return customTitles[id];
+  const t = titles[id];
+  if (t && !BORING_TITLE.test(t)) return t;
+  const cwd = lastInfo.get(id)?.cwd;
+  if (cwd) {
+    const seg = cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
+    if (seg) return seg;
+  }
+  return t ? "PowerShell" : `Session ${id}`;
 }
 
 // ── tab groups (Chrome-style: colored, collapsible) ─────────────────────
@@ -522,7 +538,7 @@ async function createTab(attachId?: number) {
   icon.className = "tab-icon";
   const label = document.createElement("span");
   label.className = "tab-label";
-  label.textContent = customTitles[id] ?? titles[id] ?? "PowerShell";
+  label.textContent = titleOf(id);
   const hide = document.createElement("button");
   hide.className = "tab-close";
   hide.textContent = "–";
@@ -598,8 +614,9 @@ async function createTab(attachId?: number) {
   term.onTitleChange((title) => {
     if (title.trim()) {
       saveTitle(id, title);
-      if (!customTitles[id]) {
-        label.textContent = title;
+      const next = titleOf(id);
+      if (label.textContent !== next) {
+        label.textContent = next;
         refreshChrome();
       }
     }
@@ -1040,14 +1057,20 @@ function renderHiddenPills() {
 /// sidebar countdowns fresh.
 async function updateLiveInfo() {
   const sessions = await invoke<SessionInfo[]>("list_sessions").catch(() => []);
+  lastInfo.clear();
+  for (const s of sessions) lastInfo.set(s.id, s);
   for (const s of sessions) {
     const tab = tabs.get(s.id);
     if (!tab) continue;
     // `?? []` tolerates an older daemon that predates the running field.
     const icon = iconFor(s.running ?? []);
-    // Only mutate on change: rewriting the icon every poll invalidates
+    // Only mutate on change: rewriting things every poll invalidates
     // layout, resizes the pane, and makes the terminal caret stutter.
     if (tab.icon.textContent !== icon) tab.icon.textContent = icon;
+    const label = titleOf(s.id);
+    if (tab.label.textContent !== label && !renameActive) {
+      tab.label.textContent = label;
+    }
   }
   renderSidebar(sessions);
 }
