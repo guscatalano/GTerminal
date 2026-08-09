@@ -21,7 +21,7 @@ A lightweight terminal for Windows with tmux-style session persistence: closing 
 | `Ctrl+Shift+B` | Toggle the session sidebar (all sessions: open/hidden/cold) |
 | Double-click tab | Rename it (custom names stick) |
 | Right-click tab | Context menu: rename, tab groups, hide/detach/kill |
-| Right-click terminal | Copy selection / paste (Windows Terminal style) |
+| Right-click terminal | Menu: Copy (with selection), Paste, Select all |
 | `Ctrl+Shift+T` · `Ctrl+Tab` | New tab · cycle tabs |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste |
 
@@ -35,9 +35,12 @@ Requires Rust (1.85+) and Node.
 
 ```sh
 npm install
-npm run tauri dev    # run
-npm run tauri build  # package installer
+npm run tauri dev     # run
+npm run tauri build   # package installer
+npm run test:typing   # typing correctness + echo latency regression test
 ```
+
+`test:typing` runs against an isolated daemon (scratch state dir): it burst-types a payload character-by-character and asserts the shell received it intact, then measures per-keystroke echo latency (budget: p50 < 50ms, p95 < 150ms; typical: p50 ≈ 1–2ms).
 
 ## Known limitations
 

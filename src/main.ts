@@ -431,21 +431,32 @@ async function createTab(attachId?: number) {
   hide.addEventListener("click", () => hideTab(id));
   requireConfirm(close, () => closeTab(id));
 
-  // Right-click in the terminal: copy the selection if there is one,
-  // otherwise paste — Windows Terminal behavior. (The WebView2 default
-  // context menu is suppressed globally.)
+  // Right-click in the terminal opens a copy/paste menu. (The WebView2
+  // default context menu is suppressed globally.)
+  const paste = () =>
+    navigator.clipboard
+      .readText()
+      .then((text) => text && invoke("write_session", { id, data: text }))
+      .catch(() => {});
   pane.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     const sel = term.getSelection();
+    const items: CtxItem[] = [];
     if (sel) {
-      navigator.clipboard.writeText(sel).catch(() => {});
-      term.clearSelection();
-    } else {
-      navigator.clipboard
-        .readText()
-        .then((text) => text && invoke("write_session", { id, data: text }))
-        .catch(() => {});
+      items.push({
+        label: "Copy",
+        action: () => {
+          navigator.clipboard.writeText(sel).catch(() => {});
+          term.clearSelection();
+        },
+      });
     }
+    items.push({ label: "Paste", action: paste });
+    items.push("sep", {
+      label: "Select all",
+      action: () => term.selectAll(),
+    });
+    showContextMenu(e.clientX, e.clientY, items);
   });
 
   term.onData((data) => {
