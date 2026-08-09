@@ -488,8 +488,14 @@ async function killAndClose(id: number) {
   if (tabs.size === 0) await createTab();
 }
 
+/// True while an inline rename input is open. Chrome rebuilds re-parent the
+/// tab buttons, which would blur (and thus instantly commit) the input — so
+/// refreshChrome() is paused for the duration.
+let renameActive = false;
+
 /// Swap an element's text for an input; commit on Enter/blur, cancel on Esc.
 function inlineRename(el: HTMLElement, current: string, commit: (v: string | null) => void) {
+  renameActive = true;
   const input = document.createElement("input");
   input.className = "rename-input";
   input.value = current;
@@ -500,8 +506,14 @@ function inlineRename(el: HTMLElement, current: string, commit: (v: string | nul
   const finish = (val: string | null) => {
     if (done) return;
     done = true;
+    renameActive = false;
     commit(val);
   };
+  // Clicks inside the input must not bubble into tab activation, which
+  // would steal focus back to the terminal and blur-commit the rename.
+  for (const ev of ["mousedown", "click", "dblclick", "contextmenu"]) {
+    input.addEventListener(ev, (e) => e.stopPropagation());
+  }
   input.addEventListener("keydown", (e) => {
     e.stopPropagation();
     if (e.key === "Enter") finish(input.value.trim() || null);
@@ -822,6 +834,7 @@ async function renderSidebar() {
 
 function refreshChrome() {
   requestAnimationFrame(() => {
+    if (renameActive) return; // rebuilt on commit instead
     layoutTabbar();
     updateTabOverflow();
     renderHiddenPills();
