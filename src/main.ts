@@ -545,7 +545,7 @@ THEMES.matrix = mkTheme(
   "Matrix",
   "white",
   ["Consolas, monospace", 1.15, "block"],
-  "repeating-linear-gradient(90deg, rgba(0,230,92,0.06) 0 2px, transparent 2px 16px), repeating-linear-gradient(180deg, rgba(0,0,0,0.32) 0 2px, transparent 2px 4px), radial-gradient(ellipse 80% 60% at 50% 0%, rgba(0,230,92,0.14), transparent 65%), linear-gradient(180deg, #04140a, #010604)",
+  'linear-gradient(rgba(1,6,3,0.6), rgba(1,6,3,0.72)), url("/backgrounds/matrix.png") center / cover no-repeat, linear-gradient(180deg, #04140a, #010604)',
   "#020a02",
   "#00f050",
   [
@@ -575,7 +575,7 @@ THEMES.synthwave = mkTheme(
   "Synthwave '84",
   "white",
   ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "block"],
-  "radial-gradient(circle 150px at 50% 88%, rgba(254,222,93,0.4) 0 55px, rgba(255,126,219,0.38) 56px 105px, transparent 145px), repeating-linear-gradient(180deg, transparent 0 30px, rgba(255,126,219,0.1) 30px 31px), radial-gradient(ellipse 90% 50% at 50% 0%, rgba(3,237,249,0.1), transparent 60%), linear-gradient(180deg, #1b1430 0%, #2d1f45 60%, #241b2f 100%)",
+  'linear-gradient(rgba(27,20,48,0.5), rgba(27,20,48,0.62)), url("/backgrounds/synthwave.png") center / cover no-repeat, linear-gradient(180deg, #1b1430 0%, #2d1f45 60%, #241b2f 100%)',
   "#241b2f",
   "#f0eff1",
   [
@@ -605,7 +605,7 @@ THEMES.bladerunner = mkTheme(
   "Blade Runner",
   "white",
   ["Consolas, monospace", 1.15, "bar"],
-  "repeating-linear-gradient(95deg, rgba(140,200,220,0.07) 0 1px, transparent 1px 7px), radial-gradient(ellipse 90% 40% at 30% 112%, rgba(255,138,61,0.28), transparent 65%), radial-gradient(ellipse 40% 30% at 85% 6%, rgba(82,224,224,0.16), transparent 60%), linear-gradient(180deg, #0e1a20, #090e12)",
+  'linear-gradient(rgba(9,14,18,0.45), rgba(9,14,18,0.58)), url("/backgrounds/bladerunner.png") center / cover no-repeat, linear-gradient(180deg, #0e1a20, #090e12)',
   "#0d1418",
   "#d9e6ea",
   [
@@ -648,7 +648,7 @@ THEMES.hyperspace = mkTheme(
   "Hyperspace",
   "white",
   ["Consolas, monospace", 1.15, "block"],
-  "radial-gradient(1px 1px at 20% 30%, rgba(255,255,255,0.6), transparent 1.5px) 0 0/180px 140px repeat, radial-gradient(1.2px 1.2px at 70% 60%, rgba(255,255,255,0.45), transparent 2px) 0 0/220px 180px repeat, radial-gradient(0.8px 0.8px at 45% 80%, rgba(255,255,255,0.35), transparent 1.5px) 0 0/160px 200px repeat, radial-gradient(ellipse 60% 40% at 50% 0%, rgba(77,159,255,0.1), transparent 60%), linear-gradient(180deg, #070716, #03030a)",
+  'linear-gradient(rgba(5,5,16,0.3), rgba(5,5,16,0.4)), url("/backgrounds/hyperspace.jpg") center / cover no-repeat, linear-gradient(180deg, #070716, #03030a)',
   "#050510",
   "#e8e6d8",
   [
@@ -678,7 +678,7 @@ THEMES.dune = mkTheme(
   "Dune",
   "white",
   ['"Cascadia Mono", Consolas, monospace', 1.2, "underline"],
-  "radial-gradient(circle at 78% 14%, rgba(240,200,120,0.5) 0 26px, transparent 60px), radial-gradient(circle at 66% 9%, rgba(255,235,200,0.4) 0 12px, transparent 34px), radial-gradient(ellipse 100% 55% at 20% 118%, rgba(122,84,40,0.55), transparent 65%), radial-gradient(ellipse 100% 50% at 85% 122%, rgba(158,108,52,0.5), transparent 68%), linear-gradient(180deg, #241708, #170f07)",
+  'linear-gradient(rgba(23,15,7,0.38), rgba(23,15,7,0.52)), url("/backgrounds/dune.jpg") center / cover no-repeat, linear-gradient(180deg, #241708, #170f07)',
   "#1a120a",
   "#e8d5b0",
   [
