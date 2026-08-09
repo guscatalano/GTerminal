@@ -225,6 +225,23 @@ $live = Drain2 $g 2000
 if ($live -notlike "*C:\\Windows*") { Fail "reboot-cwd" "new shell not in saved cwd" } else { Pass "reboot resurrection restores cwd" }
 $g.Client.Close()
 
+# ── cmd shell profile: spawns and tracks cwd via its prompt hook ──
+$id4 = (Request2 $port '{"cmd":"create","cols":100,"rows":30,"shell":"cmd"}').id
+$h = New-Conn $port
+$h.Writer.WriteLine("{""cmd"":""attach"",""id"":$id4}")
+$null = Read-Line2 $h
+$h.Writer.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')
+Start-Sleep -Seconds 3
+$h.Writer.WriteLine('{"cmd":"write","data":"cd C:\\Windows\r"}')
+Start-Sleep -Seconds 6   # checkpoint flush + prompt cwd emission
+$s = Get-Sessions $port | Where-Object id -eq $id4
+if ($null -eq $s -or -not $s.alive) { Fail "cmd-shell" "cmd session did not survive" }
+elseif ($s.cwd -notlike "*Windows*") { Fail "cmd-cwd" "cmd cwd tracking failed: cwd=$($s.cwd)" }
+else { Pass "cmd shell profile with cwd tracking" }
+$h.Client.Close()
+$null = Request2 $port "{""cmd"":""kill"",""id"":$id4}"
+try { $null = Request2 $port "{""cmd"":""kill"",""id"":$id4}" 0 } catch {}
+
 # ════ cleanup ════
 foreach ($d in $script:daemons) {
   if (Get-Process -Id $d -ErrorAction SilentlyContinue) { Stop-DaemonTree $d }

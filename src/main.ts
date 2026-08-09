@@ -68,8 +68,17 @@ interface AppConfig {
   line_height?: number;
   ai_api_key?: string;
   ai_model?: string;
+  ai_base_url?: string;
   ai_auto_titles?: boolean;
+  default_shell?: string;
 }
+
+const SHELL_CHOICES: Array<[string, string]> = [
+  ["auto", "Auto (PowerShell 7, fallback Windows PowerShell)"],
+  ["pwsh", "PowerShell 7"],
+  ["powershell", "Windows PowerShell"],
+  ["cmd", "Command Prompt"],
+];
 let config: AppConfig = {};
 
 function minutesLeft(expiresMs: number): number {
@@ -553,7 +562,7 @@ function cycleTab(dir: number) {
   setActive(ids[(i + dir + ids.length) % ids.length]);
 }
 
-async function createTab(attachId?: number) {
+async function createTab(attachId?: number, shell?: string) {
   const pane = document.createElement("div");
   pane.className = "pane active";
   panes.appendChild(pane);
@@ -584,7 +593,11 @@ async function createTab(attachId?: number) {
       id = attachId;
       await invoke("attach_session", { id, cols: term.cols, rows: term.rows });
     } else {
-      id = await invoke<number>("create_session", { cols: term.cols, rows: term.rows });
+      id = await invoke<number>("create_session", {
+        cols: term.cols,
+        rows: term.rows,
+        shell: shell ?? config.default_shell ?? null,
+      });
     }
   } catch (err) {
     console.error(`Failed to ${attachId !== undefined ? "restore" : "start"} session:`, err);
@@ -1204,7 +1217,11 @@ async function aiTitleFor(id: number): Promise<void> {
       terminalTail(tab.term) || "(no output yet)",
     ].join("\n");
 
-    const client = new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true });
+    const client = new Anthropic({
+      apiKey: key,
+      baseURL: config.ai_base_url?.trim() || undefined,
+      dangerouslyAllowBrowser: true,
+    });
     const response = (await client.beta.messages.create({
       model: config.ai_model || "claude-opus-5",
       max_tokens: 1000,
@@ -1621,6 +1638,14 @@ function buildSettingsPage() {
 
   settingsSection("Sessions");
   settingRow(
+    "Default shell",
+    "Shell for new tabs. Right-click the + button to open a one-off tab in a different shell.",
+    mkSelect(SHELL_CHOICES, config.default_shell ?? "auto", (v) => {
+      config.default_shell = v === "auto" ? undefined : v;
+      saveConfig();
+    })
+  );
+  settingRow(
     "Undo window (minutes)",
     "Closed or exited sessions stay restorable this long before they actually die. 0 disables the grace period.",
     mkNumber(config.grace_minutes ?? 5, 0, 120, (v) => {
@@ -1644,20 +1669,33 @@ function buildSettingsPage() {
     "Enables AI tab titles. Stored in config.json on this machine.",
     keyInput
   );
+  const modelInput = document.createElement("input");
+  modelInput.className = "set-control set-wide";
+  modelInput.type = "text";
+  modelInput.placeholder = "claude-opus-5";
+  modelInput.value = config.ai_model ?? "";
+  modelInput.addEventListener("change", () => {
+    config.ai_model = modelInput.value.trim() || undefined;
+    saveConfig();
+  });
   settingRow(
     "Model",
-    "Opus 5 gives the best titles; Haiku 4.5 is faster and cheaper.",
-    mkSelect(
-      [
-        ["claude-opus-5", "Claude Opus 5"],
-        ["claude-haiku-4-5", "Claude Haiku 4.5 (cheaper)"],
-      ],
-      config.ai_model ?? "claude-opus-5",
-      (v) => {
-        config.ai_model = v;
-        saveConfig();
-      }
-    )
+    "Any model ID. claude-opus-5 gives the best titles; claude-haiku-4-5 is faster and cheaper.",
+    modelInput
+  );
+  const urlInput = document.createElement("input");
+  urlInput.className = "set-control set-wide";
+  urlInput.type = "text";
+  urlInput.placeholder = "https://api.anthropic.com";
+  urlInput.value = config.ai_base_url ?? "";
+  urlInput.addEventListener("change", () => {
+    config.ai_base_url = urlInput.value.trim() || undefined;
+    saveConfig();
+  });
+  settingRow(
+    "API endpoint",
+    "Base URL for API requests. Leave empty for api.anthropic.com; set for a proxy or compatible gateway.",
+    urlInput
   );
   settingRow(
     "Auto-titles",
@@ -1698,8 +1736,24 @@ async function main() {
     window.setTimeout(() => refreshChrome(), 500);
   });
 
-  document.getElementById("newtab")!.addEventListener("click", () => createTab());
-  document.getElementById("sidebar-new")!.addEventListener("click", () => createTab());
+  const newShellMenu = (e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showContextMenu(
+      e.clientX,
+      e.clientY,
+      SHELL_CHOICES.filter(([v]) => v !== "auto").map(([v, label]) => ({
+        label: `New ${label} tab`,
+        action: () => createTab(undefined, v),
+      }))
+    );
+  };
+  const newTabBtn = document.getElementById("newtab")!;
+  newTabBtn.addEventListener("click", () => createTab());
+  newTabBtn.addEventListener("contextmenu", newShellMenu);
+  const sidebarNewBtn = document.getElementById("sidebar-new")!;
+  sidebarNewBtn.addEventListener("click", () => createTab());
+  sidebarNewBtn.addEventListener("contextmenu", newShellMenu);
   document.getElementById("sidebtn")!.addEventListener("click", toggleSidebar);
   overflowBtn.addEventListener("click", (e) => {
     e.stopPropagation();

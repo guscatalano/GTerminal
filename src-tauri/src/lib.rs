@@ -110,8 +110,9 @@ fn create_session(
     state: State<PtyManager>,
     cols: u16,
     rows: u16,
+    shell: Option<String>,
 ) -> Result<u32, String> {
-    let v = mux::client::control(&Request::Create { cols, rows })?;
+    let v = mux::client::control(&Request::Create { cols, rows, shell })?;
     let id = v.get("id").and_then(Value::as_u64).ok_or("bad response")? as u32;
     attach_internal(&app, &state, id)?;
     Ok(id)

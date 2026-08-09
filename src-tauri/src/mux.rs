@@ -46,7 +46,12 @@ const PROMPT_CMD: &str = r#"$global:__gtp = $function:prompt; $function:prompt =
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Request {
     List,
-    Create { cols: u16, rows: u16 },
+    Create {
+        cols: u16,
+        rows: u16,
+        #[serde(default)]
+        shell: Option<String>,
+    },
     Kill { id: u32 },
     Attach { id: u32 },
     Write { data: String },
@@ -111,6 +116,10 @@ struct Meta {
     cwd: String,
     #[serde(default)]
     running: Vec<String>,
+    /// Shell profile ("auto" | "pwsh" | "powershell" | "cmd") so the same
+    /// shell comes back after a reboot resurrection.
+    #[serde(default)]
+    shell: String,
 }
 
 struct Session {
@@ -122,6 +131,7 @@ struct Session {
     attached: Option<(u64, TcpStream)>,
     created_ms: u64,
     cwd: String,
+    shell: String,
     dirty: bool,
     /// Typed into the shell once its first prompt renders (writing earlier
     /// gets dropped while ConPTY is still initializing).
@@ -139,6 +149,7 @@ struct ColdSession {
     cwd: String,
     running: Vec<String>,
     expires: Option<u64>,
+    shell: String,
 }
 
 #[derive(Default)]
@@ -337,6 +348,7 @@ fn load_cold(state: &mut DaemonState) {
                 cwd: meta.cwd,
                 running: meta.running,
                 expires: None,
+                shell: meta.shell,
             },
         );
     }
@@ -357,6 +369,7 @@ fn spawn_flush_thread(sessions: Sessions) {
                             created_ms: s.created_ms,
                             cwd: s.cwd.clone(),
                             running: Vec::new(),
+                            shell: s.shell.clone(),
                         },
                         s.ring.clone(),
                         s.child_pid,
@@ -398,6 +411,7 @@ fn end_session(sessions: &Sessions, id: u32) {
                 created_ms: s.created_ms,
                 cwd: s.cwd.clone(),
                 running: Vec::new(),
+                shell: s.shell.clone(),
             };
             let _ = std::fs::create_dir_all(sessions_dir());
             let _ = std::fs::write(
@@ -412,6 +426,7 @@ fn end_session(sessions: &Sessions, id: u32) {
                     cwd: s.cwd,
                     running: Vec::new(),
                     expires: Some(now_ms() + grace),
+                    shell: s.shell,
                 },
             );
         } else {
@@ -583,10 +598,11 @@ fn conn_loop(
                 list.sort_by_key(|s| s.created_ms);
                 write_line(&mut out, &json!({"ok": true, "sessions": list}))?;
             }
-            Request::Create { cols, rows } => {
+            Request::Create { cols, rows, shell } => {
                 let id = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
                 let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\".into());
-                match start_session(sessions, id, &home, cols, rows, Vec::new(), now_ms()) {
+                let shell = shell.unwrap_or_else(|| "auto".into());
+                match start_session(sessions, id, &home, cols, rows, Vec::new(), now_ms(), &shell) {
                     Ok(()) => write_line(&mut out, &json!({"ok": true, "id": id}))?,
                     Err(e) => write_line(&mut out, &json!({"ok": false, "error": e}))?,
                 }
@@ -639,9 +655,16 @@ fn conn_loop(
                     let mut ring = std::fs::read(ring_path(id)).unwrap_or_default();
                     ring.extend_from_slice(MODE_RESET.as_bytes());
                     ring.extend_from_slice(divider.as_bytes());
-                    if let Err(e) =
-                        start_session(sessions, id, &cold.cwd, 120, 30, ring, cold.created_ms)
-                    {
+                    if let Err(e) = start_session(
+                        sessions,
+                        id,
+                        &cold.cwd,
+                        120,
+                        30,
+                        ring,
+                        cold.created_ms,
+                        &cold.shell.clone(),
+                    ) {
                         sessions.lock().unwrap().cold.insert(id, cold);
                         write_line(&mut out, &json!({"ok": false, "error": e}))?;
                         continue;
@@ -702,6 +725,8 @@ fn conn_loop(
 
 /// Spawn a shell in `cwd` and register it as live session `id`, with `ring`
 /// as pre-existing scrollback (used when resurrecting a cold session).
+/// `shell` is a profile name: "pwsh", "powershell", "cmd", or "auto"
+/// (PowerShell 7 with Windows PowerShell fallback).
 fn start_session(
     sessions: &Sessions,
     id: u32,
@@ -710,6 +735,7 @@ fn start_session(
     rows: u16,
     ring: Vec<u8>,
     created_ms: u64,
+    shell: &str,
 ) -> Result<(), String> {
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -726,19 +752,42 @@ fn start_session(
     } else {
         std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\".into())
     };
-    let build_cmd = |shell: &str| {
-        let mut cmd = CommandBuilder::new(shell);
+    let build_ps = |exe: &str| {
+        let mut cmd = CommandBuilder::new(exe);
         cmd.args(["-NoLogo", "-NoExit", "-Command", PROMPT_CMD]);
         cmd.cwd(&cwd);
         cmd.env("TERM", "xterm-256color");
         cmd
     };
-    let child = match pair.slave.spawn_command(build_cmd("pwsh.exe")) {
-        Ok(c) => c,
-        Err(_) => pair
+    let build_cmd_exe = || {
+        let mut cmd = CommandBuilder::new("cmd.exe");
+        // cmd's prompt can emit escapes: $E]9;9;$P$E\ is the same OSC 9;9
+        // cwd report the PowerShell prompt hook produces.
+        cmd.args(["/K", "prompt $E]9;9;$P$E\\$P$G"]);
+        cmd.cwd(&cwd);
+        cmd.env("TERM", "xterm-256color");
+        cmd
+    };
+    let child = match shell {
+        "cmd" => pair
             .slave
-            .spawn_command(build_cmd("powershell.exe"))
+            .spawn_command(build_cmd_exe())
             .map_err(|e| e.to_string())?,
+        "powershell" => pair
+            .slave
+            .spawn_command(build_ps("powershell.exe"))
+            .map_err(|e| e.to_string())?,
+        "pwsh" => pair
+            .slave
+            .spawn_command(build_ps("pwsh.exe"))
+            .map_err(|e| e.to_string())?,
+        _ => match pair.slave.spawn_command(build_ps("pwsh.exe")) {
+            Ok(c) => c,
+            Err(_) => pair
+                .slave
+                .spawn_command(build_ps("powershell.exe"))
+                .map_err(|e| e.to_string())?,
+        },
     };
     drop(pair.slave);
 
@@ -757,6 +806,7 @@ fn start_session(
             attached: None,
             created_ms,
             cwd,
+            shell: shell.to_string(),
             dirty: true,
             pending_input: None,
             doomed_until: None,

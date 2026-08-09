@@ -70,4 +70,5 @@ Every new feature should land with coverage in one of these suites.
 
 - The daemon socket is unauthenticated localhost TCP; switching to a user-ACL'd named pipe is the planned hardening step.
 - Scrollback checkpoints are capped at 512KB per session and flushed every 3s, so a hard cut can lose the last few seconds.
-- PowerShell only for now (pwsh preferred, Windows PowerShell fallback).
+
+**Shells**: PowerShell 7, Windows PowerShell, and Command Prompt. Set the default in ⚙ settings; right-click the + button (tab bar or sidebar) to open a one-off tab in a specific shell. Each session remembers its shell — reboot resurrection brings back the same one. All shells get cwd tracking (PowerShell via a prompt hook, cmd via its `$E]9;9;$P$E\` prompt escape).
