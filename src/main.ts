@@ -765,31 +765,31 @@ function mkTheme(
 }
 
 const THEMES: Record<string, ThemeDef> = {
-  "one-dark": mkTheme("One Dark", "white", ['"Cascadia Mono", Consolas, monospace', 1.1, "bar"], "radial-gradient(ellipse 55% 40% at 78% 12%, rgba(97,175,239,0.3), transparent 65%), linear-gradient(115deg, transparent 42%, rgba(198,120,221,0.1) 50%, transparent 58%), linear-gradient(200deg, #131a2b, #0a0c12)", "#0f1115", "#d7dae0", [
+  "one-dark": mkTheme("One Dark", "white", ['"Cascadia Mono", Consolas, monospace', 1.1, "bar"], 'linear-gradient(rgba(15,17,21,0.52), rgba(15,17,21,0.66)), url("/backgrounds/onedark.png") center / cover no-repeat, linear-gradient(180deg, rgb(15,17,21), rgb(15,17,21))', "#0f1115", "#d7dae0", [
     "#1c1f26", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd", "#56b6c2", "#d7dae0",
     "#5c6370", "#ef7d85", "#a9d387", "#f0cd8a", "#74bdf7", "#d48ce8", "#67c5d0", "#f0f2f6",
   ]),
-  dracula: mkTheme("Dracula", "white", ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "block"], "radial-gradient(circle at 80% 20%, rgba(248,248,242,0.12) 0 110px, rgba(189,147,249,0.3) 112px 128px, transparent 130px), radial-gradient(ellipse 90% 60% at 78% 18%, rgba(189,147,249,0.28), transparent 60%), radial-gradient(ellipse 70% 50% at 15% 100%, rgba(255,121,198,0.14), transparent 60%), linear-gradient(210deg, #2c2745, #16171f)", "#282a36", "#f8f8f2", [
+  dracula: mkTheme("Dracula", "white", ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "block"], 'linear-gradient(rgba(40,42,54,0.5), rgba(40,42,54,0.64)), url("/backgrounds/dracula.png") center / cover no-repeat, linear-gradient(180deg, rgb(40,42,54), rgb(40,42,54))', "#282a36", "#f8f8f2", [
     "#21222c", "#ff5555", "#50fa7b", "#f1fa8c", "#bd93f9", "#ff79c6", "#8be9fd", "#f8f8f2",
     "#6272a4", "#ff6e6e", "#69ff94", "#ffffa5", "#d6acff", "#ff92df", "#a4ffff", "#ffffff",
   ]),
-  nord: mkTheme("Nord", "white", ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"], "linear-gradient(100deg, transparent 18%, rgba(136,192,208,0.26) 30%, transparent 42%), linear-gradient(95deg, transparent 42%, rgba(163,190,140,0.18) 53%, transparent 64%), linear-gradient(107deg, transparent 62%, rgba(180,142,173,0.16) 72%, transparent 84%), linear-gradient(180deg, #1e222b 0%, #2e3440 60%, #272c37 100%)", "#2e3440", "#d8dee9", [
+  nord: mkTheme("Nord", "white", ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"], 'linear-gradient(rgba(46,52,64,0.52), rgba(46,52,64,0.66)), url("/backgrounds/nord.png") center / cover no-repeat, linear-gradient(180deg, rgb(46,52,64), rgb(46,52,64))', "#2e3440", "#d8dee9", [
     "#3b4252", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#88c0d0", "#e5e9f0",
     "#7b88a1", "#bf616a", "#a3be8c", "#f4dda1", "#81a1c1", "#b48ead", "#8fbcbb", "#eceff4",
   ]),
-  gruvbox: mkTheme("Gruvbox Dark", "white", ["Consolas, monospace", 1.1, "block"], "radial-gradient(ellipse 75% 40% at 50% 112%, rgba(251,73,52,0.32), transparent 65%), linear-gradient(0deg, rgba(215,153,33,0.22) 0%, transparent 32%), linear-gradient(0deg, rgba(254,128,25,0.12) 8%, transparent 45%), linear-gradient(180deg, #171512, #322d26)", "#282828", "#ebdbb2", [
+  gruvbox: mkTheme("Gruvbox Dark", "white", ["Consolas, monospace", 1.1, "block"], 'linear-gradient(rgba(40,40,40,0.5), rgba(40,40,40,0.66)), url("/backgrounds/gruvbox.png") center / cover no-repeat, linear-gradient(180deg, rgb(40,40,40), rgb(40,40,40))', "#282828", "#ebdbb2", [
     "#282828", "#fb4934", "#98971a", "#d79921", "#458588", "#b16286", "#689d6a", "#a89984",
     "#928374", "#fb4934", "#b8bb26", "#fabd2f", "#83a598", "#d3869b", "#8ec07c", "#ebdbb2",
   ]),
-  "tokyo-night": mkTheme("Tokyo Night", "white", ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "bar"], "repeating-linear-gradient(0deg, rgba(122,162,247,0.13) 0 1px, transparent 1px 38px), repeating-linear-gradient(90deg, rgba(122,162,247,0.13) 0 1px, transparent 1px 38px), radial-gradient(ellipse 85% 50% at 50% 0%, rgba(187,154,247,0.34), transparent 62%), linear-gradient(180deg, #171830, #0d0e1a)", "#1a1b26", "#c0caf5", [
+  "tokyo-night": mkTheme("Tokyo Night", "white", ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "bar"], 'linear-gradient(rgba(26,27,38,0.5), rgba(26,27,38,0.64)), url("/backgrounds/tokyonight.png") center / cover no-repeat, linear-gradient(180deg, rgb(26,27,38), rgb(26,27,38))', "#1a1b26", "#c0caf5", [
     "#15161e", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#a9b1d6",
     "#7982b4", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#c0caf5",
   ]),
-  catppuccin: mkTheme("Catppuccin Mocha", "white", ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"], "radial-gradient(circle at 18% 25%, rgba(245,194,231,0.2) 0 70px, transparent 110px), radial-gradient(circle at 78% 18%, rgba(137,180,250,0.18) 0 90px, transparent 140px), radial-gradient(circle at 62% 78%, rgba(166,227,161,0.13) 0 80px, transparent 130px), radial-gradient(circle at 28% 85%, rgba(250,179,135,0.16) 0 60px, transparent 100px), linear-gradient(180deg, #1e1e30, #141420)", "#1e1e2e", "#cdd6f4", [
+  catppuccin: mkTheme("Catppuccin Mocha", "white", ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"], 'linear-gradient(rgba(30,30,46,0.52), rgba(30,30,46,0.66)), url("/backgrounds/catppuccin.png") center / cover no-repeat, linear-gradient(180deg, rgb(30,30,46), rgb(30,30,46))', "#1e1e2e", "#cdd6f4", [
     "#45475a", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#bac2de",
     "#7f849c", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#a6adc8",
   ]),
-  "solarized-dark": mkTheme("Solarized Dark", "white", ["Consolas, monospace", 1.1, "underline"], "linear-gradient(180deg, rgba(42,161,152,0.3) 0%, transparent 32%), linear-gradient(180deg, transparent 55%, rgba(0,8,12,0.5) 100%), radial-gradient(ellipse 90% 45% at 50% -5%, rgba(147,161,161,0.16), transparent 60%), linear-gradient(180deg, #00323f, #001217)", "#002b36", "#839496", [
+  "solarized-dark": mkTheme("Solarized Dark", "white", ["Consolas, monospace", 1.1, "underline"], 'linear-gradient(rgba(0,43,54,0.55), rgba(0,43,54,0.7)), url("/backgrounds/solarizeddark.png") center / cover no-repeat, linear-gradient(180deg, rgb(0,43,54), rgb(0,43,54))', "#002b36", "#839496", [
     "#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198", "#eee8d5",
     "#657b83", "#cb4b16", "#78909a", "#eed968", "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
   ]),
@@ -866,7 +866,7 @@ THEMES["amber-crt"] = mkTheme(
   "Amber CRT",
   "white",
   ['"Lucida Console", Consolas, monospace', 1.1, "block"],
-  "repeating-linear-gradient(180deg, rgba(0,0,0,0.35) 0 1px, transparent 1px 3px), radial-gradient(ellipse 90% 80% at 50% 45%, rgba(255,176,0,0.13), transparent 70%), radial-gradient(ellipse 140% 110% at 50% 50%, transparent 55%, rgba(0,0,0,0.55) 100%), linear-gradient(180deg, #140d02, #0a0600)",
+  'linear-gradient(rgba(16,11,0,0.5), rgba(16,11,0,0.66)), url("/backgrounds/ambercrt.png") center / cover no-repeat, linear-gradient(180deg, #140d02, #0a0600)',
   "#100b00",
   "#ffb000",
   [
@@ -896,7 +896,7 @@ THEMES.everforest = mkTheme(
   "Everforest",
   "white",
   ["Consolas, monospace", 1.2, "bar"],
-  "radial-gradient(ellipse 90% 55% at 25% 118%, rgba(88,118,98,0.5), transparent 65%), radial-gradient(ellipse 90% 55% at 80% 122%, rgba(64,92,76,0.55), transparent 68%), radial-gradient(ellipse 100% 40% at 50% -5%, rgba(219,188,127,0.11), transparent 55%), linear-gradient(180deg, #333c43, #262d33)",
+  'linear-gradient(rgba(45,53,59,0.5), rgba(45,53,59,0.66)), url("/backgrounds/everforest.png") center / cover no-repeat, linear-gradient(180deg, rgb(45,53,59), rgb(45,53,59))',
   "#2d353b",
   "#d3c6aa",
   [
@@ -969,7 +969,7 @@ THEMES.gameboy = mkTheme(
   "Game Boy",
   "white",
   ['"Lucida Console", Consolas, monospace', 1.1, "block"],
-  "repeating-linear-gradient(0deg, rgba(8,32,8,0.4) 0 1px, transparent 1px 3px), repeating-linear-gradient(90deg, rgba(8,32,8,0.4) 0 1px, transparent 1px 3px), radial-gradient(ellipse 80% 50% at 50% 0%, rgba(155,188,15,0.12), transparent 60%), linear-gradient(180deg, #123f12, #0c2e0c)",
+  'linear-gradient(rgba(15,56,15,0.5), rgba(15,56,15,0.64)), url("/backgrounds/gameboy.png") center / cover no-repeat, linear-gradient(180deg, rgb(15,56,15), rgb(15,56,15))',
   "#0f380f",
   "#9bbc0f",
   [
