@@ -260,6 +260,14 @@ body,
   padding: 1.5px 3px;
 }
 
+/* wrapper holding one shell badge or up to three custom ones */
+.badge-wrap {
+  flex: none;
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+}
+
 .tab {
   display: flex;
   align-items: center;
@@ -911,6 +919,48 @@ input.set-control {
   border-radius: 10px;
   padding: 12px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.badge-current {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.badge-hint {
+  color: var(--muted2);
+  font: 12px var(--ui-font, "Segoe UI", sans-serif);
+}
+
+.badge-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--panel2);
+  border: 1px solid var(--border2);
+  border-radius: 5px;
+  padding: 2px 3px;
+}
+
+.badge-chip-x {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 3px;
+  border-radius: 3px;
+}
+
+.badge-chip-x:hover {
+  color: var(--danger);
+}
+
+.badge-opt[disabled] {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .badge-search {

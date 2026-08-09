@@ -216,11 +216,21 @@ function saveCustomTitles() {
   localStorage.setItem("gterm-names", JSON.stringify(customTitles));
 }
 
-// User-chosen badges: replace the automatic shell badge on a session
-// (short text or an emoji), set from the tab context menu.
-const customBadges: Record<string, string> = JSON.parse(
-  localStorage.getItem("gterm-cust-badges") ?? "{}"
-);
+// User-chosen badges: up to 3 per session (short text or emoji) replace
+// the automatic shell badge. Older single-string entries migrate to
+// one-element arrays on load.
+const customBadges: Record<string, string[]> = (() => {
+  const raw = JSON.parse(localStorage.getItem("gterm-cust-badges") ?? "{}") as Record<
+    string,
+    string | string[]
+  >;
+  const out: Record<string, string[]> = {};
+  for (const k of Object.keys(raw)) {
+    const v = raw[k];
+    out[k] = (Array.isArray(v) ? v : [v]).filter(Boolean).slice(0, 3);
+  }
+  return out;
+})();
 function saveCustomBadges() {
   localStorage.setItem("gterm-cust-badges", JSON.stringify(customBadges));
 }
@@ -308,27 +318,40 @@ function autoLabel(id: number): { text: string; fromCwd: boolean } {
   }
 }
 
-/// Small badge marking the session's shell family: blue "PS" for
-/// PowerShell (any version), dark ">_" for cmd. A user-set badge
-/// (customBadges) replaces it entirely.
+/// Badge strip for a session: the automatic shell badge (blue "PS" /
+/// dark ">_"), or the user's custom badges (up to 3) when set. `el` is a
+/// wrapper span; content only rebuilds when the signature changes.
 function setShellBadge(el: HTMLElement, shell: string | undefined, id?: number) {
-  const custom = id !== undefined ? customBadges[id] : undefined;
-  if (custom) {
-    if (el.className !== "shell-badge custom") el.className = "shell-badge custom";
-    if (el.textContent !== custom) el.textContent = custom;
-    el.title = "Custom badge — right-click the tab to change it";
+  const customs = id !== undefined ? customBadges[id] : undefined;
+  if (customs?.length) {
+    const sig = "c:" + customs.join(" ");
+    if (el.dataset.bsig === sig) return;
+    el.dataset.bsig = sig;
+    el.replaceChildren(
+      ...customs.slice(0, 3).map((c) => {
+        const s = document.createElement("span");
+        s.className = "shell-badge custom";
+        s.textContent = c;
+        return s;
+      })
+    );
+    el.title = "Custom badges — right-click the tab to change them";
     return;
   }
   const isCmd = (shell ?? "").toLowerCase() === "cmd";
-  const cls = isCmd ? "shell-badge cmd" : "shell-badge ps";
-  const txt = isCmd ? ">_" : "PS";
-  if (el.className !== cls) el.className = cls;
-  if (el.textContent !== txt) el.textContent = txt;
+  const sig = isCmd ? "cmd" : "ps";
+  if (el.dataset.bsig === sig) return;
+  el.dataset.bsig = sig;
+  const s = document.createElement("span");
+  s.className = "shell-badge " + sig;
+  s.textContent = isCmd ? ">_" : "PS";
+  el.replaceChildren(s);
   el.title = isCmd ? "Command Prompt" : "PowerShell";
 }
 
 function mkShellBadge(shell: string | undefined, id?: number): HTMLElement {
   const b = document.createElement("span");
+  b.className = "badge-wrap";
   setShellBadge(b, shell, id);
   return b;
 }
@@ -380,56 +403,120 @@ function openBadgePicker(id: number) {
   ov.id = "badge-overlay";
   const panel = document.createElement("div");
   panel.className = "badge-panel";
+  const currentRow = document.createElement("div");
+  currentRow.className = "badge-current";
   const input = document.createElement("input");
   input.className = "badge-search";
   input.placeholder = "Search… or type your own badge text";
   const grid = document.createElement("div");
   grid.className = "badge-grid";
-  const apply = (v: string | null) => {
-    if (v) customBadges[id] = v.slice(0, 4);
-    else delete customBadges[id];
-    saveCustomBadges();
+
+  const refreshChromeBadges = () => {
     const tab = tabs.get(id);
     if (tab) setShellBadge(tab.shellB, lastInfo.get(id)?.shell, id);
     sidebarSig = "";
     refreshChrome();
-    ov.remove();
   };
-  const render = () => {
+  const addBadge = (v: string) => {
+    const trimmed = v.slice(0, 4);
+    const list = customBadges[id] ?? [];
+    if (list.includes(trimmed) || list.length >= 3) return;
+    customBadges[id] = [...list, trimmed];
+    saveCustomBadges();
+    refreshChromeBadges();
+    renderCurrent();
+    renderGrid();
+  };
+  const removeBadge = (v: string) => {
+    const list = (customBadges[id] ?? []).filter((b) => b !== v);
+    if (list.length) customBadges[id] = list;
+    else delete customBadges[id];
+    saveCustomBadges();
+    refreshChromeBadges();
+    renderCurrent();
+    renderGrid();
+  };
+
+  const renderCurrent = () => {
+    currentRow.innerHTML = "";
+    const list = customBadges[id] ?? [];
+    if (!list.length) {
+      const hint = document.createElement("span");
+      hint.className = "badge-hint";
+      hint.textContent = "No custom badges — pick up to 3 below.";
+      currentRow.appendChild(hint);
+      return;
+    }
+    for (const b of list) {
+      const chip = document.createElement("span");
+      chip.className = "badge-chip";
+      const t = document.createElement("span");
+      t.className = "shell-badge custom";
+      t.textContent = b;
+      const x = document.createElement("button");
+      x.className = "badge-chip-x";
+      x.textContent = "×";
+      x.title = "Remove this badge";
+      x.addEventListener("click", () => removeBadge(b));
+      chip.append(t, x);
+      currentRow.appendChild(chip);
+    }
+  };
+  const renderGrid = () => {
     grid.innerHTML = "";
     const q = input.value.trim().toLowerCase();
+    const full = (customBadges[id] ?? []).length >= 3;
     for (const [emoji, keys] of BADGE_CHOICES) {
       if (q && !keys.includes(q)) continue;
       const b = document.createElement("button");
       b.className = "badge-opt";
       b.textContent = emoji;
-      b.title = keys;
-      b.addEventListener("click", () => apply(emoji));
+      b.title = full ? "Already at 3 badges — remove one first" : keys;
+      b.disabled = full;
+      b.addEventListener("click", () => addBadge(emoji));
       grid.appendChild(b);
     }
-    if (q) {
+    if (q && !full) {
       const custom = document.createElement("button");
       custom.className = "badge-custom";
-      custom.textContent = `Use text "${input.value.trim().slice(0, 4)}"`;
-      custom.addEventListener("click", () => apply(input.value.trim()));
+      custom.textContent = `Add text "${input.value.trim().slice(0, 4)}"`;
+      custom.addEventListener("click", () => {
+        addBadge(input.value.trim());
+        input.value = "";
+        renderGrid();
+      });
       grid.appendChild(custom);
     }
-    const reset = document.createElement("button");
-    reset.className = "badge-custom";
-    reset.textContent = "Reset to shell badge";
-    reset.addEventListener("click", () => apply(null));
-    grid.appendChild(reset);
+    if (customBadges[id]?.length) {
+      const reset = document.createElement("button");
+      reset.className = "badge-custom";
+      reset.textContent = "Clear all — back to shell badge";
+      reset.addEventListener("click", () => {
+        delete customBadges[id];
+        saveCustomBadges();
+        refreshChromeBadges();
+        renderCurrent();
+        renderGrid();
+      });
+      grid.appendChild(reset);
+    }
+    const done = document.createElement("button");
+    done.className = "badge-custom";
+    done.textContent = "Done";
+    done.addEventListener("click", () => ov.remove());
+    grid.appendChild(done);
   };
-  input.addEventListener("input", render);
+  input.addEventListener("input", renderGrid);
   input.addEventListener("keydown", (e) => {
     e.stopPropagation();
     if (e.key === "Escape") ov.remove();
     if (e.key === "Enter") {
-      grid.querySelector<HTMLElement>(".badge-opt, .badge-custom")?.click();
+      grid.querySelector<HTMLElement>(".badge-opt:not([disabled]), .badge-custom")?.click();
     }
   });
-  render();
-  panel.append(input, grid);
+  renderCurrent();
+  renderGrid();
+  panel.append(currentRow, input, grid);
   ov.appendChild(panel);
   ov.addEventListener("mousedown", (e) => {
     if (e.target === ov) ov.remove();
@@ -552,6 +639,9 @@ function saveOrder() {
 
 // ── drag-and-drop reordering ────────────────────────────────────────────
 let dragId: number | null = null;
+// Set when a sidebar pointer-drag completes, so the click that follows
+// pointerup doesn't also activate the dropped row.
+let sideSuppressClick = false;
 
 function clearDropMarkers() {
   for (const root of [tabbar, sidebarList]) {
@@ -2335,17 +2425,42 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
         e.stopPropagation();
         renameSession(id, l);
       });
-      // Open tabs reorder by drag, mirroring the tab strip.
-      row.draggable = true;
-      row.addEventListener("dragstart", (e) => {
-        dragId = id;
-        e.dataTransfer!.effectAllowed = "move";
-        row.classList.add("dragging");
-      });
-      row.addEventListener("dragend", () => {
-        dragId = null;
-        row.classList.remove("dragging");
-        clearDropMarkers();
+      // Open tabs reorder by pointer drag (not HTML5 DnD — that fights
+      // the row rebuilds and the frameless-window drag handling).
+      row.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return;
+        const startY = e.clientY;
+        let dragging = false;
+        const rowUnder = (ev: PointerEvent): HTMLElement | null =>
+          (document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".side-row") as HTMLElement | null);
+        const onMove = (ev: PointerEvent) => {
+          if (!dragging) {
+            if (Math.abs(ev.clientY - startY) < 5) return;
+            dragging = true;
+            row.classList.add("dragging");
+          }
+          clearDropMarkers();
+          const t = rowUnder(ev);
+          const tid = t ? Number(t.dataset.id) : NaN;
+          if (!t || tid === id || !tabs.has(tid)) return;
+          const rect = t.getBoundingClientRect();
+          t.classList.add(ev.clientY < rect.top + rect.height / 2 ? "drop-before" : "drop-after");
+        };
+        const onUp = (ev: PointerEvent) => {
+          window.removeEventListener("pointermove", onMove);
+          row.classList.remove("dragging");
+          clearDropMarkers();
+          if (!dragging) return;
+          sideSuppressClick = true;
+          const t = rowUnder(ev);
+          const tid = t ? Number(t.dataset.id) : NaN;
+          if (!t || tid === id || !tabs.has(tid)) return;
+          const rect = t.getBoundingClientRect();
+          const before = ev.clientY < rect.top + rect.height / 2;
+          moveTab(id, tid, before, groupState.assign[tid]);
+        };
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp, { once: true });
       });
     }
     row.addEventListener("contextmenu", (e) => {
@@ -2381,7 +2496,13 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
     }
     const info = sessions.find((s) => s.id === id);
     row.append(d, mkShellBadge(info?.shell, id), l, acts);
-    row.addEventListener("click", onClick);
+    row.addEventListener("click", () => {
+      if (sideSuppressClick) {
+        sideSuppressClick = false;
+        return;
+      }
+      onClick();
+    });
     sidebarList.appendChild(row);
   };
 
