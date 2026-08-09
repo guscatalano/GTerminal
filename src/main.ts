@@ -599,6 +599,94 @@ THEMES.everforest = mkTheme(
   ]
 );
 
+// ── pop culture pack ────────────────────────────────────────────────────
+
+THEMES.bladerunner = mkTheme(
+  "Blade Runner",
+  "white",
+  ["Consolas, monospace", 1.15, "bar"],
+  "repeating-linear-gradient(95deg, rgba(140,200,220,0.07) 0 1px, transparent 1px 7px), radial-gradient(ellipse 90% 40% at 30% 112%, rgba(255,138,61,0.28), transparent 65%), radial-gradient(ellipse 40% 30% at 85% 6%, rgba(82,224,224,0.16), transparent 60%), linear-gradient(180deg, #0e1a20, #090e12)",
+  "#0d1418",
+  "#d9e6ea",
+  [
+    "#0d1418", "#ff6b4a", "#4ecfa8", "#ffb454", "#45b8d8", "#e86ab0", "#52e0e0", "#d9e6ea",
+    "#5c7078", "#ff8f73", "#7fe6c6", "#ffc77d", "#79d2ec", "#f795cb", "#8cf0ef", "#f2fbfd",
+  ]
+);
+
+THEMES.tron = mkTheme(
+  "TRON",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "block"],
+  "linear-gradient(90deg, transparent 0 14%, rgba(0,229,255,0.4) 14.05% 14.3%, transparent 14.6%), linear-gradient(0deg, transparent 0 22%, rgba(0,229,255,0.3) 22.05% 22.3%, transparent 22.6%), linear-gradient(90deg, transparent 0 88%, rgba(255,136,54,0.35) 88.05% 88.3%, transparent 88.6%), radial-gradient(ellipse 70% 45% at 50% 110%, rgba(0,140,180,0.2), transparent 65%), linear-gradient(180deg, #060a10, #04060a)",
+  "#05080c",
+  "#bfefff",
+  [
+    "#05080c", "#ff8836", "#5ce8b6", "#ffd35c", "#4dc4ff", "#b389ff", "#00e5ff", "#bfefff",
+    "#3d5a66", "#ffa366", "#8af0d4", "#ffe08a", "#85d7ff", "#cbadff", "#66eeff", "#eafaff",
+  ]
+);
+THEMES.tron.xterm.cursor = "#00e5ff";
+THEMES.tron.xterm.selectionBackground = "#00e5ff33";
+
+THEMES.lcars = mkTheme(
+  "LCARS",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.15, "bar"],
+  "linear-gradient(180deg, #ff9933 0 18%, #000 18% 19.5%, #9999ff 19.5% 34%, #000 34% 35.5%, #cc99cc 35.5% 46%, #000 46% 47.5%, #ffcc66 47.5% 70%, #000 70% 71.5%, #e07a66 71.5% 100%) left/7px 100% no-repeat, radial-gradient(circle at 0% 0%, transparent 56px, rgba(255,153,51,0.55) 58px 64px, transparent 66px) no-repeat, linear-gradient(#000, #000)",
+  "#000000",
+  "#ffcc99",
+  [
+    "#000000", "#e07a66", "#99cc66", "#ffcc66", "#9999ff", "#cc99cc", "#99ccff", "#ffcc99",
+    "#666699", "#ff9977", "#b8e086", "#ffd98c", "#b8b8ff", "#e0b8e0", "#b8dcff", "#ffe6cc",
+  ]
+);
+THEMES.lcars.xterm.cursor = "#ff9933";
+THEMES.lcars.xterm.selectionBackground = "#ff993340";
+
+THEMES.hyperspace = mkTheme(
+  "Hyperspace",
+  "white",
+  ["Consolas, monospace", 1.15, "block"],
+  "radial-gradient(1px 1px at 20% 30%, rgba(255,255,255,0.6), transparent 1.5px) 0 0/180px 140px repeat, radial-gradient(1.2px 1.2px at 70% 60%, rgba(255,255,255,0.45), transparent 2px) 0 0/220px 180px repeat, radial-gradient(0.8px 0.8px at 45% 80%, rgba(255,255,255,0.35), transparent 1.5px) 0 0/160px 200px repeat, radial-gradient(ellipse 60% 40% at 50% 0%, rgba(77,159,255,0.1), transparent 60%), linear-gradient(180deg, #070716, #03030a)",
+  "#050510",
+  "#e8e6d8",
+  [
+    "#050510", "#ff4d4d", "#57e389", "#ffe81f", "#4d9fff", "#b878ff", "#66e0ff", "#e8e6d8",
+    "#565b78", "#ff8080", "#85f0ac", "#fff066", "#80baff", "#d0a3ff", "#99ecff", "#ffffff",
+  ]
+);
+THEMES.hyperspace.xterm.cursor = "#ffe81f";
+THEMES.hyperspace.xterm.selectionBackground = "#ffe81f33";
+
+THEMES.gameboy = mkTheme(
+  "Game Boy",
+  "white",
+  ['"Lucida Console", Consolas, monospace', 1.1, "block"],
+  "repeating-linear-gradient(0deg, rgba(8,32,8,0.4) 0 1px, transparent 1px 3px), repeating-linear-gradient(90deg, rgba(8,32,8,0.4) 0 1px, transparent 1px 3px), radial-gradient(ellipse 80% 50% at 50% 0%, rgba(155,188,15,0.12), transparent 60%), linear-gradient(180deg, #123f12, #0c2e0c)",
+  "#0f380f",
+  "#9bbc0f",
+  [
+    "#0f380f", "#cc7755", "#8bac0f", "#b3bd4a", "#6fa08a", "#a08db8", "#86c9a8", "#cadc9f",
+    "#5a8a5a", "#e09a80", "#a3cf3f", "#d4de7a", "#93c2a8", "#bfb0d6", "#a8e0c4", "#e6f0c8",
+  ]
+);
+THEMES.gameboy.xterm.cursor = "#9bbc0f";
+THEMES.gameboy.xterm.selectionBackground = "#9bbc0f33";
+
+THEMES.dune = mkTheme(
+  "Dune",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "underline"],
+  "radial-gradient(circle at 78% 14%, rgba(240,200,120,0.5) 0 26px, transparent 60px), radial-gradient(circle at 66% 9%, rgba(255,235,200,0.4) 0 12px, transparent 34px), radial-gradient(ellipse 100% 55% at 20% 118%, rgba(122,84,40,0.55), transparent 65%), radial-gradient(ellipse 100% 50% at 85% 122%, rgba(158,108,52,0.5), transparent 68%), linear-gradient(180deg, #241708, #170f07)",
+  "#1a120a",
+  "#e8d5b0",
+  [
+    "#1a120a", "#d9603a", "#a8a060", "#e0a33c", "#4f9edb", "#b8798f", "#7fbfae", "#e8d5b0",
+    "#7a6a52", "#f08a5f", "#c2bf7a", "#f2c266", "#7ab8f0", "#d49cb0", "#9fd9c8", "#f7ecd8",
+  ]
+);
+
 let themeKey = "one-dark";
 function currentTheme(): ThemeDef {
   return THEMES[themeKey] ?? THEMES["one-dark"];
