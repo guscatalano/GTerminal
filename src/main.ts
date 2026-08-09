@@ -324,7 +324,7 @@ function autoLabel(id: number): { text: string; fromCwd: boolean } {
 function setShellBadge(el: HTMLElement, shell: string | undefined, id?: number) {
   const customs = id !== undefined ? customBadges[id] : undefined;
   if (customs?.length) {
-    const sig = "c:" + customs.join(" ");
+    const sig = "c:" + customs.join(" ");
     if (el.dataset.bsig === sig) return;
     el.dataset.bsig = sig;
     el.replaceChildren(
@@ -637,11 +637,10 @@ function saveOrder() {
   localStorage.setItem("gterm-order", JSON.stringify(tabOrder));
 }
 
-// ── drag-and-drop reordering ────────────────────────────────────────────
-let dragId: number | null = null;
-// Set when a sidebar pointer-drag completes, so the click that follows
-// pointerup doesn't also activate the dropped row.
-let sideSuppressClick = false;
+// ── drag reordering (pointer-based) ─────────────────────────────────────
+// Set when a drag completes, so the click that follows pointerup doesn't
+// also activate the dropped row.
+let dragSuppressClick = false;
 
 function clearDropMarkers() {
   for (const root of [tabbar, sidebarList]) {
@@ -649,6 +648,55 @@ function clearDropMarkers() {
       el.classList.remove("drop-before", "drop-after", "drop-into");
     }
   }
+}
+
+/// Pointer-based drag reordering, used by both the tab strip (axis "x")
+/// and the sidebar (axis "y"). HTML5 drag-and-drop is deliberately not
+/// used: inside the frameless window it fails to start drags reliably.
+/// Targets are resolved by hit-testing at pointer position, so chrome
+/// rebuilds mid-drag are harmless.
+function beginPointerDrag(
+  e: PointerEvent,
+  el: HTMLElement,
+  axis: "x" | "y",
+  hitSelector: string,
+  onDrop: (target: HTMLElement | null, before: boolean, ev: PointerEvent) => void
+) {
+  if (e.button !== 0) return;
+  const start = axis === "x" ? e.clientX : e.clientY;
+  let dragging = false;
+  const hit = (ev: PointerEvent): HTMLElement | null =>
+    (document.elementFromPoint(ev.clientX, ev.clientY)?.closest(hitSelector) as HTMLElement | null);
+  const isBefore = (t: HTMLElement, ev: PointerEvent): boolean => {
+    const r = t.getBoundingClientRect();
+    return axis === "x" ? ev.clientX < r.left + r.width / 2 : ev.clientY < r.top + r.height / 2;
+  };
+  const onMove = (ev: PointerEvent) => {
+    if (!dragging) {
+      if (Math.abs((axis === "x" ? ev.clientX : ev.clientY) - start) < 5) return;
+      dragging = true;
+      el.classList.add("dragging");
+    }
+    clearDropMarkers();
+    const t = hit(ev);
+    if (!t || t === el) return;
+    if (t.classList.contains("group-chip")) {
+      t.classList.add("drop-into");
+      return;
+    }
+    t.classList.add(isBefore(t, ev) ? "drop-before" : "drop-after");
+  };
+  const onUp = (ev: PointerEvent) => {
+    window.removeEventListener("pointermove", onMove);
+    el.classList.remove("dragging");
+    clearDropMarkers();
+    if (!dragging) return;
+    dragSuppressClick = true;
+    const t = hit(ev);
+    onDrop(t && t !== el ? t : null, t ? isBefore(t, ev) : false, ev);
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp, { once: true });
 }
 
 /// Move `dragged` next to `refId` (or to the end when undefined), joining
@@ -944,6 +992,51 @@ THEMES.dune = mkTheme(
     "#7a6a52", "#f08a5f", "#c2bf7a", "#f2c266", "#7ab8f0", "#d49cb0", "#9fd9c8", "#f7ecd8",
   ]
 );
+
+THEMES.cyberpunk = mkTheme(
+  "Cyberpunk",
+  "white",
+  ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "block"],
+  'linear-gradient(rgba(10,10,18,0.5), rgba(10,10,18,0.66)), url("/backgrounds/cyberpunk.png") center / cover no-repeat, linear-gradient(180deg, #0d0d12, #16101f)',
+  "#0d0d12",
+  "#eaeaf0",
+  [
+    "#14141c", "#ff2a6d", "#05ffa1", "#fcee0a", "#00b8ff", "#ff5cf4", "#00f0ff", "#c7c7d1",
+    "#7a7a92", "#ff6b95", "#6bffc4", "#fff65c", "#66d4ff", "#ff9df7", "#7dffff", "#ffffff",
+  ]
+);
+THEMES.cyberpunk.xterm.cursor = "#fcee0a";
+THEMES.cyberpunk.xterm.selectionBackground = "#00f0ff3d";
+
+THEMES["deus-ex"] = mkTheme(
+  "Deus Ex",
+  "white",
+  ['"Lucida Console", Consolas, monospace', 1.2, "underline"],
+  'linear-gradient(rgba(10,9,6,0.42), rgba(10,9,6,0.58)), url("/backgrounds/deusex.png") center / cover no-repeat, linear-gradient(180deg, #0e0b06, #060503)',
+  "#0a0906",
+  "#e2cf9a",
+  [
+    "#12100b", "#d4522f", "#9aa762", "#e0a83a", "#7fa8c4", "#c095c6", "#7fc0b5", "#c9b985",
+    "#8a7f5c", "#e57a52", "#b8c47f", "#f3c95f", "#9dc6dc", "#d6b5da", "#a4d8cf", "#f2e6c0",
+  ]
+);
+THEMES["deus-ex"].xterm.cursor = "#e0a83a";
+THEMES["deus-ex"].xterm.selectionBackground = "#e0a83a3d";
+
+THEMES.umbrella = mkTheme(
+  "Umbrella Corp",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.15, "bar"],
+  'linear-gradient(rgba(12,13,16,0.45), rgba(12,13,16,0.6)), url("/backgrounds/umbrella.png") center / cover no-repeat, linear-gradient(180deg, #0c0e11, #060608)',
+  "#0c0e11",
+  "#e3e6ea",
+  [
+    "#14171c", "#e02b2b", "#4fb477", "#d9a441", "#4d8fd6", "#c65fa8", "#56c2c9", "#b9c0c8",
+    "#7a838e", "#ff5f5f", "#7ede9f", "#ffd45c", "#82b6ea", "#e394cd", "#8fdde3", "#f2f5f8",
+  ]
+);
+THEMES.umbrella.xterm.cursor = "#e02b2b";
+THEMES.umbrella.xterm.selectionBackground = "#e02b2b40";
 
 let themeKey = "one-dark";
 function currentTheme(): ThemeDef {
@@ -1364,16 +1457,35 @@ async function createTab(attachId?: number, shell?: string, cwd?: string, title?
   button.addEventListener("dblclick", (e) => {
     if (e.target === label) renameTab(id);
   });
-  button.draggable = true;
-  button.addEventListener("dragstart", (e) => {
-    dragId = id;
-    e.dataTransfer!.effectAllowed = "move";
-    button.classList.add("dragging");
-  });
-  button.addEventListener("dragend", () => {
-    dragId = null;
-    button.classList.remove("dragging");
-    clearDropMarkers();
+  // Drag to reorder within the tab strip; dropping onto a group chip
+  // joins that group at its front, past a group's last member leaves it.
+  button.addEventListener("pointerdown", (e) => {
+    if (e.target === close || e.target === hide) return;
+    beginPointerDrag(e, button, "x", ".tab, .group-chip", (target, before, ev) => {
+      if (!target) {
+        const bar = tabbar.getBoundingClientRect();
+        const inBar =
+          ev.clientX >= bar.left && ev.clientX <= bar.right &&
+          ev.clientY >= bar.top && ev.clientY <= bar.bottom;
+        if (inBar) moveTab(id, undefined, false);
+        return;
+      }
+      if (target.classList.contains("group-chip")) {
+        const gid = target.dataset.gid!;
+        const first = tabOrder.find((m) => groupState.assign[m] === gid);
+        moveTab(id, first, true, gid);
+        return;
+      }
+      const refId = Number(target.dataset.id);
+      if (!tabs.has(refId) || refId === id) return;
+      const gid = groupState.assign[refId];
+      let joinGroup: string | undefined = gid;
+      if (gid) {
+        const members = tabOrder.filter((m) => groupState.assign[m] === gid);
+        if (!before && members[members.length - 1] === refId) joinGroup = undefined;
+      }
+      moveTab(id, refId, before, joinGroup);
+    });
   });
   button.addEventListener("contextmenu", (e) => {
     e.preventDefault();
@@ -2428,39 +2540,12 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
       // Open tabs reorder by pointer drag (not HTML5 DnD — that fights
       // the row rebuilds and the frameless-window drag handling).
       row.addEventListener("pointerdown", (e) => {
-        if (e.button !== 0) return;
-        const startY = e.clientY;
-        let dragging = false;
-        const rowUnder = (ev: PointerEvent): HTMLElement | null =>
-          (document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".side-row") as HTMLElement | null);
-        const onMove = (ev: PointerEvent) => {
-          if (!dragging) {
-            if (Math.abs(ev.clientY - startY) < 5) return;
-            dragging = true;
-            row.classList.add("dragging");
-          }
-          clearDropMarkers();
-          const t = rowUnder(ev);
-          const tid = t ? Number(t.dataset.id) : NaN;
-          if (!t || tid === id || !tabs.has(tid)) return;
-          const rect = t.getBoundingClientRect();
-          t.classList.add(ev.clientY < rect.top + rect.height / 2 ? "drop-before" : "drop-after");
-        };
-        const onUp = (ev: PointerEvent) => {
-          window.removeEventListener("pointermove", onMove);
-          row.classList.remove("dragging");
-          clearDropMarkers();
-          if (!dragging) return;
-          sideSuppressClick = true;
-          const t = rowUnder(ev);
-          const tid = t ? Number(t.dataset.id) : NaN;
-          if (!t || tid === id || !tabs.has(tid)) return;
-          const rect = t.getBoundingClientRect();
-          const before = ev.clientY < rect.top + rect.height / 2;
+        if ((e.target as HTMLElement).closest(".side-act")) return;
+        beginPointerDrag(e, row, "y", ".side-row", (target, before) => {
+          const tid = target ? Number(target.dataset.id) : NaN;
+          if (!target || tid === id || !tabs.has(tid)) return;
           moveTab(id, tid, before, groupState.assign[tid]);
-        };
-        window.addEventListener("pointermove", onMove);
-        window.addEventListener("pointerup", onUp, { once: true });
+        });
       });
     }
     row.addEventListener("contextmenu", (e) => {
@@ -2497,8 +2582,8 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
     const info = sessions.find((s) => s.id === id);
     row.append(d, mkShellBadge(info?.shell, id), l, acts);
     row.addEventListener("click", () => {
-      if (sideSuppressClick) {
-        sideSuppressClick = false;
+      if (dragSuppressClick) {
+        dragSuppressClick = false;
         return;
       }
       onClick();
@@ -3189,84 +3274,9 @@ async function main() {
       toggleSidebar();
     }
   });
-  // Sidebar drag-reorder: dropping on a row moves the dragged tab next to
-  // it and adopts that row's group (or leaves a group when the target is
-  // ungrouped) — the same semantics as the tab strip.
-  sidebarList.addEventListener("dragover", (e) => {
-    if (dragId === null) return;
-    e.preventDefault();
-    e.dataTransfer!.dropEffect = "move";
-    clearDropMarkers();
-    const target = (e.target as HTMLElement).closest(".side-row") as HTMLElement | null;
-    const tid = target ? Number(target.dataset.id) : NaN;
-    if (!target || tid === dragId || !tabs.has(tid)) return;
-    const rect = target.getBoundingClientRect();
-    target.classList.add(e.clientY < rect.top + rect.height / 2 ? "drop-before" : "drop-after");
-  });
-  sidebarList.addEventListener("drop", (e) => {
-    if (dragId === null) return;
-    e.preventDefault();
-    clearDropMarkers();
-    const dragged = dragId;
-    dragId = null;
-    const target = (e.target as HTMLElement).closest(".side-row") as HTMLElement | null;
-    const tid = target ? Number(target.dataset.id) : NaN;
-    if (!target || tid === dragged || !tabs.has(tid)) return;
-    const rect = target.getBoundingClientRect();
-    const before = e.clientY < rect.top + rect.height / 2;
-    moveTab(dragged, tid, before, groupState.assign[tid]);
-  });
   new ResizeObserver(() => refreshChrome()).observe(tabbar);
   window.setInterval(updateLiveInfo, 5000);
   window.setInterval(aiAutoTitleTick, 120_000);
-
-  // Drag-and-drop reordering, with group awareness: dropping between a
-  // group's members joins it, past its right edge leaves it, onto the
-  // chip adds at the front.
-  tabbar.addEventListener("dragover", (e) => {
-    if (dragId === null) return;
-    e.preventDefault();
-    e.dataTransfer!.dropEffect = "move";
-    clearDropMarkers();
-    const target = (e.target as HTMLElement).closest(".tab, .group-chip") as HTMLElement | null;
-    if (!target || Number(target.dataset.id) === dragId) return;
-    if (target.classList.contains("group-chip")) {
-      target.classList.add("drop-into");
-      return;
-    }
-    const rect = target.getBoundingClientRect();
-    const before = e.clientX < rect.left + rect.width / 2;
-    target.classList.add(before ? "drop-before" : "drop-after");
-  });
-  tabbar.addEventListener("drop", (e) => {
-    if (dragId === null) return;
-    e.preventDefault();
-    clearDropMarkers();
-    const dragged = dragId;
-    dragId = null;
-    const target = (e.target as HTMLElement).closest(".tab, .group-chip") as HTMLElement | null;
-    if (!target) {
-      moveTab(dragged, undefined, false);
-      return;
-    }
-    if (target.classList.contains("group-chip")) {
-      const gid = target.dataset.gid!;
-      const first = tabOrder.find((m) => groupState.assign[m] === gid);
-      moveTab(dragged, first, true, gid);
-      return;
-    }
-    const refId = Number(target.dataset.id);
-    if (refId === dragged) return;
-    const rect = target.getBoundingClientRect();
-    const before = e.clientX < rect.left + rect.width / 2;
-    const gid = groupState.assign[refId];
-    let joinGroup: string | undefined = gid;
-    if (gid) {
-      const members = tabOrder.filter((m) => groupState.assign[m] === gid);
-      if (!before && members[members.length - 1] === refId) joinGroup = undefined;
-    }
-    moveTab(dragged, refId, before, joinGroup);
-  });
 
   if (localStorage.getItem("gterm-sidebar") === "1") {
     app.classList.add("sidebar-on");

@@ -253,4 +253,148 @@ for ($i = 0; $i -lt 5000; $i++) {
 }
 Save $bmp $g "nous.png"
 
+# ── Cyberpunk: Night City neon canyon, yellow/cyan signage, glitch bands ──
+$rng = New-Object System.Random(2077)
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 10 10 18) (C 255 24 16 34)
+Glow $g 300 980 640 (C 70 252 238 10)      # street haze, cyberpunk yellow
+Glow $g 1560 760 560 (C 60 0 240 255)      # cyan district
+Glow $g 980 120 480 (C 40 255 0 60)        # red skyline bloom
+# tower blocks with dense window grids
+$x = -30
+while ($x -lt $W) {
+  $bw = $rng.Next(90, 240); $h2 = $rng.Next(340, 820)
+  $top = $H - $h2
+  $b = New-Object System.Drawing.SolidBrush((C 255 7 8 14))
+  $g.FillRectangle($b, $x, $top, $bw, $h2); $b.Dispose()
+  for ($wy = $top + 16; $wy -lt $H - 20; $wy += 22) {
+    for ($wx = $x + 10; $wx -lt $x + $bw - 12; $wx += 16) {
+      if ($rng.NextDouble() -lt 0.45) { continue }
+      $roll = $rng.NextDouble()
+      $cc = if ($roll -lt 0.5) { C $rng.Next(40, 150) 252 238 10 }
+      elseif ($roll -lt 0.8) { C $rng.Next(40, 140) 0 240 255 }
+      else { C $rng.Next(40, 130) 255 0 90 }
+      $b = New-Object System.Drawing.SolidBrush($cc); $g.FillRectangle($b, $wx, $wy, 6, 9); $b.Dispose()
+    }
+  }
+  # vertical neon signboard on some faces
+  if ($rng.NextDouble() -lt 0.45 -and $bw -gt 120) {
+    $sx = $x + $rng.Next(20, $bw - 30); $sy = $top + $rng.Next(30, 180); $sh = $rng.Next(120, 320)
+    $neon = if ($rng.NextDouble() -lt 0.5) { C 235 252 238 10 } else { C 235 0 240 255 }
+    Glow $g ($sx + 5) ($sy + $sh / 2) 90 (C 60 $neon.R $neon.G $neon.B)
+    $b = New-Object System.Drawing.SolidBrush($neon); $g.FillRectangle($b, $sx, $sy, 10, $sh); $b.Dispose()
+  }
+  $x += $bw + $rng.Next(6, 26)
+}
+# glitch bands: horizontal slices offset in hot colors
+for ($i = 0; $i -lt 14; $i++) {
+  $gy = $rng.Next(0, $H); $gh = $rng.Next(2, 9)
+  $cc = if ($rng.NextDouble() -lt 0.5) { C $rng.Next(30, 90) 0 240 255 } else { C $rng.Next(30, 90) 255 0 90 }
+  $b = New-Object System.Drawing.SolidBrush($cc)
+  $g.FillRectangle($b, $rng.Next(0, 400), $gy, $rng.Next(300, $W), $gh); $b.Dispose()
+}
+# scanlines
+for ($y = 0; $y -lt $H; $y += 4) {
+  $pen = New-Object System.Drawing.Pen((C 30 0 0 0), 1)
+  $g.DrawLine($pen, 0, $y, $W, $y); $pen.Dispose()
+}
+Save $bmp $g "cyberpunk.png"
+
+# ── Deus Ex: black-gold hexagon lattice, circuit traces, icarus glow ──
+$rng = New-Object System.Random(2027)
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 14 11 6) (C 255 6 5 3)
+Glow $g 1420 300 520 (C 46 226 168 62)     # gold aura
+Glow $g 360 900 460 (C 26 180 130 40)
+# hexagon lattice
+$hr = 46.0
+$penHex = New-Object System.Drawing.Pen((C 40 226 168 62), 1)
+for ($row = -1; $row -lt 16; $row++) {
+  for ($col = -1; $col -lt 26; $col++) {
+    $cx2 = $col * ($hr * 1.5)
+    $cy2 = $row * ($hr * 1.732) + $(if ($col % 2 -ne 0) { $hr * 0.866 } else { 0 })
+    $pts = New-Object 'System.Drawing.Point[]' 6
+    for ($k = 0; $k -lt 6; $k++) {
+      $ang = [math]::PI / 180 * (60 * $k)
+      $pts[$k] = New-Object System.Drawing.Point(([int]($cx2 + $hr * [math]::Cos($ang))), ([int]($cy2 + $hr * [math]::Sin($ang))))
+    }
+    $g.DrawPolygon($penHex, $pts)
+  }
+}
+$penHex.Dispose()
+# brighter gold hexes scattered through the lattice
+for ($i = 0; $i -lt 26; $i++) {
+  $cx2 = $rng.Next(0, $W); $cy2 = $rng.Next(0, $H)
+  $pts = New-Object 'System.Drawing.Point[]' 6
+  for ($k = 0; $k -lt 6; $k++) {
+    $ang = [math]::PI / 180 * (60 * $k)
+    $pts[$k] = New-Object System.Drawing.Point(([int]($cx2 + $hr * [math]::Cos($ang))), ([int]($cy2 + $hr * [math]::Sin($ang))))
+  }
+  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(10, 34) 226 168 62))
+  $g.FillPolygon($b, $pts); $b.Dispose()
+}
+# circuit traces with solder pads
+for ($i = 0; $i -lt 26; $i++) {
+  $cx2 = $rng.Next(0, $W); $cy2 = $rng.Next(0, $H)
+  $pen = New-Object System.Drawing.Pen((C 70 226 168 62), 1)
+  $len = $rng.Next(80, 340)
+  $horiz = $rng.NextDouble() -lt 0.5
+  $mx2 = if ($horiz) { $cx2 + $len } else { $cx2 }
+  $my2 = if ($horiz) { $cy2 } else { $cy2 + $len }
+  $g.DrawLine($pen, $cx2, $cy2, $mx2, $my2)
+  $ex = if ($horiz) { $mx2 + 60 } else { $mx2 + 60 }
+  $ey = if ($horiz) { $my2 + 60 } else { $my2 }
+  $g.DrawLine($pen, $mx2, $my2, $ex, $ey); $pen.Dispose()
+  $b = New-Object System.Drawing.SolidBrush((C 150 226 168 62))
+  $g.FillEllipse($b, $ex - 3, $ey - 3, 6, 6); $b.Dispose()
+}
+# vignette
+foreach ($corner in @(@(0,0), @($W,0), @(0,$H), @($W,$H))) {
+  Glow $g $corner[0] $corner[1] 620 (C 120 0 0 0)
+}
+Save $bmp $g "deusex.png"
+
+# ── Umbrella: red/white octagon emblem over a sterile containment grid ──
+$rng = New-Object System.Random(1998)
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 12 13 16) (C 255 6 6 8)
+Glow $g 1430 470 560 (C 46 200 20 24)      # red containment glow
+# containment floor grid
+$pen = New-Object System.Drawing.Pen((C 16 200 210 220), 1)
+for ($gx = 0; $gx -lt $W; $gx += 90) { $g.DrawLine($pen, $gx, 0, $gx, $H) }
+for ($gy = 0; $gy -lt $H; $gy += 90) { $g.DrawLine($pen, 0, $gy, $W, $gy) }
+$pen.Dispose()
+# the emblem: 8 alternating wedges, red and bone-white
+$er = 300.0; $ex2 = 1430.0; $ey2 = 470.0
+for ($k = 0; $k -lt 8; $k++) {
+  $col = if ($k % 2 -eq 0) { C 120 190 22 28 } else { C 60 226 226 220 }
+  $b = New-Object System.Drawing.SolidBrush($col)
+  $g.FillPie($b, ($ex2 - $er), ($ey2 - $er), (2 * $er), (2 * $er), (45 * $k + 22.5), 45.0)
+  $b.Dispose()
+}
+# emblem rings
+$pen = New-Object System.Drawing.Pen((C 150 226 226 220), 3)
+$g.DrawEllipse($pen, ($ex2 - $er), ($ey2 - $er), (2 * $er), (2 * $er)); $pen.Dispose()
+$pen = New-Object System.Drawing.Pen((C 90 226 226 220), 2)
+$g.DrawEllipse($pen, ($ex2 - 96), ($ey2 - 96), 192, 192); $pen.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 210 12 13 16))
+$g.FillEllipse($b, ($ex2 - 92), ($ey2 - 92), 184, 184); $b.Dispose()
+# hazard stripe bar along the bottom
+$stripeY = $H - 74
+$b = New-Object System.Drawing.SolidBrush((C 60 20 20 24)); $g.FillRectangle($b, 0, $stripeY, $W, 74); $b.Dispose()
+for ($sx = -80; $sx -lt $W; $sx += 76) {
+  $pts = New-Object 'System.Drawing.Point[]' 4
+  $pts[0] = New-Object System.Drawing.Point($sx, ($stripeY + 74))
+  $pts[1] = New-Object System.Drawing.Point(($sx + 38), $stripeY)
+  $pts[2] = New-Object System.Drawing.Point(($sx + 76), $stripeY)
+  $pts[3] = New-Object System.Drawing.Point(($sx + 38), ($stripeY + 74))
+  $b = New-Object System.Drawing.SolidBrush((C 42 190 22 28)); $g.FillPolygon($b, $pts); $b.Dispose()
+}
+# specimen dust
+for ($i = 0; $i -lt 1400; $i++) {
+  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(6, 20) 220 225 230))
+  $g.FillRectangle($b, $rng.Next(0, $W), $rng.Next(0, $H), 1, 1); $b.Dispose()
+}
+Save $bmp $g "umbrella.png"
+
 "done -> $out"
