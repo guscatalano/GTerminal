@@ -2481,12 +2481,14 @@ function buildSettingsPage() {
   );
   settingRow(
     "Autocomplete suggestions",
-    "Prediction for new PowerShell tabs. Smart modes add GTerminal's own suggestions — commands you've run in any session, ranked with a boost for the current folder — alongside PSReadLine history. List shows a navigable dropdown.",
+    "Prediction for new PowerShell tabs. Smart modes add GTerminal's own suggestions — commands you've run in any session, ranked with a boost for the current folder — alongside PSReadLine's cross-app history. GTerminal-only modes suggest solely from what you've run here.",
     mkSelect(
       [
         ["shell", "Shell default"],
-        ["inline", "Smart inline ghost text"],
-        ["list", "Smart dropdown list"],
+        ["inline", "Smart inline (history + GTerminal)"],
+        ["list", "Smart dropdown (history + GTerminal)"],
+        ["plugin-inline", "GTerminal only — inline"],
+        ["plugin-list", "GTerminal only — dropdown"],
         ["off", "Off"],
       ],
       config.prediction ?? "shell",

@@ -342,6 +342,25 @@ $p2.Client.Close()
 $null = Request2 $port "{""cmd"":""kill"",""id"":$id10}"
 try { $null = Request2 $port "{""cmd"":""kill"",""id"":$id10}" 0 } catch {}
 
+# ── "GTerminal only" mode: PredictionSource is Plugin, not HistoryAndPlugin ──
+Set-Content "$env:LOCALAPPDATA\GTerminal\config.json" '{"grace_minutes": 5, "prediction": "plugin-list"}'
+$id11 = (Request2 $port '{"cmd":"create","cols":110,"rows":30}').id
+$p3 = New-Conn $port
+$p3.Writer.WriteLine("{""cmd"":""attach"",""id"":$id11}")
+$null = Read-Line2 $p3
+$p3.Writer.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')
+Start-Sleep -Seconds 5
+$null = Drain2 $p3
+$p3.Writer.WriteLine('{"cmd":"write","data":"echo \"src=$((Get-PSReadLineOption).PredictionSource)\"\r"}')
+Start-Sleep -Seconds 3
+$srcOut = Drain2 $p3 1000
+if ($srcOut -like "*src=Plugin*" -and $srcOut -notlike "*src=HistoryAndPlugin*") {
+  Pass "GTerminal-only mode sets PredictionSource Plugin"
+} else { Fail "plugin-only" "PredictionSource not Plugin" }
+$p3.Client.Close()
+$null = Request2 $port "{""cmd"":""kill"",""id"":$id11}"
+try { $null = Request2 $port "{""cmd"":""kill"",""id"":$id11}" 0 } catch {}
+
 # ── prediction "off": PSReadLine ghost suggestions suppressed ──
 # The inline ghost renders as dim+italic (ESC[2m ESC[3m — see the SGR probe);
 # with PredictionSource None those sequences must not appear while typing.

@@ -991,9 +991,14 @@ fn start_session(
     };
     let mut ps_init = base.to_string();
     match prediction.as_str() {
-        "inline" | "list" => {
-            let view = if prediction == "list" { "ListView" } else { "InlineView" };
-            ps_init.push_str("; try { Set-PSReadLineOption -PredictionSource HistoryAndPlugin -PredictionViewStyle ");
+        // "plugin-*" = GTerminal-only suggestions (no cross-app PSReadLine
+        // history); plain "inline"/"list" merge both sources.
+        "inline" | "list" | "plugin-inline" | "plugin-list" => {
+            let view = if prediction.ends_with("list") { "ListView" } else { "InlineView" };
+            let source = if prediction.starts_with("plugin") { "Plugin" } else { "HistoryAndPlugin" };
+            ps_init.push_str("; try { Set-PSReadLineOption -PredictionSource ");
+            ps_init.push_str(source);
+            ps_init.push_str(" -PredictionViewStyle ");
             ps_init.push_str(view);
             ps_init.push_str(" -ErrorAction Stop } catch { try { Set-PSReadLineOption -PredictionSource History -PredictionViewStyle ");
             ps_init.push_str(view);
