@@ -127,16 +127,62 @@ function saveCustomTitles() {
 // the same exe path); these fall through to the cwd-based label.
 const BORING_TITLE = /pwsh|powershell|cmd\.exe|^Administrator: |^Windows PowerShell$/i;
 
-function titleOf(id: number): string {
-  if (customTitles[id]) return customTitles[id];
-  const t = titles[id];
-  if (t && !BORING_TITLE.test(t)) return t;
+function cwdParts(id: number): string[] {
   const cwd = lastInfo.get(id)?.cwd;
-  if (cwd) {
-    const seg = cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
-    if (seg) return seg;
+  return cwd ? cwd.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean) : [];
+}
+
+function baseLabel(id: number): { text: string; fromCwd: boolean } {
+  if (customTitles[id]) return { text: customTitles[id], fromCwd: false };
+  const t = titles[id];
+  if (t && !BORING_TITLE.test(t)) return { text: t, fromCwd: false };
+  const parts = cwdParts(id);
+  if (parts.length) return { text: parts[parts.length - 1], fromCwd: true };
+  return { text: t ? "PowerShell" : `Session ${id}`, fromCwd: false };
+}
+
+// Duplicate labels get disambiguated: different directories sharing a tail
+// show their parent folder ("repos/app" vs "fork/app"); genuinely identical
+// ones get stable numbering ("app", "app (2)").
+const labelCache = new Map<number, string>();
+function recomputeLabels() {
+  labelCache.clear();
+  const ids = new Set<number>([...tabs.keys(), ...hidden, ...lastInfo.keys()]);
+  const groups = new Map<string, number[]>();
+  for (const id of ids) {
+    const b = baseLabel(id).text;
+    const g = groups.get(b);
+    if (g) g.push(id);
+    else groups.set(b, [id]);
   }
-  return t ? "PowerShell" : `Session ${id}`;
+  const order = (id: number) => {
+    const i = tabOrder.indexOf(id);
+    return i === -1 ? Number.MAX_SAFE_INTEGER / 2 + id : i;
+  };
+  for (const [base, members] of groups) {
+    if (members.length === 1) {
+      labelCache.set(members[0], base);
+      continue;
+    }
+    members.sort((a, b) => order(a) - order(b));
+    const parents = members.map((id) => {
+      const parts = cwdParts(id);
+      return baseLabel(id).fromCwd && parts.length >= 2 ? parts[parts.length - 2] : "";
+    });
+    const allDistinctParents =
+      parents.every(Boolean) && new Set(parents).size === parents.length;
+    members.forEach((id, i) => {
+      if (allDistinctParents) {
+        labelCache.set(id, `${parents[i]}/${base}`);
+      } else {
+        labelCache.set(id, i === 0 ? base : `${base} (${i + 1})`);
+      }
+    });
+  }
+}
+
+function titleOf(id: number): string {
+  return labelCache.get(id) ?? baseLabel(id).text;
 }
 
 // ── tab groups (Chrome-style: colored, collapsible) ─────────────────────
@@ -832,7 +878,8 @@ function inlineRename(el: HTMLElement, current: string, commit: (v: string | nul
 function renameTab(id: number) {
   const tab = tabs.get(id);
   if (!tab) return;
-  inlineRename(tab.label, titleOf(id), (v) => {
+  // Edit the base name, not the "(2)" disambiguation suffix.
+  inlineRename(tab.label, baseLabel(id).text, (v) => {
     if (v) {
       customTitles[id] = v;
     } else if (v === null && !customTitles[id]) {
@@ -1059,6 +1106,7 @@ async function updateLiveInfo() {
   const sessions = await invoke<SessionInfo[]>("list_sessions").catch(() => []);
   lastInfo.clear();
   for (const s of sessions) lastInfo.set(s.id, s);
+  recomputeLabels();
   for (const s of sessions) {
     const tab = tabs.get(s.id);
     if (!tab) continue;
@@ -1205,6 +1253,7 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
 function refreshChrome() {
   requestAnimationFrame(() => {
     if (renameActive) return; // rebuilt on commit instead
+    recomputeLabels();
     layoutTabbar();
     updateTabOverflow();
     renderHiddenPills();
