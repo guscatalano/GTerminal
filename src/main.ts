@@ -90,9 +90,23 @@ const BG_PRESETS: Record<string, string> = {
     "repeating-linear-gradient(0deg, rgba(90,140,255,0.12) 0 1px, transparent 1px 42px), repeating-linear-gradient(90deg, rgba(90,140,255,0.12) 0 1px, transparent 1px 42px), linear-gradient(180deg, #060913, #0b1120)",
 };
 
+/// Resolve the effective background CSS: theme's built-in art by default,
+/// or a preset / custom image / plain color per the Background setting.
+function resolvedBgCss(): string {
+  const style = config.bg_style ?? "theme";
+  if (style === "none") return "";
+  if (style === "theme") return currentTheme().bgArt;
+  if (style === "custom") {
+    const raw = config.bg_image?.trim();
+    if (!raw) return "";
+    const src = /^https?:/i.test(raw) ? raw : convertFileSrc(raw);
+    return `url("${src.replace(/"/g, "%22")}") center / cover no-repeat fixed`;
+  }
+  return BG_PRESETS[style] ?? "";
+}
+
 function bgActive(): boolean {
-  const s = config.bg_style;
-  return !!s && s !== "none" && (s !== "custom" || !!config.bg_image?.trim());
+  return !!resolvedBgCss();
 }
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -104,21 +118,19 @@ function hexToRgba(hex: string, alpha: number): string {
 }
 
 function applyBackground() {
-  if (!bgActive()) {
+  const image = resolvedBgCss();
+  if (!image) {
     panes.style.background = "";
     return;
   }
+  // Theme-built-in art is already palette-matched and subtle; presets and
+  // images get the dim overlay for readability.
+  const isThemeArt = (config.bg_style ?? "theme") === "theme";
   const dim = Math.min(0.95, Math.max(0, (config.bg_dim ?? 50) / 100));
   const overlay = hexToRgba(currentTheme().xterm.background ?? "#0f1115", dim);
-  let image = BG_PRESETS[config.bg_style!] ?? "";
-  if (config.bg_style === "custom" && config.bg_image) {
-    const raw = config.bg_image.trim();
-    const src = /^https?:/i.test(raw) ? raw : convertFileSrc(raw);
-    image = `url("${src.replace(/"/g, '%22')}") center / cover no-repeat fixed`;
-  }
-  panes.style.background = image
-    ? `linear-gradient(${overlay}, ${overlay}), ${image}`
-    : "";
+  panes.style.background = isThemeArt
+    ? image
+    : `linear-gradient(${overlay}, ${overlay}), ${image}`;
 }
 
 const SHELL_CHOICES: Array<[string, string]> = [
@@ -410,6 +422,8 @@ interface ThemeDef {
   font: string;
   lineHeight: number;
   cursorStyle: CursorStyle;
+  /// Built-in decorative background in the theme's palette.
+  bgArt: string;
   xterm: ITheme;
 }
 
@@ -417,6 +431,7 @@ function mkTheme(
   label: string,
   tint: "white" | "black",
   look: [string, number, CursorStyle],
+  bgArt: string,
   bg: string,
   fg: string,
   ansi: string[]
@@ -427,6 +442,7 @@ function mkTheme(
     font: look[0],
     lineHeight: look[1],
     cursorStyle: look[2],
+    bgArt,
     xterm: {
       background: bg,
       foreground: fg,
@@ -442,39 +458,56 @@ function mkTheme(
 }
 
 const THEMES: Record<string, ThemeDef> = {
-  "one-dark": mkTheme("One Dark", "white", ['"Cascadia Mono", Consolas, monospace', 1.1, "bar"], "#0f1115", "#d7dae0", [
+  "one-dark": mkTheme("One Dark", "white", ['"Cascadia Mono", Consolas, monospace', 1.1, "bar"], "radial-gradient(ellipse 70% 50% at 30% 10%, rgba(97,175,239,0.18), transparent 60%), radial-gradient(ellipse 60% 50% at 80% 90%, rgba(198,120,221,0.14), transparent 60%), linear-gradient(170deg, #0d1016, #12161f)", "#0f1115", "#d7dae0", [
     "#1c1f26", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd", "#56b6c2", "#d7dae0",
     "#5c6370", "#ef7d85", "#a9d387", "#f0cd8a", "#74bdf7", "#d48ce8", "#67c5d0", "#f0f2f6",
   ]),
-  dracula: mkTheme("Dracula", "white", ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "block"], "#282a36", "#f8f8f2", [
+  dracula: mkTheme("Dracula", "white", ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "block"], "radial-gradient(ellipse 65% 50% at 25% 15%, rgba(189,147,249,0.2), transparent 60%), radial-gradient(ellipse 55% 45% at 80% 85%, rgba(255,121,198,0.14), transparent 60%), linear-gradient(165deg, #1f2029, #2a2c3a)", "#282a36", "#f8f8f2", [
     "#21222c", "#ff5555", "#50fa7b", "#f1fa8c", "#bd93f9", "#ff79c6", "#8be9fd", "#f8f8f2",
     "#6272a4", "#ff6e6e", "#69ff94", "#ffffa5", "#d6acff", "#ff92df", "#a4ffff", "#ffffff",
   ]),
-  nord: mkTheme("Nord", "white", ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"], "#2e3440", "#d8dee9", [
+  nord: mkTheme("Nord", "white", ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"], "radial-gradient(ellipse 75% 55% at 20% 0%, rgba(136,192,208,0.16), transparent 60%), radial-gradient(ellipse 60% 50% at 85% 95%, rgba(129,161,193,0.15), transparent 60%), linear-gradient(175deg, #272c36, #313846)", "#2e3440", "#d8dee9", [
     "#3b4252", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#88c0d0", "#e5e9f0",
     "#4c566a", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#8fbcbb", "#eceff4",
   ]),
-  gruvbox: mkTheme("Gruvbox Dark", "white", ["Consolas, monospace", 1.1, "block"], "#282828", "#ebdbb2", [
+  gruvbox: mkTheme("Gruvbox Dark", "white", ["Consolas, monospace", 1.1, "block"], "radial-gradient(ellipse 70% 50% at 25% 10%, rgba(215,153,33,0.16), transparent 60%), radial-gradient(ellipse 55% 45% at 80% 90%, rgba(204,36,29,0.1), transparent 60%), linear-gradient(170deg, #211f1d, #2b2724)", "#282828", "#ebdbb2", [
     "#282828", "#cc241d", "#98971a", "#d79921", "#458588", "#b16286", "#689d6a", "#a89984",
     "#928374", "#fb4934", "#b8bb26", "#fabd2f", "#83a598", "#d3869b", "#8ec07c", "#ebdbb2",
   ]),
-  "tokyo-night": mkTheme("Tokyo Night", "white", ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "bar"], "#1a1b26", "#c0caf5", [
+  "tokyo-night": mkTheme("Tokyo Night", "white", ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "bar"], "radial-gradient(ellipse 70% 50% at 30% 5%, rgba(122,162,247,0.2), transparent 60%), radial-gradient(ellipse 60% 45% at 80% 90%, rgba(187,154,247,0.16), transparent 55%), linear-gradient(170deg, #131420, #1b1c2e)", "#1a1b26", "#c0caf5", [
     "#15161e", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#a9b1d6",
     "#414868", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#c0caf5",
   ]),
-  catppuccin: mkTheme("Catppuccin Mocha", "white", ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"], "#1e1e2e", "#cdd6f4", [
+  catppuccin: mkTheme("Catppuccin Mocha", "white", ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"], "radial-gradient(ellipse 70% 50% at 25% 10%, rgba(203,166,247,0.16), transparent 60%), radial-gradient(ellipse 60% 45% at 80% 90%, rgba(137,180,250,0.14), transparent 55%), linear-gradient(170deg, #191926, #232336)", "#1e1e2e", "#cdd6f4", [
     "#45475a", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#bac2de",
     "#585b70", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#a6adc8",
   ]),
-  "solarized-dark": mkTheme("Solarized Dark", "white", ["Consolas, monospace", 1.1, "underline"], "#002b36", "#839496", [
+  "solarized-dark": mkTheme("Solarized Dark", "white", ["Consolas, monospace", 1.1, "underline"], "radial-gradient(ellipse 75% 55% at 25% 5%, rgba(42,161,152,0.18), transparent 60%), radial-gradient(ellipse 60% 45% at 85% 95%, rgba(38,139,210,0.12), transparent 55%), linear-gradient(175deg, #00212b, #003644)", "#002b36", "#839496", [
     "#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198", "#eee8d5",
     "#002b36", "#cb4b16", "#586e75", "#657b83", "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
   ]),
-  "solarized-light": mkTheme("Solarized Light", "black", ["Consolas, monospace", 1.1, "underline"], "#fdf6e3", "#657b83", [
+  "solarized-light": mkTheme("Solarized Light", "black", ["Consolas, monospace", 1.1, "underline"], "radial-gradient(ellipse 75% 55% at 25% 5%, rgba(181,137,0,0.12), transparent 60%), radial-gradient(ellipse 60% 45% at 85% 95%, rgba(38,139,210,0.08), transparent 55%), linear-gradient(175deg, #fdf6e3, #f1e9d2)", "#fdf6e3", "#657b83", [
     "#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198", "#eee8d5",
     "#002b36", "#cb4b16", "#586e75", "#657b83", "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
   ]),
 };
+
+// Hermes (nous research style): International Klein Blue field, noise
+// grain, edge vignette, chartreuse accent.
+THEMES.hermes = mkTheme(
+  "Hermes",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.15, "block"],
+  `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E") repeat, radial-gradient(90% 70% at 50% 35%, rgba(237,255,69,0.07), transparent 55%), radial-gradient(140% 110% at 50% 50%, transparent 45%, rgba(0,0,110,0.6) 100%), linear-gradient(0deg, #0000f2, #0000f2)`,
+  "#0000f2",
+  "#f5f5f5",
+  [
+    "#0000a8", "#ff7a85", "#9dffb0", "#edff45", "#9db8ff", "#e0a8ff", "#8df4ff", "#f5f5f5",
+    "#6f6fff", "#ffa9b2", "#c4ffd0", "#f6ff8f", "#c0d2ff", "#eec6ff", "#c2f9ff", "#ffffff",
+  ]
+);
+THEMES.hermes.xterm.cursor = "#edff45";
+THEMES.hermes.xterm.selectionBackground = "#edff4540";
 
 let themeKey = "one-dark";
 function currentTheme(): ThemeDef {
@@ -1883,18 +1916,19 @@ function buildSettingsPage() {
   );
   settingRow(
     "Background",
-    "Decorative background behind the terminal. New tabs render transparently over it; already-open tabs keep a solid background until reopened.",
+    "Each theme ships its own background art (the default). New tabs render transparently over it; already-open tabs keep a solid background until reopened.",
     mkSelect(
       [
-        ["none", "None (theme color)"],
+        ["theme", "Theme default"],
+        ["none", "Plain color"],
         ["aurora", "Aurora"],
         ["nebula", "Nebula"],
         ["grid", "Synth grid"],
         ["custom", "Custom image"],
       ],
-      config.bg_style ?? "none",
+      config.bg_style ?? "theme",
       (v) => {
-        config.bg_style = v === "none" ? undefined : v;
+        config.bg_style = v === "theme" ? undefined : v;
         changed();
       }
     )
