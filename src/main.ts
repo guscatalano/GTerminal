@@ -2671,6 +2671,12 @@ async function main() {
     if (settingsOpen()) closeSettings();
     else openSettings();
   });
+  // Custom window controls (native title bar is off). Close detaches —
+  // the daemon keeps every session running, same as before.
+  const win = getCurrentWindow();
+  document.getElementById("win-min")!.addEventListener("click", () => void win.minimize());
+  document.getElementById("win-max")!.addEventListener("click", () => void win.toggleMaximize());
+  document.getElementById("win-close")!.addEventListener("click", () => void win.close());
   const historyBtn = document.getElementById("historybtn")!;
   historyBtn.addEventListener("click", (e) => {
     e.stopPropagation();

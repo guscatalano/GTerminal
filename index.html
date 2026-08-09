@@ -8,21 +8,24 @@
   <body>
     <div id="app">
       <div id="sidebar">
-        <div id="sidebar-title">Sessions</div>
+        <div id="sidebar-title" data-tauri-drag-region>Sessions</div>
         <div id="sidebar-list"></div>
         <div id="sidebar-legend">● open&ensp;◌ hidden&ensp;○ detached&ensp;⌛ closing</div>
         <button id="sidebar-new">+ new session</button>
       </div>
       <div id="main">
-        <div id="tabbar-row">
+        <div id="tabbar-row" data-tauri-drag-region>
           <button id="sidebtn" title="Toggle session sidebar (Ctrl+Shift+B)">☰</button>
-          <div id="tabbar"></div>
+          <div id="tabbar" data-tauri-drag-region></div>
           <button id="overflow" class="chip" hidden></button>
           <div id="hiddenbar"></div>
           <button id="newtab" title="New tab (Ctrl+Shift+T) — right-click for shell choice">+</button>
           <button id="restore" title="Restore a detached session (Ctrl+Shift+Z)">⟳</button>
           <button id="historybtn" title="Session history — transcripts of past sessions">◷</button>
           <button id="settingsbtn" title="Settings">⚙</button>
+          <button id="win-min" class="win-ctl" title="Minimize">–</button>
+          <button id="win-max" class="win-ctl" title="Maximize / restore">▢</button>
+          <button id="win-close" class="win-ctl" title="Close window — sessions keep running">×</button>
           <div id="restore-menu" class="menu"></div>
           <div id="overflow-menu" class="menu"></div>
           <div id="hidden-menu" class="menu"></div>

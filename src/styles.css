@@ -187,11 +187,42 @@ body,
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 8px 0 8px;
+  padding: 6px 0 0 8px; /* window controls sit flush against the right edge */
   background: var(--bar);
   user-select: none;
   flex: none;
   position: relative;
+}
+
+/* Custom window controls (frameless window). */
+.win-ctl {
+  flex: none;
+  width: 40px;
+  align-self: stretch;
+  margin: -6px 0 0 0; /* reach the very top edge like a real title bar */
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: var(--muted);
+  font: 14px "Segoe UI", sans-serif;
+  cursor: default;
+  padding: 0;
+}
+
+.win-ctl:hover {
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+  color: var(--text);
+}
+
+/* Pin controls to the right even when the sidebar hides the tab strip
+   (nothing else stretches then). */
+#win-min {
+  margin-left: auto;
+}
+
+#win-close:hover {
+  background: #e81123;
+  color: #fff;
 }
 
 #tabbar {
