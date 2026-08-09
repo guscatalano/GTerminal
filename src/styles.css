@@ -889,6 +889,80 @@ input.set-control {
   font-family: var(--ui-font, "Segoe UI", sans-serif);
 }
 
+/* sidebar drag-reorder markers */
+.side-row.dragging {
+  opacity: 0.5;
+}
+
+.side-row.drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.side-row.drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* ── badge picker popup ──────────────────────────────────────────────── */
+
+.badge-panel {
+  width: min(420px, 80vw);
+  background: var(--panel);
+  border: 1px solid var(--border2);
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.badge-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 10px;
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--border2);
+  border-radius: 5px;
+  font: 13px var(--ui-font, "Segoe UI", sans-serif);
+  padding: 6px 10px;
+}
+
+.badge-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.badge-opt {
+  width: 42px;
+  height: 38px;
+  font-size: 18px;
+  background: var(--panel2);
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.badge-opt:hover {
+  border-color: var(--accent);
+}
+
+.badge-custom {
+  flex-basis: 100%;
+  text-align: left;
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  font: 12px var(--ui-font, "Segoe UI", sans-serif);
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.badge-custom:hover {
+  border-color: var(--accent);
+}
+
 /* ── clipboard history viewer ────────────────────────────────────────── */
 
 .clip-overlay {

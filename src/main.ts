@@ -333,25 +333,109 @@ function mkShellBadge(shell: string | undefined, id?: number): HTMLElement {
   return b;
 }
 
-/// Edit a session's badge in place, on whichever badge element is
-/// currently visible (sidebar row or tab button).
-function editBadge(id: number) {
-  let el: HTMLElement | null = null;
-  if (app.classList.contains("sidebar-on")) {
-    el = sidebarList.querySelector<HTMLElement>(`.side-row[data-id="${id}"] .shell-badge`);
-  }
-  el ??= tabs.get(id)?.shellB ?? null;
-  if (!el) return;
-  inlineRename(el, customBadges[id] ?? "", (v) => {
-    if (v) {
-      customBadges[id] = v.slice(0, 4);
-      saveCustomBadges();
-    }
+/// Badge picker popup: searchable emoji choices plus free text.
+const BADGE_CHOICES: Array<[string, string]> = [
+  ["🚀", "rocket deploy ship release"],
+  ["🔥", "fire hot urgent"],
+  ["🐛", "bug debug fix"],
+  ["🧪", "test lab experiment"],
+  ["📦", "package box npm build bundle"],
+  ["🗄️", "database db storage sql"],
+  ["🌐", "web globe network http site"],
+  ["📝", "docs notes writing readme"],
+  ["🔑", "key auth secret token login"],
+  ["🔒", "lock secure private"],
+  ["☁️", "cloud aws azure gcp"],
+  ["🤖", "ai bot robot claude agent"],
+  ["⚙️", "gear config settings setup"],
+  ["🧰", "tools toolbox utils"],
+  ["🎮", "game gaming play"],
+  ["🎵", "music audio sound"],
+  ["💰", "money billing finance pay"],
+  ["📊", "chart data analytics metrics"],
+  ["⚠️", "warning alert caution danger"],
+  ["⭐", "star favorite important"],
+  ["🏠", "home personal"],
+  ["💼", "work office job"],
+  ["🔬", "research science"],
+  ["🎨", "design art ui frontend"],
+  ["🐳", "docker whale container"],
+  ["🐙", "github git octopus repo"],
+  ["⚡", "fast perf lightning power"],
+  ["🧠", "brain ml model think"],
+  ["📡", "server antenna remote ssh"],
+  ["🖥️", "desktop machine computer"],
+  ["🔧", "wrench fix repair maintain"],
+  ["🚧", "wip construction progress"],
+  ["❤️", "heart love"],
+  ["⏰", "clock timer cron schedule"],
+  ["📁", "folder files"],
+  ["🍕", "pizza food lunch"],
+];
+
+function openBadgePicker(id: number) {
+  document.getElementById("badge-overlay")?.remove();
+  const ov = document.createElement("div");
+  ov.className = "clip-overlay";
+  ov.id = "badge-overlay";
+  const panel = document.createElement("div");
+  panel.className = "badge-panel";
+  const input = document.createElement("input");
+  input.className = "badge-search";
+  input.placeholder = "Search… or type your own badge text";
+  const grid = document.createElement("div");
+  grid.className = "badge-grid";
+  const apply = (v: string | null) => {
+    if (v) customBadges[id] = v.slice(0, 4);
+    else delete customBadges[id];
+    saveCustomBadges();
     const tab = tabs.get(id);
     if (tab) setShellBadge(tab.shellB, lastInfo.get(id)?.shell, id);
     sidebarSig = "";
     refreshChrome();
+    ov.remove();
+  };
+  const render = () => {
+    grid.innerHTML = "";
+    const q = input.value.trim().toLowerCase();
+    for (const [emoji, keys] of BADGE_CHOICES) {
+      if (q && !keys.includes(q)) continue;
+      const b = document.createElement("button");
+      b.className = "badge-opt";
+      b.textContent = emoji;
+      b.title = keys;
+      b.addEventListener("click", () => apply(emoji));
+      grid.appendChild(b);
+    }
+    if (q) {
+      const custom = document.createElement("button");
+      custom.className = "badge-custom";
+      custom.textContent = `Use text "${input.value.trim().slice(0, 4)}"`;
+      custom.addEventListener("click", () => apply(input.value.trim()));
+      grid.appendChild(custom);
+    }
+    const reset = document.createElement("button");
+    reset.className = "badge-custom";
+    reset.textContent = "Reset to shell badge";
+    reset.addEventListener("click", () => apply(null));
+    grid.appendChild(reset);
+  };
+  input.addEventListener("input", render);
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Escape") ov.remove();
+    if (e.key === "Enter") {
+      grid.querySelector<HTMLElement>(".badge-opt, .badge-custom")?.click();
+    }
   });
+  render();
+  panel.append(input, grid);
+  ov.appendChild(panel);
+  ov.addEventListener("mousedown", (e) => {
+    if (e.target === ov) ov.remove();
+  });
+  document.body.appendChild(ov);
+  input.focus();
 }
 
 function clearBadge(id: number) {
@@ -470,8 +554,10 @@ function saveOrder() {
 let dragId: number | null = null;
 
 function clearDropMarkers() {
-  for (const el of tabbar.querySelectorAll(".drop-before, .drop-after, .drop-into")) {
-    el.classList.remove("drop-before", "drop-after", "drop-into");
+  for (const root of [tabbar, sidebarList]) {
+    for (const el of root.querySelectorAll(".drop-before, .drop-after, .drop-into")) {
+      el.classList.remove("drop-before", "drop-after", "drop-into");
+    }
   }
 }
 
@@ -1645,7 +1731,7 @@ function showTabContextMenu(x: number, y: number, id: number) {
   const current = groupState.assign[id];
   const items: CtxItem[] = [{ label: "Rename tab", action: () => renameTabAnywhere(id) }];
   items.push({ label: "Suggest title…", action: () => suggestTitles(id) });
-  items.push({ label: "Set badge…", action: () => editBadge(id) });
+  items.push({ label: "Set badge…", action: () => openBadgePicker(id) });
   if (customBadges[id]) {
     items.push({ label: "Reset badge to shell", action: () => clearBadge(id) });
   }
@@ -2248,6 +2334,18 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
       l.addEventListener("dblclick", (e) => {
         e.stopPropagation();
         renameSession(id, l);
+      });
+      // Open tabs reorder by drag, mirroring the tab strip.
+      row.draggable = true;
+      row.addEventListener("dragstart", (e) => {
+        dragId = id;
+        e.dataTransfer!.effectAllowed = "move";
+        row.classList.add("dragging");
+      });
+      row.addEventListener("dragend", () => {
+        dragId = null;
+        row.classList.remove("dragging");
+        clearDropMarkers();
       });
     }
     row.addEventListener("contextmenu", (e) => {
@@ -2930,6 +3028,12 @@ async function main() {
   document.getElementById("settings-close")!.addEventListener("click", closeSettings);
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
+      const badgeOv = document.getElementById("badge-overlay");
+      if (badgeOv) {
+        e.preventDefault();
+        badgeOv.remove();
+        return;
+      }
       if (document.getElementById("clip-overlay")) {
         e.preventDefault();
         closeClipViewer();
@@ -2963,6 +3067,33 @@ async function main() {
       e.preventDefault();
       toggleSidebar();
     }
+  });
+  // Sidebar drag-reorder: dropping on a row moves the dragged tab next to
+  // it and adopts that row's group (or leaves a group when the target is
+  // ungrouped) — the same semantics as the tab strip.
+  sidebarList.addEventListener("dragover", (e) => {
+    if (dragId === null) return;
+    e.preventDefault();
+    e.dataTransfer!.dropEffect = "move";
+    clearDropMarkers();
+    const target = (e.target as HTMLElement).closest(".side-row") as HTMLElement | null;
+    const tid = target ? Number(target.dataset.id) : NaN;
+    if (!target || tid === dragId || !tabs.has(tid)) return;
+    const rect = target.getBoundingClientRect();
+    target.classList.add(e.clientY < rect.top + rect.height / 2 ? "drop-before" : "drop-after");
+  });
+  sidebarList.addEventListener("drop", (e) => {
+    if (dragId === null) return;
+    e.preventDefault();
+    clearDropMarkers();
+    const dragged = dragId;
+    dragId = null;
+    const target = (e.target as HTMLElement).closest(".side-row") as HTMLElement | null;
+    const tid = target ? Number(target.dataset.id) : NaN;
+    if (!target || tid === dragged || !tabs.has(tid)) return;
+    const rect = target.getBoundingClientRect();
+    const before = e.clientY < rect.top + rect.height / 2;
+    moveTab(dragged, tid, before, groupState.assign[tid]);
   });
   new ResizeObserver(() => refreshChrome()).observe(tabbar);
   window.setInterval(updateLiveInfo, 5000);
