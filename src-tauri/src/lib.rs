@@ -154,6 +154,11 @@ fn kill_session(id: u32) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn get_config() -> serde_json::Value {
+    mux::read_config()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if std::env::args().any(|a| a == "--daemon") {
@@ -170,7 +175,8 @@ pub fn run() {
             write_session,
             resize_session,
             detach_session,
-            kill_session
+            kill_session,
+            get_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

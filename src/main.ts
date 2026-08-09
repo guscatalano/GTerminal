@@ -49,6 +49,16 @@ function iconFor(running: string[]): string {
   return progs.length ? "⚙️" : "";
 }
 
+// User config (%LOCALAPPDATA%\GTerminal\config.json), loaded at startup.
+// cursor_style: "bar" | "block" | "underline" (default bar, like Windows
+// Terminal); cursor_blink: boolean (default true).
+interface AppConfig {
+  cursor_style?: "bar" | "block" | "underline";
+  cursor_blink?: boolean;
+  grace_minutes?: number;
+}
+let config: AppConfig = {};
+
 function minutesLeft(expiresMs: number): number {
   return Math.max(1, Math.ceil((expiresMs - Date.now()) / 60_000));
 }
@@ -348,7 +358,8 @@ async function createTab(attachId?: number) {
     fontFamily: '"Cascadia Mono", Consolas, monospace',
     fontSize: 14,
     lineHeight: 1.1,
-    cursorBlink: true,
+    cursorStyle: config.cursor_style ?? "bar",
+    cursorBlink: config.cursor_blink ?? true,
     scrollback: 10000,
     theme: THEME,
     allowProposedApi: true,
@@ -1059,6 +1070,7 @@ async function renderRestoreMenu() {
 }
 
 async function main() {
+  config = await invoke<AppConfig>("get_config").catch(() => ({}));
   await listen<{ id: number; data: string }>("pty-output", (event) => {
     const tab = tabs.get(event.payload.id);
     if (tab) {

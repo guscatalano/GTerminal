@@ -72,11 +72,18 @@ pub struct SessionInfo {
 /// running (hidden) and exited sessions keep their checkpoint, for this
 /// long, so a restore can undo the mistake. Configurable via
 /// config.json {"grace_minutes": N}; 0 disables the grace entirely.
-fn grace_ms() -> Option<u64> {
-    let minutes = std::fs::read_to_string(state_dir().join("config.json"))
+/// User config from %LOCALAPPDATA%\GTerminal\config.json ({} if absent).
+pub fn read_config() -> serde_json::Value {
+    std::fs::read_to_string(state_dir().join("config.json"))
         .ok()
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .and_then(|v| v.get("grace_minutes").and_then(|g| g.as_u64()))
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
+fn grace_ms() -> Option<u64> {
+    let minutes = read_config()
+        .get("grace_minutes")
+        .and_then(|g| g.as_u64())
         .unwrap_or(5);
     if minutes == 0 {
         None

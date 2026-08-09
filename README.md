@@ -29,6 +29,18 @@ Tabs shrink browser-style as they multiply; overflow collapses into a `+N` menu.
 
 **"Oops" grace window**: killing a session doesn't actually kill it — the tab closes but the process keeps running for 5 minutes (a ⌛ "closes in Xm" entry in the sidebar/menus restores it, cancelling the kill entirely). An accidental `exit` is likewise restorable from its checkpoint for the same window. Kill something twice to skip the grace. Configure with `%LOCALAPPDATA%\GTerminal\config.json`: `{"grace_minutes": 10}` (0 disables).
 
+**Config** (`%LOCALAPPDATA%\GTerminal\config.json`, all keys optional):
+
+```json
+{
+  "grace_minutes": 5,
+  "cursor_style": "bar",
+  "cursor_blink": true
+}
+```
+
+`cursor_style` is `bar` (default, Windows Terminal-like), `block`, or `underline`; `cursor_blink` defaults to true. Cursor settings apply to new windows/tabs.
+
 ## Development
 
 Requires Rust (1.85+) and Node.
