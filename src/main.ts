@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Terminal } from "@xterm/xterm";
@@ -75,6 +75,50 @@ interface AppConfig {
   default_shell?: string;
   title_mode?: string;
   title_template?: string;
+  bg_style?: string;
+  bg_image?: string;
+  bg_dim?: number;
+}
+
+// Built-in decorative backgrounds — pure CSS, no assets.
+const BG_PRESETS: Record<string, string> = {
+  aurora:
+    "radial-gradient(ellipse 80% 60% at 20% 0%, rgba(64,120,255,0.35), transparent 60%), radial-gradient(ellipse 70% 50% at 80% 20%, rgba(120,64,255,0.3), transparent 60%), radial-gradient(ellipse 90% 60% at 50% 100%, rgba(0,180,160,0.25), transparent 60%), linear-gradient(160deg, #070b18, #10142a)",
+  nebula:
+    "radial-gradient(circle at 25% 30%, rgba(190,80,255,0.28), transparent 45%), radial-gradient(circle at 75% 65%, rgba(255,80,140,0.2), transparent 50%), radial-gradient(circle at 60% 20%, rgba(80,140,255,0.22), transparent 40%), linear-gradient(180deg, #0a0714, #140b22)",
+  grid:
+    "repeating-linear-gradient(0deg, rgba(90,140,255,0.12) 0 1px, transparent 1px 42px), repeating-linear-gradient(90deg, rgba(90,140,255,0.12) 0 1px, transparent 1px 42px), linear-gradient(180deg, #060913, #0b1120)",
+};
+
+function bgActive(): boolean {
+  const s = config.bg_style;
+  return !!s && s !== "none" && (s !== "custom" || !!config.bg_image?.trim());
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const m = hex.replace("#", "");
+  const r = parseInt(m.slice(0, 2), 16);
+  const g = parseInt(m.slice(2, 4), 16);
+  const b = parseInt(m.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function applyBackground() {
+  if (!bgActive()) {
+    panes.style.background = "";
+    return;
+  }
+  const dim = Math.min(0.95, Math.max(0, (config.bg_dim ?? 50) / 100));
+  const overlay = hexToRgba(currentTheme().xterm.background ?? "#0f1115", dim);
+  let image = BG_PRESETS[config.bg_style!] ?? "";
+  if (config.bg_style === "custom" && config.bg_image) {
+    const raw = config.bg_image.trim();
+    const src = /^https?:/i.test(raw) ? raw : convertFileSrc(raw);
+    image = `url("${src.replace(/"/g, '%22')}") center / cover no-repeat fixed`;
+  }
+  panes.style.background = image
+    ? `linear-gradient(${overlay}, ${overlay}), ${image}`
+    : "";
 }
 
 const SHELL_CHOICES: Array<[string, string]> = [
@@ -462,9 +506,17 @@ function saveConfig() {
   }, 300);
 }
 
+/// Terminal color theme, with a transparent background when a decorative
+/// background is active so it shows through the cells.
+function effXtermTheme(): ITheme {
+  const t = currentTheme().xterm;
+  return bgActive() ? { ...t, background: "rgba(0, 0, 0, 0)" } : t;
+}
+
 /// Push current appearance settings into every open terminal.
 function applyAppearance() {
-  const t = currentTheme();
+  applyBackground();
+  const t = { xterm: effXtermTheme() };
   for (const tab of tabs.values()) {
     tab.term.options.theme = t.xterm;
     tab.term.options.fontFamily = effFont();
@@ -641,16 +693,21 @@ async function createTab(attachId?: number, shell?: string) {
     cursorStyle: effCursorStyle(),
     cursorBlink: effCursorBlink(),
     scrollback: 10000,
-    theme: currentTheme().xterm,
+    theme: effXtermTheme(),
+    allowTransparency: true,
     allowProposedApi: true,
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.open(pane);
-  try {
-    term.loadAddon(new WebglAddon());
-  } catch {
-    // WebGL unavailable; xterm falls back to the DOM renderer.
+  // The WebGL renderer can't composite transparency over a decorative
+  // background; those tabs use the DOM renderer instead.
+  if (!bgActive()) {
+    try {
+      term.loadAddon(new WebglAddon());
+    } catch {
+      // WebGL unavailable; xterm falls back to the DOM renderer.
+    }
   }
   fit.fit();
 
@@ -1824,6 +1881,42 @@ function buildSettingsPage() {
       changed();
     })
   );
+  settingRow(
+    "Background",
+    "Decorative background behind the terminal. New tabs render transparently over it; already-open tabs keep a solid background until reopened.",
+    mkSelect(
+      [
+        ["none", "None (theme color)"],
+        ["aurora", "Aurora"],
+        ["nebula", "Nebula"],
+        ["grid", "Synth grid"],
+        ["custom", "Custom image"],
+      ],
+      config.bg_style ?? "none",
+      (v) => {
+        config.bg_style = v === "none" ? undefined : v;
+        changed();
+      }
+    )
+  );
+  const bgInput = document.createElement("input");
+  bgInput.className = "set-control set-wide";
+  bgInput.type = "text";
+  bgInput.placeholder = "C:\\path\\to\\image.jpg or https://…";
+  bgInput.value = config.bg_image ?? "";
+  bgInput.addEventListener("change", () => {
+    config.bg_image = bgInput.value.trim() || undefined;
+    changed();
+  });
+  settingRow("Background image", "Used when Background is Custom image. Local file path or URL.", bgInput);
+  settingRow(
+    "Background dim (%)",
+    "How strongly the theme color covers the background — higher keeps text more readable.",
+    mkNumber(config.bg_dim ?? 50, 0, 95, (v) => {
+      config.bg_dim = v;
+      changed();
+    })
+  );
 
   settingsSection("Tab titles");
   settingRow(
@@ -1954,6 +2047,7 @@ function buildSettingsPage() {
 async function main() {
   config = await invoke<AppConfig>("get_config").catch(() => ({}));
   applyTheme(config.theme ?? localStorage.getItem("gterm-theme") ?? "one-dark");
+  applyBackground();
   await listen<{ id: number; data: string }>("pty-output", (event) => {
     const tab = tabs.get(event.payload.id);
     if (tab) {
