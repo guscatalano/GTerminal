@@ -2481,7 +2481,7 @@ function buildSettingsPage() {
   );
   settingRow(
     "Autocomplete suggestions",
-    "PSReadLine prediction for new PowerShell tabs. Smart modes pull from your command history (and predictor plugins); List shows a navigable dropdown.",
+    "Prediction for new PowerShell tabs. Smart modes add GTerminal's own suggestions — commands you've run in any session, ranked with a boost for the current folder — alongside PSReadLine history. List shows a navigable dropdown.",
     mkSelect(
       [
         ["shell", "Shell default"],

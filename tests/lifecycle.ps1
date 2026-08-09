@@ -317,6 +317,31 @@ if ((Test-Path "$hist\$oldTs-99.log") -or (Test-Path "$hist\$oldTs-99.json")) {
 $null = Request2 $port "{""cmd"":""kill"",""id"":$keep}"
 try { $null = Request2 $port "{""cmd"":""kill"",""id"":$keep}" 0 } catch {}
 
+# ── transcript-fed predictor: command logging + plugin registration ──
+Set-Content "$env:LOCALAPPDATA\GTerminal\config.json" '{"grace_minutes": 5, "prediction": "list"}'
+$id10 = (Request2 $port '{"cmd":"create","cols":110,"rows":30}').id
+$p2 = New-Conn $port
+$p2.Writer.WriteLine("{""cmd"":""attach"",""id"":$id10}")
+$null = Read-Line2 $p2
+$p2.Writer.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')
+Start-Sleep -Seconds 5
+$null = Drain2 $p2
+$p2.Writer.WriteLine('{"cmd":"write","data":"echo gterm-cmdlog-777\r"}')
+Start-Sleep -Seconds 3   # the prompt AFTER the command logs it
+$null = Drain2 $p2
+$clog = "$env:LOCALAPPDATA\GTerminal\commands.log"
+$clogText = if (Test-Path $clog) { Get-Content $clog -Raw } else { "" }
+if ($clogText -like "*`techo gterm-cmdlog-777*") {
+  Pass "prompt hook logs commands with their directory"
+} else { Fail "cmdlog" "commands.log missing cwd-tab-command entry" }
+$p2.Writer.WriteLine('{"cmd":"write","data":"[System.Management.Automation.Subsystem.SubsystemManager]::GetSubsystemInfo([System.Management.Automation.Subsystem.SubsystemKind]::CommandPredictor).Implementations.Name -join *q*,*q*\r"}'.Replace("*q*", "'"))
+Start-Sleep -Seconds 3
+$pred = Drain2 $p2 1000
+if ($pred -like "*gterm*") { Pass "gterm predictor plugin registered" } else { Fail "predictor" "gterm not among CommandPredictor implementations" }
+$p2.Client.Close()
+$null = Request2 $port "{""cmd"":""kill"",""id"":$id10}"
+try { $null = Request2 $port "{""cmd"":""kill"",""id"":$id10}" 0 } catch {}
+
 # ── prediction "off": PSReadLine ghost suggestions suppressed ──
 # The inline ghost renders as dim+italic (ESC[2m ESC[3m — see the SGR probe);
 # with PredictionSource None those sequences must not appear while typing.
