@@ -875,6 +875,18 @@ function inlineRename(el: HTMLElement, current: string, commit: (v: string | nul
   input.addEventListener("blur", () => finish(input.value.trim() || null));
 }
 
+/// Rename any session (open or not) by editing a label element in place.
+function renameSession(id: number, el: HTMLElement) {
+  inlineRename(el, baseLabel(id).text, (v) => {
+    if (v) customTitles[id] = v;
+    saveCustomTitles();
+    sidebarSig = "";
+    const tab = tabs.get(id);
+    if (tab) tab.label.textContent = titleOf(id);
+    refreshChrome();
+  });
+}
+
 function renameTab(id: number) {
   const tab = tabs.get(id);
   if (!tab) return;
@@ -1127,6 +1139,7 @@ let sidebarVersion = 0;
 let sidebarSig = "";
 async function renderSidebar(prefetched?: SessionInfo[]) {
   if (!app.classList.contains("sidebar-on")) return;
+  if (renameActive) return; // don't destroy an in-progress rename input
   const version = ++sidebarVersion;
   const sessions =
     prefetched ?? (await invoke<SessionInfo[]>("list_sessions").catch(() => []));
@@ -1146,6 +1159,7 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
   const addRow = (
     dot: string,
     dotClass: string,
+    id: number,
     label: string,
     isActive: boolean,
     onClick: () => void,
@@ -1159,6 +1173,27 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
     const l = document.createElement("span");
     l.className = "side-label";
     l.textContent = label;
+    if (tabs.has(id)) {
+      // Double-click renames; safe here because row clicks just activate.
+      l.addEventListener("dblclick", (e) => {
+        e.stopPropagation();
+        renameSession(id, l);
+      });
+    }
+    row.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (tabs.has(id)) {
+        showTabContextMenu(e.clientX, e.clientY, id);
+      } else {
+        showContextMenu(e.clientX, e.clientY, [
+          { label: "Rename", action: () => renameSession(id, l) },
+          { label: "Restore", action: onClick },
+          "sep",
+          { label: "Kill session", action: () => killSession(id), confirm: true },
+        ]);
+      }
+    });
     const acts = document.createElement("span");
     acts.className = "side-actions";
     for (const [text, tip, fn, confirm] of actions) {
@@ -1195,18 +1230,19 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
   };
 
   const openRow = (id: number) =>
-    addRow("●", "open", titleOf(id), id === activeId, () => setActive(id), [
+    addRow("●", "open", id, titleOf(id), id === activeId, () => setActive(id), [
       ["–", "Hide (Ctrl+Shift+H)", () => hideTab(id)],
       ["×", "Close — click twice", () => closeTab(id), true],
     ]);
   const hiddenRow = (id: number) =>
-    addRow("◌", "hidden", titleOf(id), false, () => restoreHidden(id), [
+    addRow("◌", "hidden", id, titleOf(id), false, () => restoreHidden(id), [
       ["×", "Kill session — click twice", () => killSession(id), true],
     ]);
   const coldRow = (s: SessionInfo) =>
     addRow(
       s.expires_ms ? "⌛" : "○",
       s.expires_ms ? "doomed" : "cold",
+      s.id,
       `${titleOf(s.id)}${expirySuffix(s)}`,
       false,
       () => createTab(s.id),
@@ -1241,6 +1277,7 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
       addRow(
         "⌛",
         "doomed",
+        s.id,
         `${titleOf(s.id)} · ${remainingLabel(s.expires_ms!)}`,
         false,
         () => createTab(s.id),
