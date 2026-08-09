@@ -99,7 +99,7 @@ const restoreMenu = document.getElementById("restore-menu")!;
 const overflowBtn = document.getElementById("overflow") as HTMLButtonElement;
 const overflowMenu = document.getElementById("overflow-menu")!;
 const hiddenMenu = document.getElementById("hidden-menu")!;
-const settingsMenu = document.getElementById("settings-menu")!;
+const settingsList = document.getElementById("settings-list")!;
 const sidebarList = document.getElementById("sidebar-list")!;
 
 // Sessions the user parked with "hide" — detached in the daemon but shown
@@ -421,6 +421,7 @@ function orderedIds(): number[] {
 function setActive(id: number) {
   const tab = tabs.get(id);
   if (!tab) return;
+  closeSettings();
   activeId = id;
   for (const [tid, t] of tabs) {
     t.pane.classList.toggle("active", tid === id);
@@ -774,8 +775,27 @@ ctxMenu.className = "menu ctx";
 document.body.appendChild(ctxMenu);
 
 function closeMenus(except?: HTMLElement) {
-  for (const m of [restoreMenu, overflowMenu, hiddenMenu, settingsMenu, ctxMenu]) {
+  for (const m of [restoreMenu, overflowMenu, hiddenMenu, ctxMenu]) {
     if (m !== except) m.classList.remove("open");
+  }
+}
+
+function settingsOpen(): boolean {
+  return app.classList.contains("settings-on");
+}
+
+function openSettings() {
+  buildSettingsPage();
+  app.classList.add("settings-on");
+}
+
+function closeSettings() {
+  if (!settingsOpen()) return;
+  app.classList.remove("settings-on");
+  const tab = activeId !== null ? tabs.get(activeId) : undefined;
+  if (tab) {
+    fitTab(tab);
+    tab.term.focus();
   }
 }
 
@@ -1454,16 +1474,6 @@ async function renderRestoreMenu() {
   }
 }
 
-function setRow(label: string, control: HTMLElement): HTMLElement {
-  const row = document.createElement("div");
-  row.className = "set-row";
-  const l = document.createElement("span");
-  l.className = "set-label";
-  l.textContent = label;
-  row.append(l, control);
-  return row;
-}
-
 function mkSelect(
   options: Array<[string, string]>,
   value: string,
@@ -1502,105 +1512,126 @@ function mkNumber(
   return input;
 }
 
-function buildSettingsMenu() {
-  settingsMenu.innerHTML = "";
+function settingsSection(title: string): HTMLElement {
+  const h = document.createElement("div");
+  h.className = "settings-section-title";
+  h.textContent = title;
+  settingsList.appendChild(h);
+  return h;
+}
+
+function settingRow(title: string, desc: string, control: HTMLElement) {
+  const row = document.createElement("div");
+  row.className = "setting";
+  const meta = document.createElement("div");
+  meta.className = "setting-meta";
+  const t = document.createElement("div");
+  t.className = "setting-title";
+  t.textContent = title;
+  meta.appendChild(t);
+  if (desc) {
+    const d = document.createElement("div");
+    d.className = "setting-desc";
+    d.textContent = desc;
+    meta.appendChild(d);
+  }
+  row.append(meta, control);
+  settingsList.appendChild(row);
+}
+
+function buildSettingsPage() {
+  settingsList.innerHTML = "";
   const changed = () => {
     applyAppearance();
     saveConfig();
   };
-  settingsMenu.appendChild(
-    setRow(
-      "Theme",
-      mkSelect(
-        Object.entries(THEMES).map(([k, t]) => [k, t.label] as [string, string]),
-        themeKey,
-        (v) => {
-          applyTheme(v);
-          buildSettingsMenu(); // theme defaults shown elsewhere follow along
-        }
-      )
+
+  settingsSection("Appearance");
+  settingRow(
+    "Theme",
+    "Colors, plus each theme's default font, spacing, and cursor personality.",
+    mkSelect(
+      Object.entries(THEMES).map(([k, t]) => [k, t.label] as [string, string]),
+      themeKey,
+      (v) => {
+        applyTheme(v);
+        buildSettingsPage();
+      }
     )
   );
-  settingsMenu.appendChild(
-    setRow(
-      "Font",
-      mkSelect(
-        [
-          ["", "Theme default"],
-          ['"Cascadia Mono", Consolas, monospace', "Cascadia Mono"],
-          ['"Cascadia Code", "Cascadia Mono", monospace', "Cascadia Code"],
-          ["Consolas, monospace", "Consolas"],
-          ['"Lucida Console", monospace', "Lucida Console"],
-          ['"Courier New", monospace', "Courier New"],
-        ],
-        config.font_family ?? "",
-        (v) => {
-          config.font_family = v || undefined;
-          changed();
-        }
-      )
-    )
-  );
-  settingsMenu.appendChild(
-    setRow(
-      "Font size",
-      mkNumber(effFontSize(), 9, 24, (v) => {
-        config.font_size = v;
+  settingRow(
+    "Font",
+    "Overrides the theme's font for all terminals.",
+    mkSelect(
+      [
+        ["", "Theme default"],
+        ['"Cascadia Mono", Consolas, monospace', "Cascadia Mono"],
+        ['"Cascadia Code", "Cascadia Mono", monospace', "Cascadia Code"],
+        ["Consolas, monospace", "Consolas"],
+        ['"Lucida Console", monospace', "Lucida Console"],
+        ['"Courier New", monospace', "Courier New"],
+      ],
+      config.font_family ?? "",
+      (v) => {
+        config.font_family = v || undefined;
         changed();
-      })
+      }
     )
   );
-  settingsMenu.appendChild(
-    setRow(
-      "Line height",
-      mkSelect(
-        [["", "Theme default"], ["1", "1.0"], ["1.1", "1.1"], ["1.2", "1.2"], ["1.3", "1.3"], ["1.4", "1.4"]],
-        config.line_height ? String(config.line_height) : "",
-        (v) => {
-          config.line_height = v ? Number(v) : undefined;
-          changed();
-        }
-      )
-    )
+  settingRow(
+    "Font size",
+    "Terminal text size in pixels.",
+    mkNumber(effFontSize(), 9, 24, (v) => {
+      config.font_size = v;
+      changed();
+    })
   );
-  settingsMenu.appendChild(
-    setRow(
-      "Cursor",
-      mkSelect(
-        [["", "Theme default"], ["bar", "Bar"], ["block", "Block"], ["underline", "Underline"]],
-        config.cursor_style ?? "",
-        (v) => {
-          config.cursor_style = (v || undefined) as CursorStyle | undefined;
-          changed();
-        }
-      )
-    )
-  );
-  settingsMenu.appendChild(
-    setRow(
-      "Cursor blink",
-      mkSelect([["on", "On"], ["off", "Off"]], effCursorBlink() ? "on" : "off", (v) => {
-        config.cursor_blink = v === "on";
+  settingRow(
+    "Line height",
+    "Vertical spacing between terminal lines.",
+    mkSelect(
+      [["", "Theme default"], ["1", "1.0"], ["1.1", "1.1"], ["1.2", "1.2"], ["1.3", "1.3"], ["1.4", "1.4"]],
+      config.line_height ? String(config.line_height) : "",
+      (v) => {
+        config.line_height = v ? Number(v) : undefined;
         changed();
-      })
+      }
     )
   );
-  settingsMenu.appendChild(
-    setRow(
-      "Undo window (min)",
-      mkNumber(config.grace_minutes ?? 5, 0, 120, (v) => {
-        config.grace_minutes = v;
-        saveConfig();
-      })
+  settingRow(
+    "Cursor style",
+    "Bar is the Windows Terminal look; block is classic.",
+    mkSelect(
+      [["", "Theme default"], ["bar", "Bar"], ["block", "Block"], ["underline", "Underline"]],
+      config.cursor_style ?? "",
+      (v) => {
+        config.cursor_style = (v || undefined) as CursorStyle | undefined;
+        changed();
+      }
     )
+  );
+  settingRow(
+    "Cursor blink",
+    "",
+    mkSelect([["on", "On"], ["off", "Off"]], effCursorBlink() ? "on" : "off", (v) => {
+      config.cursor_blink = v === "on";
+      changed();
+    })
   );
 
-  const sep = document.createElement("div");
-  sep.className = "menu-sep";
-  settingsMenu.appendChild(sep);
+  settingsSection("Sessions");
+  settingRow(
+    "Undo window (minutes)",
+    "Closed or exited sessions stay restorable this long before they actually die. 0 disables the grace period.",
+    mkNumber(config.grace_minutes ?? 5, 0, 120, (v) => {
+      config.grace_minutes = v;
+      saveConfig();
+    })
+  );
 
+  settingsSection("AI titles");
   const keyInput = document.createElement("input");
-  keyInput.className = "set-control";
+  keyInput.className = "set-control set-wide";
   keyInput.type = "password";
   keyInput.placeholder = "sk-ant-…";
   keyInput.value = config.ai_api_key ?? "";
@@ -1608,34 +1639,36 @@ function buildSettingsMenu() {
     config.ai_api_key = keyInput.value.trim() || undefined;
     saveConfig();
   });
-  settingsMenu.appendChild(setRow("AI API key", keyInput));
-  settingsMenu.appendChild(
-    setRow(
-      "AI model",
-      mkSelect(
-        [
-          ["claude-opus-5", "Claude Opus 5"],
-          ["claude-haiku-4-5", "Claude Haiku 4.5 (cheaper)"],
-        ],
-        config.ai_model ?? "claude-opus-5",
-        (v) => {
-          config.ai_model = v;
-          saveConfig();
-        }
-      )
+  settingRow(
+    "Anthropic API key",
+    "Enables AI tab titles. Stored in config.json on this machine.",
+    keyInput
+  );
+  settingRow(
+    "Model",
+    "Opus 5 gives the best titles; Haiku 4.5 is faster and cheaper.",
+    mkSelect(
+      [
+        ["claude-opus-5", "Claude Opus 5"],
+        ["claude-haiku-4-5", "Claude Haiku 4.5 (cheaper)"],
+      ],
+      config.ai_model ?? "claude-opus-5",
+      (v) => {
+        config.ai_model = v;
+        saveConfig();
+      }
     )
   );
-  settingsMenu.appendChild(
-    setRow(
-      "AI auto-titles",
-      mkSelect(
-        [["off", "Off"], ["on", "On"]],
-        config.ai_auto_titles ? "on" : "off",
-        (v) => {
-          config.ai_auto_titles = v === "on";
-          saveConfig();
-        }
-      )
+  settingRow(
+    "Auto-titles",
+    "Quietly names unnamed tabs from their activity, one tab every couple of minutes. Manual renames always win.",
+    mkSelect(
+      [["off", "Off"], ["on", "On"]],
+      config.ai_auto_titles ? "on" : "off",
+      (v) => {
+        config.ai_auto_titles = v === "on";
+        saveConfig();
+      }
     )
   );
 }
@@ -1683,13 +1716,13 @@ async function main() {
   const settingsBtn = document.getElementById("settingsbtn")!;
   settingsBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    if (!settingsMenu.classList.contains("open")) buildSettingsMenu();
-    closeMenus(settingsMenu);
-    settingsMenu.classList.toggle("open");
+    closeMenus();
+    if (settingsOpen()) closeSettings();
+    else openSettings();
   });
   document.addEventListener("mousedown", (e) => {
     const target = e.target as Node;
-    for (const m of [restoreMenu, overflowMenu, hiddenMenu, settingsMenu, ctxMenu]) {
+    for (const m of [restoreMenu, overflowMenu, hiddenMenu, ctxMenu]) {
       if (m.classList.contains("open") && !m.contains(target)) {
         m.classList.remove("open");
       }
@@ -1698,7 +1731,13 @@ async function main() {
   // Suppress the WebView2 default context menu everywhere ("Send to
   // devices", "Web capture", etc.) — the app provides its own menus.
   window.addEventListener("contextmenu", (e) => e.preventDefault());
+  document.getElementById("settings-close")!.addEventListener("click", closeSettings);
   window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && settingsOpen()) {
+      e.preventDefault();
+      closeSettings();
+      return;
+    }
     if (e.ctrlKey && e.shiftKey && e.key.toUpperCase() === "T") {
       e.preventDefault();
       createTab();

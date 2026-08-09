@@ -22,11 +22,19 @@
           <button id="restore" title="Restore a detached session (Ctrl+Shift+Z)">⟳</button>
           <button id="settingsbtn" title="Settings">⚙</button>
           <div id="restore-menu" class="menu"></div>
-          <div id="settings-menu" class="menu"></div>
           <div id="overflow-menu" class="menu"></div>
           <div id="hidden-menu" class="menu"></div>
         </div>
         <div id="panes"></div>
+        <div id="settings-page">
+          <div class="settings-inner">
+            <div class="settings-h1">
+              <span>Settings</span>
+              <button id="settings-close" title="Close (Esc)">×</button>
+            </div>
+            <div id="settings-list"></div>
+          </div>
+        </div>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

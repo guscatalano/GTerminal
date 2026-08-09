@@ -556,6 +556,94 @@ input.set-control {
   font: 12px "Segoe UI", sans-serif;
 }
 
+/* ── settings page ───────────────────────────────────────────────────── */
+
+#settings-page {
+  display: none;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+#app.settings-on #settings-page {
+  display: block;
+}
+
+#app.settings-on #panes {
+  display: none;
+}
+
+.settings-inner {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 28px 24px 56px;
+}
+
+.settings-h1 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font: 600 20px "Segoe UI", sans-serif;
+  color: var(--text);
+}
+
+#settings-close {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+#settings-close:hover {
+  background: var(--panel);
+  color: var(--text);
+}
+
+.settings-section-title {
+  margin-top: 28px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  font: 600 12px "Segoe UI", sans-serif;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted2);
+}
+
+.setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 14px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.setting-meta {
+  min-width: 0;
+}
+
+.setting-title {
+  font: 13px "Segoe UI", sans-serif;
+  color: var(--text);
+}
+
+.setting-desc {
+  margin-top: 3px;
+  font: 11.5px "Segoe UI", sans-serif;
+  color: var(--muted);
+  max-width: 400px;
+}
+
+.set-wide {
+  width: 220px;
+  max-width: 220px;
+}
+
 /* ── terminal panes ──────────────────────────────────────────────────── */
 
 #panes {
