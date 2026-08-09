@@ -74,6 +74,7 @@ interface AppConfig {
   ai_flavor?: string;
   ai_auto_titles?: boolean;
   default_shell?: string;
+  default_cwd?: string;
   title_mode?: string;
   title_template?: string;
   bg_style?: string;
@@ -469,7 +470,7 @@ const THEMES: Record<string, ThemeDef> = {
   ]),
   nord: mkTheme("Nord", "white", ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"], "linear-gradient(100deg, transparent 18%, rgba(136,192,208,0.26) 30%, transparent 42%), linear-gradient(95deg, transparent 42%, rgba(163,190,140,0.18) 53%, transparent 64%), linear-gradient(107deg, transparent 62%, rgba(180,142,173,0.16) 72%, transparent 84%), linear-gradient(180deg, #1e222b 0%, #2e3440 60%, #272c37 100%)", "#2e3440", "#d8dee9", [
     "#3b4252", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#88c0d0", "#e5e9f0",
-    "#7b88a1", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#8fbcbb", "#eceff4",
+    "#7b88a1", "#bf616a", "#a3be8c", "#f4dda1", "#81a1c1", "#b48ead", "#8fbcbb", "#eceff4",
   ]),
   gruvbox: mkTheme("Gruvbox Dark", "white", ["Consolas, monospace", 1.1, "block"], "radial-gradient(ellipse 75% 40% at 50% 112%, rgba(251,73,52,0.32), transparent 65%), linear-gradient(0deg, rgba(215,153,33,0.22) 0%, transparent 32%), linear-gradient(0deg, rgba(254,128,25,0.12) 8%, transparent 45%), linear-gradient(180deg, #171512, #322d26)", "#282828", "#ebdbb2", [
     "#282828", "#fb4934", "#98971a", "#d79921", "#458588", "#b16286", "#689d6a", "#a89984",
@@ -485,11 +486,11 @@ const THEMES: Record<string, ThemeDef> = {
   ]),
   "solarized-dark": mkTheme("Solarized Dark", "white", ["Consolas, monospace", 1.1, "underline"], "linear-gradient(180deg, rgba(42,161,152,0.3) 0%, transparent 32%), linear-gradient(180deg, transparent 55%, rgba(0,8,12,0.5) 100%), radial-gradient(ellipse 90% 45% at 50% -5%, rgba(147,161,161,0.16), transparent 60%), linear-gradient(180deg, #00323f, #001217)", "#002b36", "#839496", [
     "#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198", "#eee8d5",
-    "#657b83", "#cb4b16", "#78909a", "#657b83", "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
+    "#657b83", "#cb4b16", "#78909a", "#eed968", "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
   ]),
   "solarized-light": mkTheme("Solarized Light", "black", ["Consolas, monospace", 1.1, "underline"], "radial-gradient(circle at 80% 10%, rgba(181,137,0,0.38) 0 70px, rgba(203,75,22,0.16) 72px 130px, transparent 200px), radial-gradient(ellipse 100% 55% at 50% 0%, rgba(203,75,22,0.08), transparent 55%), linear-gradient(180deg, #fdf6e3, #eadfc0)", "#fdf6e3", "#586e75", [
     "#073642", "#dc322f", "#6f7d00", "#8f6c00", "#268bd2", "#d33682", "#1f857c", "#eee8d5",
-    "#49606a", "#b04214", "#5c727b", "#657b83", "#66787f", "#6c71c4", "#6d838b", "#fdf6e3",
+    "#49606a", "#b04214", "#5c727b", "#705a00", "#66787f", "#6c71c4", "#6d838b", "#fdf6e3",
   ]),
 };
 
@@ -522,7 +523,7 @@ THEMES.nous = mkTheme(
   "#141414",
   [
     "#141414", "#b3261e", "#1d6f42", "#8a6d00", "#0471a9", "#7b2d8b", "#0e7c86", "#f7f5f0",
-    "#5a5a5a", "#d64545", "#2c8f58", "#a8862a", "#2b93cc", "#9c4fae", "#157d86", "#ffffff",
+    "#5a5a5a", "#d64545", "#2c8f58", "#7a6000", "#2b93cc", "#9c4fae", "#157d86", "#ffffff",
   ]
 );
 THEMES.nous.xterm.cursor = "#0471a9";
@@ -2194,6 +2195,20 @@ function buildSettingsPage() {
       config.default_shell = v === "auto" ? undefined : v;
       saveConfig();
     })
+  );
+  const cwdInput = document.createElement("input");
+  cwdInput.className = "set-control set-wide";
+  cwdInput.type = "text";
+  cwdInput.placeholder = "blank = home directory";
+  cwdInput.value = config.default_cwd ?? "";
+  cwdInput.addEventListener("change", () => {
+    config.default_cwd = cwdInput.value.trim() || undefined;
+    saveConfig();
+  });
+  settingRow(
+    "Default directory",
+    "New tabs start in this folder. Falls back to your home directory if the path doesn't exist.",
+    cwdInput
   );
   settingRow(
     "Undo window (minutes)",

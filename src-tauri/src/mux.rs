@@ -604,9 +604,18 @@ fn conn_loop(
             }
             Request::Create { cols, rows, shell } => {
                 let id = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
-                let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\".into());
+                // New sessions honor config.default_cwd when set; start_session
+                // falls back to the home dir if the path isn't a directory.
+                let start_dir = read_config()
+                    .get("default_cwd")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| {
+                        std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\".into())
+                    });
                 let shell = shell.unwrap_or_else(|| "auto".into());
-                match start_session(sessions, id, &home, cols, rows, Vec::new(), now_ms(), &shell) {
+                match start_session(sessions, id, &start_dir, cols, rows, Vec::new(), now_ms(), &shell) {
                     Ok(()) => write_line(&mut out, &json!({"ok": true, "id": id}))?,
                     Err(e) => write_line(&mut out, &json!({"ok": false, "error": e}))?,
                 }

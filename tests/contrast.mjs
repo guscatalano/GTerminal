@@ -49,6 +49,17 @@ for (const t of themes) {
     const r = contrast(c, t.bg);
     if (r < floor) bad.push(`${NAMES[i]} ${c} = ${r.toFixed(2)}`);
   });
+  // PSReadLine prominence: commands render in brYellow (11), arguments in
+  // white (7). The command must never look thinner than its arguments.
+  const cmd = t.ansi[11], arg = t.ansi[7];
+  if (lightBg) {
+    // On light bg the renderer's minimumContrastRatio darkens a near-bg
+    // white(7) to ~4.5; the command needs at least that much on its own.
+    const r = contrast(cmd, t.bg);
+    if (r < 4.5) bad.push(`brYellow(cmd) ${cmd} = ${r.toFixed(2)} < 4.5 (thinner than args)`);
+  } else if (lum(arg) > lum(cmd) * 1.25) {
+    bad.push(`white(arg) ${arg} brighter than brYellow(cmd) ${cmd}: commands look thin`);
+  }
   if (bad.length) {
     failures += bad.length;
     console.log(`FAIL ${t.name} (bg ${t.bg}):`);

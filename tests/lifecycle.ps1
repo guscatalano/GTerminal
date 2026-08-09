@@ -242,6 +242,38 @@ $h.Client.Close()
 $null = Request2 $port "{""cmd"":""kill"",""id"":$id4}"
 try { $null = Request2 $port "{""cmd"":""kill"",""id"":$id4}" 0 } catch {}
 
+# ── default_cwd config: new sessions start in the configured directory ──
+$defDir = Join-Path $env:TEMP "gterminal-defcwd-test"
+New-Item -ItemType Directory -Force $defDir | Out-Null
+Set-Content "$env:LOCALAPPDATA\GTerminal\config.json" ('{"grace_minutes": 5, "default_cwd": ' + ($defDir | ConvertTo-Json) + '}')
+$id5 = (Request2 $port '{"cmd":"create","cols":100,"rows":30}').id
+$i = New-Conn $port
+$i.Writer.WriteLine("{""cmd"":""attach"",""id"":$id5}")
+$null = Read-Line2 $i
+$i.Writer.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')
+Start-Sleep -Seconds 6   # prompt renders -> OSC 9;9 cwd emission
+$s = Get-Sessions $port | Where-Object id -eq $id5
+if ($s.cwd -notlike "*gterminal-defcwd-test*") { Fail "default-cwd" "cwd=$($s.cwd)" } else { Pass "default_cwd config honored for new sessions" }
+$i.Client.Close()
+$null = Request2 $port "{""cmd"":""kill"",""id"":$id5}"
+try { $null = Request2 $port "{""cmd"":""kill"",""id"":$id5}" 0 } catch {}
+# bad path falls back to home instead of failing to spawn
+Set-Content "$env:LOCALAPPDATA\GTerminal\config.json" '{"grace_minutes": 5, "default_cwd": "Q:\\does\\not\\exist"}'
+$id6 = (Request2 $port '{"cmd":"create","cols":100,"rows":30}').id
+$j = New-Conn $port
+$j.Writer.WriteLine("{""cmd"":""attach"",""id"":$id6}")
+$null = Read-Line2 $j
+$j.Writer.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')
+Start-Sleep -Seconds 6
+$s = Get-Sessions $port | Where-Object id -eq $id6
+if ($null -eq $s -or -not $s.alive) { Fail "default-cwd-fallback" "session did not spawn with bad default_cwd" }
+elseif ($s.cwd -like "*does*not*exist*") { Fail "default-cwd-fallback" "cwd=$($s.cwd)" }
+else { Pass "bad default_cwd falls back to home" }
+$j.Client.Close()
+$null = Request2 $port "{""cmd"":""kill"",""id"":$id6}"
+try { $null = Request2 $port "{""cmd"":""kill"",""id"":$id6}" 0 } catch {}
+Remove-Item $defDir -Recurse -Force -ErrorAction SilentlyContinue
+
 # ════ cleanup ════
 foreach ($d in $script:daemons) {
   if (Get-Process -Id $d -ErrorAction SilentlyContinue) { Stop-DaemonTree $d }
