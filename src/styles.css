@@ -1,3 +1,25 @@
+/* Theme variables: JS sets --bg/--text/--tint/--accent/--danger per theme;
+   everything else derives via color-mix so the whole chrome follows. */
+:root {
+  --bg: #0f1115;
+  --text: #d7dae0;
+  --tint: white; /* lighten for dark themes, black for light themes */
+  --accent: #61afef;
+  --danger: #e06c75;
+
+  --bar: color-mix(in srgb, var(--bg) 94%, var(--tint));
+  --sidebar: color-mix(in srgb, var(--bg) 97%, var(--tint));
+  --hover: color-mix(in srgb, var(--bg) 89%, var(--tint));
+  --panel: color-mix(in srgb, var(--bg) 85%, var(--tint));
+  --panel2: color-mix(in srgb, var(--bg) 78%, var(--tint));
+  --border: color-mix(in srgb, var(--bg) 82%, var(--tint));
+  --border2: color-mix(in srgb, var(--bg) 72%, var(--tint));
+  --killhover: color-mix(in srgb, var(--bg) 62%, var(--tint));
+  --muted: color-mix(in srgb, var(--text) 62%, var(--bg));
+  --muted2: color-mix(in srgb, var(--text) 42%, var(--bg));
+  --dim: color-mix(in srgb, var(--text) 50%, var(--bg));
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -9,7 +31,7 @@ body,
 #app {
   height: 100%;
   overflow: hidden;
-  background: #0f1115;
+  background: var(--bg);
 }
 
 #app {
@@ -23,8 +45,8 @@ body,
   width: 220px;
   flex: none;
   flex-direction: column;
-  background: #12151b;
-  border-right: 1px solid #2b3140;
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
   user-select: none;
 }
 
@@ -40,7 +62,7 @@ body,
 
 #sidebar-title {
   padding: 10px 12px 6px 12px;
-  color: #5c6370;
+  color: var(--muted2);
   font: 600 11px "Segoe UI", sans-serif;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -58,19 +80,19 @@ body,
   gap: 8px;
   padding: 6px 8px;
   border-radius: 6px;
-  color: #8b93a1;
+  color: var(--muted);
   font: 12px "Segoe UI", sans-serif;
   cursor: pointer;
   white-space: nowrap;
 }
 
 .side-row:hover {
-  background: #1a1e26;
+  background: var(--hover);
 }
 
 .side-row.active {
-  background: #1e222b;
-  color: #d7dae0;
+  background: var(--panel);
+  color: var(--text);
 }
 
 .side-dot {
@@ -79,19 +101,19 @@ body,
 }
 
 .side-dot.open {
-  color: #61afef;
+  color: var(--accent);
 }
 
 .side-dot.hidden {
-  color: #6b7383;
+  color: var(--dim);
 }
 
 .side-dot.cold {
-  color: #4a5160;
+  color: var(--muted2);
 }
 
 .side-dot.doomed {
-  color: #e06c75;
+  color: var(--danger);
 }
 
 .side-label {
@@ -112,7 +134,7 @@ body,
 .side-act {
   border: none;
   background: none;
-  color: #8b93a1;
+  color: var(--muted);
   font-size: 13px;
   line-height: 1;
   padding: 2px 5px;
@@ -121,24 +143,24 @@ body,
 }
 
 .side-act:hover {
-  background: #333a47;
-  color: #fff;
+  background: var(--border2);
+  color: var(--text);
 }
 
 #sidebar-new {
   margin: 6px;
   padding: 7px;
-  border: 1px dashed #333a47;
+  border: 1px dashed var(--border2);
   border-radius: 6px;
   background: none;
-  color: #8b93a1;
+  color: var(--muted);
   font: 12px "Segoe UI", sans-serif;
   cursor: pointer;
 }
 
 #sidebar-new:hover {
-  background: #1a1e26;
-  color: #d7dae0;
+  background: var(--hover);
+  color: var(--text);
 }
 
 /* ── main column & tab bar ───────────────────────────────────────────── */
@@ -155,7 +177,7 @@ body,
   align-items: center;
   gap: 4px;
   padding: 6px 8px 0 8px;
-  background: #171a21;
+  background: var(--bar);
   user-select: none;
   flex: none;
   position: relative;
@@ -179,19 +201,19 @@ body,
   height: 28px; /* fixed: emoji icons must not wobble the bar height */
   padding: 0 6px 0 12px;
   border-radius: 8px 8px 0 0;
-  color: #8b93a1;
+  color: var(--muted);
   font: 12px "Segoe UI", sans-serif;
   cursor: pointer;
   white-space: nowrap;
 }
 
 .tab:hover {
-  background: #1e222b;
+  background: var(--panel);
 }
 
 .tab.active {
-  background: #0f1115;
-  color: #d7dae0;
+  background: var(--bg);
+  color: var(--text);
 }
 
 .tab-icon {
@@ -227,16 +249,17 @@ body,
 }
 
 .tab-close:hover {
-  background: #333a47;
-  color: #fff;
+  background: var(--border2);
+  color: var(--text);
 }
 
 #sidebtn,
 #newtab,
-#restore {
+#restore,
+#themebtn {
   border: none;
   background: none;
-  color: #8b93a1;
+  color: var(--muted);
   font-size: 14px;
   line-height: 1;
   padding: 4px 8px;
@@ -251,15 +274,16 @@ body,
 
 #sidebtn:hover,
 #newtab:hover,
-#restore:hover {
-  background: #1e222b;
-  color: #d7dae0;
+#restore:hover,
+#themebtn:hover {
+  background: var(--panel);
+  color: var(--text);
 }
 
 .chip {
-  border: 1px solid #333a47;
-  background: #1a1e26;
-  color: #8b93a1;
+  border: 1px solid var(--border2);
+  background: var(--hover);
+  color: var(--muted);
   font: 11px "Segoe UI", sans-serif;
   line-height: 1;
   padding: 5px 8px;
@@ -270,8 +294,8 @@ body,
 }
 
 .chip:hover {
-  color: #d7dae0;
-  border-color: #4a5468;
+  color: var(--text);
+  border-color: var(--killhover);
 }
 
 /* ── tab groups ──────────────────────────────────────────────────────── */
@@ -283,7 +307,7 @@ body,
   align-self: center;
   padding: 4px 10px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--gc) 18%, #171a21);
+  background: color-mix(in srgb, var(--gc) 18%, var(--bar));
   border: 1px solid color-mix(in srgb, var(--gc) 55%, transparent);
   color: var(--gc);
   font: 600 11px "Segoe UI", sans-serif;
@@ -298,7 +322,7 @@ body,
 }
 
 .group-chip:hover {
-  background: color-mix(in srgb, var(--gc) 30%, #171a21);
+  background: color-mix(in srgb, var(--gc) 30%, var(--bar));
 }
 
 .tab.grouped {
@@ -310,19 +334,19 @@ body,
 }
 
 .tab.drop-before {
-  box-shadow: inset 3px 0 0 #61afef;
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .tab.drop-after {
-  box-shadow: inset -3px 0 0 #61afef;
+  box-shadow: inset -3px 0 0 var(--accent);
 }
 
 .tab.grouped.drop-before {
-  box-shadow: inset 3px 0 0 #61afef, inset 0 2px 0 var(--gc);
+  box-shadow: inset 3px 0 0 var(--accent), inset 0 2px 0 var(--gc);
 }
 
 .tab.grouped.drop-after {
-  box-shadow: inset -3px 0 0 #61afef, inset 0 2px 0 var(--gc);
+  box-shadow: inset -3px 0 0 var(--accent), inset 0 2px 0 var(--gc);
 }
 
 .group-chip.drop-into {
@@ -331,10 +355,10 @@ body,
 
 .rename-input {
   width: 100%;
-  border: 1px solid #4a5468;
+  border: 1px solid var(--killhover);
   border-radius: 4px;
-  background: #0f1115;
-  color: #d7dae0;
+  background: var(--bg);
+  color: var(--text);
   font: 12px "Segoe UI", sans-serif;
   padding: 1px 4px;
   outline: none;
@@ -351,14 +375,14 @@ body,
 /* Armed (click-again-to-confirm) state for destructive controls */
 button.armed,
 .menu-row.armed {
-  background: #e06c75 !important;
+  background: var(--danger) !important;
   color: #fff !important;
 }
 
 .menu-sep {
   height: 1px;
   margin: 4px 6px;
-  background: #2b3140;
+  background: var(--border);
 }
 
 .menu-dot {
@@ -374,7 +398,7 @@ button.armed,
   display: flex;
   align-items: center;
   padding: 10px 10px 4px 10px;
-  color: #5c6370;
+  color: var(--muted2);
   font: 600 11px "Segoe UI", sans-serif;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -395,7 +419,7 @@ button.armed,
 #hiddenbar:not(:empty) {
   padding-left: 8px;
   margin-left: 4px;
-  border-left: 1px solid #2b3140;
+  border-left: 1px solid var(--border);
 }
 
 .hidden-pill {
@@ -404,18 +428,18 @@ button.armed,
   gap: 4px;
   padding: 3px 4px 3px 10px;
   border-radius: 999px;
-  background: #161921;
-  border: 1px dashed #333a47;
-  color: #6b7383;
+  background: var(--sidebar);
+  border: 1px dashed var(--border2);
+  color: var(--dim);
   font: 11px "Segoe UI", sans-serif;
   cursor: pointer;
   white-space: nowrap;
 }
 
 .hidden-pill:hover {
-  color: #d7dae0;
-  border-color: #4a5468;
-  background: #1e222b;
+  color: var(--text);
+  border-color: var(--killhover);
+  background: var(--panel);
 }
 
 .hidden-pill-label {
@@ -436,11 +460,11 @@ button.armed,
 }
 
 .hidden-pill-kill:hover {
-  background: #3a4152;
-  color: #fff;
+  background: var(--killhover);
+  color: var(--text);
 }
 
-/* ── dropdown menus (restore / overflow / hidden) ────────────────────── */
+/* ── dropdown menus (restore / overflow / hidden / theme) ────────────── */
 
 .menu {
   display: none;
@@ -451,8 +475,8 @@ button.armed,
   min-width: 220px;
   max-height: 320px;
   overflow-y: auto;
-  background: #1e222b;
-  border: 1px solid #2b3140;
+  background: var(--panel);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 4px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
@@ -469,13 +493,13 @@ button.armed,
   gap: 8px;
   padding: 6px 10px;
   border-radius: 6px;
-  color: #d7dae0;
+  color: var(--text);
   font: 12px "Segoe UI", sans-serif;
   cursor: pointer;
 }
 
 .menu-row:hover {
-  background: #262c38;
+  background: var(--panel2);
 }
 
 .menu-label {
@@ -487,7 +511,7 @@ button.armed,
 .menu-kill {
   border: none;
   background: none;
-  color: #8b93a1;
+  color: var(--muted);
   font-size: 14px;
   line-height: 1;
   padding: 2px 5px;
@@ -496,13 +520,13 @@ button.armed,
 }
 
 .menu-kill:hover {
-  background: #3a4152;
-  color: #fff;
+  background: var(--killhover);
+  color: var(--text);
 }
 
 .restore-empty {
   padding: 8px 10px;
-  color: #5c6370;
+  color: var(--muted2);
   font: 12px "Segoe UI", sans-serif;
 }
 

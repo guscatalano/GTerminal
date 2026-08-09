@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Terminal } from "@xterm/xterm";
+import type { ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
@@ -56,11 +57,18 @@ interface AppConfig {
   cursor_style?: "bar" | "block" | "underline";
   cursor_blink?: boolean;
   grace_minutes?: number;
+  theme?: string;
 }
 let config: AppConfig = {};
 
 function minutesLeft(expiresMs: number): number {
   return Math.max(1, Math.ceil((expiresMs - Date.now()) / 60_000));
+}
+function remainingLabel(expiresMs: number): string {
+  const total = Math.max(0, Math.round((expiresMs - Date.now()) / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
 }
 function expirySuffix(s: SessionInfo): string {
   return s.expires_ms ? ` · closes in ${minutesLeft(s.expires_ms)}m` : s.alive ? "" : " (cold)";
@@ -80,6 +88,7 @@ const restoreMenu = document.getElementById("restore-menu")!;
 const overflowBtn = document.getElementById("overflow") as HTMLButtonElement;
 const overflowMenu = document.getElementById("overflow-menu")!;
 const hiddenMenu = document.getElementById("hidden-menu")!;
+const themeMenu = document.getElementById("theme-menu")!;
 const sidebarList = document.getElementById("sidebar-list")!;
 
 // Sessions the user parked with "hide" — detached in the daemon but shown
@@ -193,29 +202,90 @@ function moveTab(dragged: number, refId: number | undefined, before: boolean, gi
   refreshChrome();
 }
 
-const THEME = {
-  background: "#0f1115",
-  foreground: "#d7dae0",
-  cursor: "#d7dae0",
-  cursorAccent: "#0f1115",
-  selectionBackground: "#33415580",
-  black: "#1c1f26",
-  red: "#e06c75",
-  green: "#98c379",
-  yellow: "#e5c07b",
-  blue: "#61afef",
-  magenta: "#c678dd",
-  cyan: "#56b6c2",
-  white: "#d7dae0",
-  brightBlack: "#5c6370",
-  brightRed: "#ef7d85",
-  brightGreen: "#a9d387",
-  brightYellow: "#f0cd8a",
-  brightBlue: "#74bdf7",
-  brightMagenta: "#d48ce8",
-  brightCyan: "#67c5d0",
-  brightWhite: "#f0f2f6",
+interface ThemeDef {
+  label: string;
+  tint: "white" | "black"; // chrome derives by mixing bg toward this
+  xterm: ITheme;
+}
+
+function mkTheme(
+  label: string,
+  tint: "white" | "black",
+  bg: string,
+  fg: string,
+  ansi: string[]
+): ThemeDef {
+  return {
+    label,
+    tint,
+    xterm: {
+      background: bg,
+      foreground: fg,
+      cursor: fg,
+      cursorAccent: bg,
+      selectionBackground: `${ansi[4]}55`,
+      black: ansi[0], red: ansi[1], green: ansi[2], yellow: ansi[3],
+      blue: ansi[4], magenta: ansi[5], cyan: ansi[6], white: ansi[7],
+      brightBlack: ansi[8], brightRed: ansi[9], brightGreen: ansi[10], brightYellow: ansi[11],
+      brightBlue: ansi[12], brightMagenta: ansi[13], brightCyan: ansi[14], brightWhite: ansi[15],
+    },
+  };
+}
+
+const THEMES: Record<string, ThemeDef> = {
+  "one-dark": mkTheme("One Dark", "white", "#0f1115", "#d7dae0", [
+    "#1c1f26", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd", "#56b6c2", "#d7dae0",
+    "#5c6370", "#ef7d85", "#a9d387", "#f0cd8a", "#74bdf7", "#d48ce8", "#67c5d0", "#f0f2f6",
+  ]),
+  dracula: mkTheme("Dracula", "white", "#282a36", "#f8f8f2", [
+    "#21222c", "#ff5555", "#50fa7b", "#f1fa8c", "#bd93f9", "#ff79c6", "#8be9fd", "#f8f8f2",
+    "#6272a4", "#ff6e6e", "#69ff94", "#ffffa5", "#d6acff", "#ff92df", "#a4ffff", "#ffffff",
+  ]),
+  nord: mkTheme("Nord", "white", "#2e3440", "#d8dee9", [
+    "#3b4252", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#88c0d0", "#e5e9f0",
+    "#4c566a", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#8fbcbb", "#eceff4",
+  ]),
+  gruvbox: mkTheme("Gruvbox Dark", "white", "#282828", "#ebdbb2", [
+    "#282828", "#cc241d", "#98971a", "#d79921", "#458588", "#b16286", "#689d6a", "#a89984",
+    "#928374", "#fb4934", "#b8bb26", "#fabd2f", "#83a598", "#d3869b", "#8ec07c", "#ebdbb2",
+  ]),
+  "tokyo-night": mkTheme("Tokyo Night", "white", "#1a1b26", "#c0caf5", [
+    "#15161e", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#a9b1d6",
+    "#414868", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#c0caf5",
+  ]),
+  catppuccin: mkTheme("Catppuccin Mocha", "white", "#1e1e2e", "#cdd6f4", [
+    "#45475a", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#bac2de",
+    "#585b70", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#a6adc8",
+  ]),
+  "solarized-dark": mkTheme("Solarized Dark", "white", "#002b36", "#839496", [
+    "#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198", "#eee8d5",
+    "#002b36", "#cb4b16", "#586e75", "#657b83", "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
+  ]),
+  "solarized-light": mkTheme("Solarized Light", "black", "#fdf6e3", "#657b83", [
+    "#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198", "#eee8d5",
+    "#002b36", "#cb4b16", "#586e75", "#657b83", "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
+  ]),
 };
+
+let themeKey = "one-dark";
+function currentTheme(): ThemeDef {
+  return THEMES[themeKey] ?? THEMES["one-dark"];
+}
+
+function applyTheme(key: string) {
+  themeKey = THEMES[key] ? key : "one-dark";
+  const t = currentTheme();
+  const root = document.documentElement.style;
+  root.setProperty("--bg", t.xterm.background!);
+  root.setProperty("--text", t.xterm.foreground!);
+  root.setProperty("--tint", t.tint);
+  root.setProperty("--accent", t.xterm.blue!);
+  root.setProperty("--danger", t.xterm.red!);
+  for (const tab of tabs.values()) {
+    tab.term.options.theme = t.xterm;
+  }
+  localStorage.setItem("gterm-theme", themeKey);
+}
 
 function orderedIds(): number[] {
   return [...tabbar.querySelectorAll<HTMLElement>(".tab")].map((el) => Number(el.dataset.id));
@@ -361,7 +431,7 @@ async function createTab(attachId?: number) {
     cursorStyle: config.cursor_style ?? "bar",
     cursorBlink: config.cursor_blink ?? true,
     scrollback: 10000,
-    theme: THEME,
+    theme: currentTheme().xterm,
     allowProposedApi: true,
   });
   const fit = new FitAddon();
@@ -568,7 +638,7 @@ ctxMenu.className = "menu ctx";
 document.body.appendChild(ctxMenu);
 
 function closeMenus(except?: HTMLElement) {
-  for (const m of [restoreMenu, overflowMenu, hiddenMenu, ctxMenu]) {
+  for (const m of [restoreMenu, overflowMenu, hiddenMenu, themeMenu, ctxMenu]) {
     if (m !== except) m.classList.remove("open");
   }
 }
@@ -939,7 +1009,11 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
 
   // Skip the DOM rebuild when nothing changed — the 5s poll would
   // otherwise churn the sidebar (and hitch the renderer) while typing.
-  const sig = JSON.stringify([activeId, orderedIds(), [...hidden], sessions, groupState, titles, customTitles]);
+  // Countdown labels are part of the signature so ticking still renders.
+  const countdowns = sessions
+    .filter((s) => s.expires_ms)
+    .map((s) => remainingLabel(s.expires_ms!));
+  const sig = JSON.stringify([activeId, orderedIds(), [...hidden], sessions, groupState, titles, customTitles, countdowns]);
   if (sig === sidebarSig) return;
   sidebarSig = sig;
 
@@ -1014,21 +1088,40 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
       [["×", "Kill session — click twice", () => killSession(s.id), true]]
     );
 
+  // Sessions in their grace window get their own section with a live
+  // countdown; everything else renders under its group as usual.
+  const closing = sessions.filter((s) => s.expires_ms && !tabs.has(s.id));
+  const isClosing = (id: number) => closing.some((s) => s.id === id);
+
   const inGroup = (id: number, gid: string) => groupState.assign[id] === gid;
   for (const g of groupState.groups) {
     addHeader(g.name, g.color);
     for (const id of orderedIds()) if (inGroup(id, g.id)) openRow(id);
-    for (const id of hidden) if (inGroup(id, g.id)) hiddenRow(id);
+    for (const id of hidden) if (inGroup(id, g.id) && !isClosing(id)) hiddenRow(id);
     for (const s of sessions) {
-      if (!tabs.has(s.id) && !hidden.has(s.id) && inGroup(s.id, g.id)) coldRow(s);
+      if (!tabs.has(s.id) && !hidden.has(s.id) && !isClosing(s.id) && inGroup(s.id, g.id)) coldRow(s);
     }
   }
   const ungrouped = (id: number) => !groupById(groupState.assign[id]);
   if (groupState.groups.length) addHeader("Ungrouped");
   for (const id of orderedIds()) if (ungrouped(id)) openRow(id);
-  for (const id of hidden) if (ungrouped(id)) hiddenRow(id);
+  for (const id of hidden) if (ungrouped(id) && !isClosing(id)) hiddenRow(id);
   for (const s of sessions) {
-    if (!tabs.has(s.id) && !hidden.has(s.id) && ungrouped(s.id)) coldRow(s);
+    if (!tabs.has(s.id) && !hidden.has(s.id) && !isClosing(s.id) && ungrouped(s.id)) coldRow(s);
+  }
+
+  if (closing.length) {
+    addHeader("Closing soon");
+    for (const s of closing) {
+      addRow(
+        "⌛",
+        "doomed",
+        `${titleOf(s.id)} · ${remainingLabel(s.expires_ms!)}`,
+        false,
+        () => createTab(s.id),
+        [["×", "Kill now — click twice", () => killSession(s.id), true]]
+      );
+    }
   }
 }
 
@@ -1071,6 +1164,7 @@ async function renderRestoreMenu() {
 
 async function main() {
   config = await invoke<AppConfig>("get_config").catch(() => ({}));
+  applyTheme(localStorage.getItem("gterm-theme") ?? config.theme ?? "one-dark");
   await listen<{ id: number; data: string }>("pty-output", (event) => {
     const tab = tabs.get(event.payload.id);
     if (tab) {
@@ -1107,9 +1201,21 @@ async function main() {
     closeMenus(restoreMenu);
     restoreMenu.classList.toggle("open");
   });
+  const themeBtn = document.getElementById("themebtn")!;
+  themeBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    themeMenu.innerHTML = "";
+    for (const [key, t] of Object.entries(THEMES)) {
+      themeMenu.appendChild(
+        menuRow((key === themeKey ? "✓ " : "  ") + t.label, () => applyTheme(key))
+      );
+    }
+    closeMenus(themeMenu);
+    themeMenu.classList.toggle("open");
+  });
   document.addEventListener("mousedown", (e) => {
     const target = e.target as Node;
-    for (const m of [restoreMenu, overflowMenu, hiddenMenu, ctxMenu]) {
+    for (const m of [restoreMenu, overflowMenu, hiddenMenu, themeMenu, ctxMenu]) {
       if (m.classList.contains("open") && !m.contains(target)) {
         m.classList.remove("open");
       }

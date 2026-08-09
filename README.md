@@ -35,11 +35,16 @@ Tabs shrink browser-style as they multiply; overflow collapses into a `+N` menu.
 {
   "grace_minutes": 5,
   "cursor_style": "bar",
-  "cursor_blink": true
+  "cursor_blink": true,
+  "theme": "one-dark"
 }
 ```
 
 `cursor_style` is `bar` (default, Windows Terminal-like), `block`, or `underline`; `cursor_blink` defaults to true. Cursor settings apply to new windows/tabs.
+
+**Themes**: pick via the 🎨 button — One Dark, Dracula, Nord, Gruvbox Dark, Tokyo Night, Catppuccin Mocha, Solarized Dark, Solarized Light. The whole chrome (tab bar, sidebar, menus) recolors along with the terminal. The picker persists; `config.json`'s `theme` sets the initial default.
+
+Sessions in their grace window get a dedicated **Closing soon** sidebar section with a live m:ss countdown; click to restore, × (twice) to kill immediately.
 
 ## Development
 
