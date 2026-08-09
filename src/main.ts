@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Terminal } from "@xterm/xterm";
 import type { ITheme } from "@xterm/xterm";
+import Anthropic from "@anthropic-ai/sdk";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
@@ -65,6 +66,9 @@ interface AppConfig {
   font_family?: string;
   font_size?: number;
   line_height?: number;
+  ai_api_key?: string;
+  ai_model?: string;
+  ai_auto_titles?: boolean;
 }
 let config: AppConfig = {};
 
@@ -123,6 +127,14 @@ const customTitles: Record<string, string> = JSON.parse(
 function saveCustomTitles() {
   localStorage.setItem("gterm-names", JSON.stringify(customTitles));
 }
+
+// AI-suggested titles: outrank shell/cwd labels, lose to user renames.
+const aiTitles: Record<string, string> = JSON.parse(
+  localStorage.getItem("gterm-ai-titles") ?? "{}"
+);
+function saveAiTitles() {
+  localStorage.setItem("gterm-ai-titles", JSON.stringify(aiTitles));
+}
 // Shell-reported titles that carry no information (every pwsh tab reports
 // the same exe path); these fall through to the cwd-based label.
 const BORING_TITLE = /pwsh|powershell|cmd\.exe|^Administrator: |^Windows PowerShell$/i;
@@ -134,6 +146,7 @@ function cwdParts(id: number): string[] {
 
 function baseLabel(id: number): { text: string; fromCwd: boolean } {
   if (customTitles[id]) return { text: customTitles[id], fromCwd: false };
+  if (aiTitles[id]) return { text: aiTitles[id], fromCwd: false };
   const t = titles[id];
   if (t && !BORING_TITLE.test(t)) return { text: t, fromCwd: false };
   const parts = cwdParts(id);
@@ -833,7 +846,11 @@ function renameTabAnywhere(id: number) {
 
 function showTabContextMenu(x: number, y: number, id: number) {
   const current = groupState.assign[id];
-  const items: CtxItem[] = [{ label: "Rename tab", action: () => renameTabAnywhere(id) }, "sep"];
+  const items: CtxItem[] = [{ label: "Rename tab", action: () => renameTabAnywhere(id) }];
+  if (config.ai_api_key?.trim()) {
+    items.push({ label: "✨ AI title", action: () => aiTitleFor(id) });
+  }
+  items.push("sep");
   for (const g of groupState.groups) {
     if (g.id === current) continue;
     items.push({ label: `Add to "${g.name}"`, color: g.color, action: () => assignToGroup(id, g.id) });
@@ -916,6 +933,8 @@ function renameTab(id: number) {
   inlineRename(tab.label, baseLabel(id).text, (v) => {
     if (v) {
       customTitles[id] = v;
+      delete aiTitles[id]; // user rename supersedes any AI suggestion
+      saveAiTitles();
     } else if (v === null && !customTitles[id]) {
       // cancelled, nothing to change
     }
@@ -1131,6 +1150,90 @@ function renderHiddenPills() {
     });
     requireConfirm(kill, () => killSession(id));
     hiddenbar.appendChild(pill);
+  }
+}
+
+// ── AI titles (optional; needs an API key in settings) ──────────────────
+
+/// Last ~N meaningful lines of a terminal's buffer, as plain text.
+function terminalTail(term: Terminal, maxLines = 30): string {
+  const buf = term.buffer.active;
+  const end = buf.baseY + buf.cursorY;
+  const lines: string[] = [];
+  for (let i = Math.max(0, end - 80); i <= end; i++) {
+    const line = buf.getLine(i)?.translateToString(true).trimEnd();
+    if (line) lines.push(line.slice(0, 200));
+  }
+  return lines.slice(-maxLines).join("\n");
+}
+
+const aiTitleInFlight = new Set<number>();
+const aiTitleLastRun = new Map<number, { at: number; tail: string }>();
+
+async function aiTitleFor(id: number): Promise<void> {
+  const key = config.ai_api_key?.trim();
+  const tab = tabs.get(id);
+  if (!key || !tab || aiTitleInFlight.has(id)) return;
+  aiTitleInFlight.add(id);
+  try {
+    const info = lastInfo.get(id);
+    const context = [
+      `Working directory: ${info?.cwd ?? "unknown"}`,
+      `Running programs: ${(info?.running ?? []).join(", ") || "just the shell"}`,
+      "Recent terminal output:",
+      terminalTail(tab.term) || "(no output yet)",
+    ].join("\n");
+
+    const client = new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true });
+    const response = (await client.beta.messages.create({
+      model: config.ai_model || "claude-opus-5",
+      max_tokens: 1000,
+      output_config: { effort: "low" },
+      // Server-side fallback: if safety classifiers decline (terminal
+      // content can trip them during e.g. security work), another model
+      // titles the tab instead of failing silently.
+      betas: ["server-side-fallback-2026-07-01"],
+      system:
+        "You name terminal tabs. Reply with only a title of 2-4 words describing what this terminal session is being used for. No quotes, no trailing punctuation, no explanation.",
+      messages: [{ role: "user", content: context }],
+      // SDK typings may lag the "default" fallbacks mode; pass it through.
+      ...({ fallbacks: "default" } as object),
+    })) as Anthropic.Beta.BetaMessage;
+
+    if (response.stop_reason === "refusal") return; // keep the current title
+    const text = response.content.find(
+      (b): b is Anthropic.Beta.BetaTextBlock => b.type === "text"
+    );
+    const title = text ? text.text.trim().split("\n")[0].slice(0, 40) : "";
+    if (title) {
+      aiTitles[id] = title;
+      saveAiTitles();
+      sidebarSig = "";
+      refreshChrome();
+    }
+  } catch (err) {
+    console.error("AI title failed:", err);
+  } finally {
+    aiTitleInFlight.delete(id);
+  }
+}
+
+/// Auto mode: every tick, title at most one open tab that has no custom
+/// name and whose content changed since its last AI pass.
+async function aiAutoTitleTick() {
+  if (!config.ai_auto_titles || !config.ai_api_key?.trim()) return;
+  const now = Date.now();
+  for (const id of orderedIds()) {
+    if (customTitles[id]) continue;
+    const tab = tabs.get(id);
+    if (!tab) continue;
+    const tail = terminalTail(tab.term, 10);
+    if (!tail) continue;
+    const last = aiTitleLastRun.get(id);
+    if (last && (now - last.at < 5 * 60_000 || last.tail === tail)) continue;
+    aiTitleLastRun.set(id, { at: now, tail });
+    await aiTitleFor(id);
+    return; // one per tick keeps cost bounded
   }
 }
 
@@ -1491,6 +1594,50 @@ function buildSettingsMenu() {
       })
     )
   );
+
+  const sep = document.createElement("div");
+  sep.className = "menu-sep";
+  settingsMenu.appendChild(sep);
+
+  const keyInput = document.createElement("input");
+  keyInput.className = "set-control";
+  keyInput.type = "password";
+  keyInput.placeholder = "sk-ant-…";
+  keyInput.value = config.ai_api_key ?? "";
+  keyInput.addEventListener("change", () => {
+    config.ai_api_key = keyInput.value.trim() || undefined;
+    saveConfig();
+  });
+  settingsMenu.appendChild(setRow("AI API key", keyInput));
+  settingsMenu.appendChild(
+    setRow(
+      "AI model",
+      mkSelect(
+        [
+          ["claude-opus-5", "Claude Opus 5"],
+          ["claude-haiku-4-5", "Claude Haiku 4.5 (cheaper)"],
+        ],
+        config.ai_model ?? "claude-opus-5",
+        (v) => {
+          config.ai_model = v;
+          saveConfig();
+        }
+      )
+    )
+  );
+  settingsMenu.appendChild(
+    setRow(
+      "AI auto-titles",
+      mkSelect(
+        [["off", "Off"], ["on", "On"]],
+        config.ai_auto_titles ? "on" : "off",
+        (v) => {
+          config.ai_auto_titles = v === "on";
+          saveConfig();
+        }
+      )
+    )
+  );
 }
 
 async function main() {
@@ -1511,6 +1658,7 @@ async function main() {
     // back. Stale titles get pruned against the daemon list at startup.
     hidden.delete(event.payload.id);
     saveHidden();
+    aiTitleLastRun.delete(event.payload.id);
     removeTab(event.payload.id);
     // Let the daemon finish its exit/trash transition, then show the
     // session's "closes in Xm" row.
@@ -1566,6 +1714,7 @@ async function main() {
   });
   new ResizeObserver(() => refreshChrome()).observe(tabbar);
   window.setInterval(updateLiveInfo, 5000);
+  window.setInterval(aiAutoTitleTick, 120_000);
 
   // Drag-and-drop reordering, with group awareness: dropping between a
   // group's members joins it, past its right edge leaves it, onto the
