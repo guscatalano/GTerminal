@@ -653,6 +653,60 @@ input.set-control {
   max-width: 220px;
 }
 
+/* Session templates editor: full-width rows under their setting label. */
+.setting:has(.tpl-list) {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.tpl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tpl-row {
+  display: grid;
+  grid-template-columns: 1fr 160px 1.4fr 1fr 26px;
+  gap: 6px;
+  align-items: center;
+}
+
+.tpl-row .set-control {
+  max-width: none;
+  width: auto;
+}
+
+.tpl-del {
+  background: none;
+  border: none;
+  color: var(--muted2);
+  cursor: pointer;
+  font-size: 13px;
+  border-radius: 4px;
+  padding: 3px 0;
+}
+
+.tpl-del:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+}
+
+.set-btn {
+  align-self: flex-start;
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--border2);
+  border-radius: 5px;
+  font: 12px "Segoe UI", sans-serif;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.set-btn:hover {
+  border-color: var(--accent);
+}
+
 /* ── terminal panes ──────────────────────────────────────────────────── */
 
 #panes {

@@ -272,6 +272,20 @@ else { Pass "bad default_cwd falls back to home" }
 $j.Client.Close()
 $null = Request2 $port "{""cmd"":""kill"",""id"":$id6}"
 try { $null = Request2 $port "{""cmd"":""kill"",""id"":$id6}" 0 } catch {}
+
+# ── explicit create cwd (templates) beats config default_cwd ──
+# config still points at the bogus Q:\ path; the request's cwd must win.
+$id7 = (Request2 $port '{"cmd":"create","cols":100,"rows":30,"cwd":"C:\\Windows"}').id
+$k = New-Conn $port
+$k.Writer.WriteLine("{""cmd"":""attach"",""id"":$id7}")
+$null = Read-Line2 $k
+$k.Writer.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')
+Start-Sleep -Seconds 6
+$s = Get-Sessions $port | Where-Object id -eq $id7
+if ($s.cwd -notlike "*Windows") { Fail "template-cwd" "cwd=$($s.cwd)" } else { Pass "explicit create cwd overrides default_cwd" }
+$k.Client.Close()
+$null = Request2 $port "{""cmd"":""kill"",""id"":$id7}"
+try { $null = Request2 $port "{""cmd"":""kill"",""id"":$id7}" 0 } catch {}
 Remove-Item $defDir -Recurse -Force -ErrorAction SilentlyContinue
 
 # ════ cleanup ════

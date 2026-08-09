@@ -60,6 +60,16 @@ function iconFor(running: string[]): string {
 // User config (%LOCALAPPDATA%\GTerminal\config.json), loaded at startup.
 // cursor_style: "bar" | "block" | "underline" (default bar, like Windows
 // Terminal); cursor_blink: boolean (default true).
+// A "new tab" preset: right-clicking the + button lists these. Unset
+// fields fall back to the regular defaults (default_shell, default_cwd,
+// automatic titles).
+interface SessionTemplate {
+  name: string;
+  shell?: string;
+  cwd?: string;
+  title?: string;
+}
+
 interface AppConfig {
   cursor_style?: CursorStyle;
   cursor_blink?: boolean;
@@ -75,6 +85,7 @@ interface AppConfig {
   ai_auto_titles?: boolean;
   default_shell?: string;
   default_cwd?: string;
+  templates?: SessionTemplate[];
   title_mode?: string;
   title_template?: string;
   bg_style?: string;
@@ -908,7 +919,7 @@ function cycleTab(dir: number) {
   setActive(ids[(i + dir + ids.length) % ids.length]);
 }
 
-async function createTab(attachId?: number, shell?: string) {
+async function createTab(attachId?: number, shell?: string, cwd?: string, title?: string) {
   const pane = document.createElement("div");
   pane.className = "pane active";
   panes.appendChild(pane);
@@ -953,6 +964,7 @@ async function createTab(attachId?: number, shell?: string) {
         cols: term.cols,
         rows: term.rows,
         shell: shell ?? config.default_shell ?? null,
+        cwd: cwd ?? null,
       });
     }
   } catch (err) {
@@ -960,6 +972,13 @@ async function createTab(attachId?: number, shell?: string) {
     term.dispose();
     pane.remove();
     return;
+  }
+
+  // Template-given titles behave like a user rename: they stick and are
+  // never overwritten by auto labels. Set before the tab label renders.
+  if (title && !customTitles[id]) {
+    customTitles[id] = title;
+    saveCustomTitles();
   }
 
   if (hidden.delete(id)) {
@@ -2210,6 +2229,75 @@ function buildSettingsPage() {
     "New tabs start in this folder. Falls back to your home directory if the path doesn't exist.",
     cwdInput
   );
+  // Session templates: named presets combining shell, folder, and title.
+  const mkTplInput = (ph: string, value: string, onChange: (v: string) => void) => {
+    const input = document.createElement("input");
+    input.className = "set-control";
+    input.type = "text";
+    input.placeholder = ph;
+    input.value = value;
+    input.addEventListener("change", () => onChange(input.value.trim()));
+    return input;
+  };
+  const tplBlock = document.createElement("div");
+  tplBlock.className = "tpl-list";
+  const renderTemplates = () => {
+    tplBlock.innerHTML = "";
+    (config.templates ?? []).forEach((t, i) => {
+      const row = document.createElement("div");
+      row.className = "tpl-row";
+      const name = mkTplInput("Name", t.name, (v) => {
+        t.name = v;
+        saveConfig();
+      });
+      const shellSel = mkSelect(
+        [["auto", "Default shell"], ...SHELL_CHOICES.filter(([v]) => v !== "auto")],
+        t.shell ?? "auto",
+        (v) => {
+          t.shell = v === "auto" ? undefined : v;
+          saveConfig();
+        }
+      );
+      const cwd = mkTplInput("Start folder (blank = default)", t.cwd ?? "", (v) => {
+        t.cwd = v || undefined;
+        saveConfig();
+      });
+      const title = mkTplInput("Tab title (blank = automatic)", t.title ?? "", (v) => {
+        t.title = v || undefined;
+        saveConfig();
+      });
+      const del = document.createElement("button");
+      del.className = "tpl-del";
+      del.textContent = "✕";
+      del.title = "Remove template";
+      del.addEventListener("click", () => {
+        config.templates!.splice(i, 1);
+        if (!config.templates!.length) config.templates = undefined;
+        saveConfig();
+        renderTemplates();
+      });
+      row.append(name, shellSel, cwd, title, del);
+      tplBlock.appendChild(row);
+    });
+    const add = document.createElement("button");
+    add.className = "set-btn";
+    add.textContent = "+ Add template";
+    add.addEventListener("click", () => {
+      config.templates = [
+        ...(config.templates ?? []),
+        { name: `Template ${(config.templates?.length ?? 0) + 1}` },
+      ];
+      saveConfig();
+      renderTemplates();
+    });
+    tplBlock.appendChild(add);
+  };
+  renderTemplates();
+  settingRow(
+    "Templates",
+    "Named presets for new tabs — shell, start folder, and tab title. Right-click the + button to open one.",
+    tplBlock
+  );
   settingRow(
     "Undo window (minutes)",
     "Closed or exited sessions stay restorable this long before they actually die. 0 disables the grace period.",
@@ -2320,14 +2408,20 @@ async function main() {
   const newShellMenu = (e: MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    showContextMenu(
-      e.clientX,
-      e.clientY,
-      SHELL_CHOICES.filter(([v]) => v !== "auto").map(([v, label]) => ({
+    const items: CtxItem[] = (config.templates ?? [])
+      .filter((t) => t.name.trim())
+      .map((t) => ({
+        label: t.name,
+        action: () => createTab(undefined, t.shell, t.cwd, t.title),
+      }));
+    if (items.length) items.push("sep");
+    items.push(
+      ...SHELL_CHOICES.filter(([v]) => v !== "auto").map(([v, label]): CtxItem => ({
         label: `New ${label} tab`,
         action: () => createTab(undefined, v),
       }))
     );
+    showContextMenu(e.clientX, e.clientY, items);
   };
   const newTabBtn = document.getElementById("newtab")!;
   newTabBtn.addEventListener("click", () => createTab());

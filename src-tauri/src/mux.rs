@@ -51,6 +51,10 @@ pub enum Request {
         rows: u16,
         #[serde(default)]
         shell: Option<String>,
+        /// Explicit start directory (session templates); overrides
+        /// config.default_cwd. Falls back to home if not a directory.
+        #[serde(default)]
+        cwd: Option<String>,
     },
     Kill { id: u32 },
     Attach { id: u32 },
@@ -602,15 +606,21 @@ fn conn_loop(
                 list.sort_by_key(|s| s.created_ms);
                 write_line(&mut out, &json!({"ok": true, "sessions": list}))?;
             }
-            Request::Create { cols, rows, shell } => {
+            Request::Create { cols, rows, shell, cwd } => {
                 let id = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
-                // New sessions honor config.default_cwd when set; start_session
-                // falls back to the home dir if the path isn't a directory.
-                let start_dir = read_config()
-                    .get("default_cwd")
-                    .and_then(|v| v.as_str())
+                // Start directory precedence: request cwd (templates), then
+                // config.default_cwd, then home. start_session additionally
+                // falls back to home if the path isn't a directory.
+                let start_dir = cwd
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
+                    .or_else(|| {
+                        read_config()
+                            .get("default_cwd")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                    })
                     .unwrap_or_else(|| {
                         std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\".into())
                     });
