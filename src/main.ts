@@ -2801,6 +2801,10 @@ async function main() {
   };
   sessions.sort((a, b) => rank(a.id) - rank(b.id) || a.created_ms - b.created_ms);
   for (const s of sessions) {
+    // Never re-adopt a session the user closed: attaching cancels its
+    // pending kill, so an app restart would resurrect every tab still in
+    // its grace window. They stay under "Closing soon" instead.
+    if (s.expires_ms) continue;
     if (!hidden.has(s.id)) await createTab(s.id);
   }
   if (tabs.size === 0) await createTab();
