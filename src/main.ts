@@ -997,7 +997,7 @@ THEMES.cyberpunk = mkTheme(
   "Cyberpunk",
   "white",
   ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "block"],
-  'linear-gradient(rgba(10,10,18,0.5), rgba(10,10,18,0.66)), url("/backgrounds/cyberpunk.png") center / cover no-repeat, linear-gradient(180deg, #0d0d12, #16101f)',
+  'linear-gradient(rgba(10,10,18,0.35), rgba(10,10,18,0.5)), url("/backgrounds/cyberpunk.png") center / cover no-repeat, linear-gradient(180deg, #0d0d12, #16101f)',
   "#0d0d12",
   "#eaeaf0",
   [
