@@ -86,6 +86,8 @@ interface AppConfig {
   default_shell?: string;
   default_cwd?: string;
   templates?: SessionTemplate[];
+  history_days?: number;
+  prediction?: string;
   title_mode?: string;
   title_template?: string;
   bg_style?: string;
@@ -1185,6 +1187,177 @@ function closeSettings() {
     fitTab(tab);
     tab.term.focus();
   }
+}
+
+// ── history page: durable transcripts of past sessions ─────────────────
+
+interface HistoryEntry {
+  stem: string;
+  id: number;
+  created_ms: number;
+  ended_ms: number | null;
+  cwd: string;
+  shell: string;
+  bytes: number;
+}
+
+// Same escape-mode cleanup the daemon uses for resurrection replays: a
+// transcript can contain a TUI's mouse/altscreen mode enables.
+const VIEWER_MODE_RESET =
+  "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?2004l\x1b[?1l\x1b[?1049l\x1b[?47l\x1b[?1004l\x1b[?9001l\x1b[?25h\x1b[0m\r\n";
+
+function stripAnsiText(s: string): string {
+  return s
+    .replace(/\u001b\][^\u0007\u001b]*(\u0007|\u001b\\)/g, "")
+    .replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "")
+    .replace(/\u001b[=>]/g, "");
+}
+
+function fmtStamp(ms: number): string {
+  return new Date(ms).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function fmtSize(b: number): string {
+  return b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`;
+}
+
+function historyOpen(): boolean {
+  return app.classList.contains("history-on");
+}
+
+function openHistory() {
+  app.classList.remove("settings-on");
+  app.classList.add("history-on");
+  void buildHistoryPage();
+}
+
+function closeHistory() {
+  if (!historyOpen()) return;
+  app.classList.remove("history-on");
+  const tab = activeId !== null ? tabs.get(activeId) : undefined;
+  if (tab) {
+    fitTab(tab);
+    tab.term.focus();
+  }
+}
+
+async function buildHistoryPage(filter?: string) {
+  const list = document.getElementById("history-list")!;
+  list.innerHTML = "";
+  let entries: HistoryEntry[] = [];
+  try {
+    entries = await invoke<HistoryEntry[]>("history_list");
+  } catch (err) {
+    console.error("history_list failed:", err);
+  }
+  const needle = filter?.trim().toLowerCase();
+  const shown: HistoryEntry[] = [];
+  for (const en of entries) {
+    if (needle) {
+      let match = `${en.cwd} ${en.shell}`.toLowerCase().includes(needle);
+      if (!match) {
+        try {
+          const text = stripAnsiText(await invoke<string>("history_read", { stem: en.stem }));
+          match = text.toLowerCase().includes(needle);
+        } catch {
+          match = false;
+        }
+      }
+      if (!match) continue;
+    }
+    shown.push(en);
+  }
+  if (!shown.length) {
+    const empty = document.createElement("div");
+    empty.className = "hist-empty";
+    empty.textContent = needle
+      ? "No transcripts match that search."
+      : (config.history_days ?? 14) === 0
+        ? "History recording is disabled (Settings → Sessions → Keep history)."
+        : "No transcripts yet — history builds up as sessions run.";
+    list.appendChild(empty);
+    return;
+  }
+  for (const en of shown) {
+    const row = document.createElement("div");
+    row.className = "hist-row";
+    const when = document.createElement("span");
+    when.className = "hist-when";
+    when.textContent = en.ended_ms
+      ? `${fmtStamp(en.created_ms)} → ${fmtStamp(en.ended_ms)}`
+      : fmtStamp(en.created_ms);
+    const cwd = document.createElement("span");
+    cwd.className = "hist-cwd";
+    cwd.textContent = en.cwd;
+    cwd.title = en.cwd;
+    const shell = document.createElement("span");
+    shell.className = "hist-shell";
+    shell.textContent = en.shell;
+    const size = document.createElement("span");
+    size.className = "hist-size";
+    size.textContent = fmtSize(en.bytes);
+    row.append(when, cwd, shell, size);
+    if (!en.ended_ms) {
+      const live = document.createElement("span");
+      live.className = "hist-live";
+      live.textContent = "● live";
+      row.appendChild(live);
+    }
+    row.addEventListener("click", () => void openTranscript(en));
+    list.appendChild(row);
+  }
+}
+
+let viewerTerm: Terminal | null = null;
+let viewerFit: FitAddon | null = null;
+
+async function openTranscript(en: HistoryEntry) {
+  let data: string;
+  try {
+    data = await invoke<string>("history_read", { stem: en.stem });
+  } catch (err) {
+    console.error("history_read failed:", err);
+    return;
+  }
+  const viewer = document.getElementById("history-viewer")!;
+  document.getElementById("history-viewer-title")!.textContent =
+    `${fmtStamp(en.created_ms)} · ${en.shell} · ${en.cwd}`;
+  viewer.classList.add("open");
+  closeTranscriptTerm();
+  const term = new Terminal({
+    fontFamily: effFont(),
+    fontSize: effFontSize(),
+    lineHeight: effLineHeight(),
+    scrollback: 200000,
+    theme: effXtermTheme(),
+    allowTransparency: true,
+    minimumContrastRatio: 4.5,
+    disableStdin: true,
+    allowProposedApi: true,
+  });
+  viewerTerm = term;
+  viewerFit = new FitAddon();
+  term.loadAddon(viewerFit);
+  term.open(document.getElementById("history-term")!);
+  viewerFit.fit();
+  term.write(data + VIEWER_MODE_RESET);
+}
+
+function closeTranscriptTerm() {
+  viewerTerm?.dispose();
+  viewerTerm = null;
+  viewerFit = null;
+  document.getElementById("history-term")!.innerHTML = "";
+}
+
+function closeViewer() {
+  document.getElementById("history-viewer")!.classList.remove("open");
+  closeTranscriptTerm();
 }
 
 type CtxItem = { label: string; action: () => void; color?: string; confirm?: boolean } | "sep";
@@ -2299,6 +2472,31 @@ function buildSettingsPage() {
     tplBlock
   );
   settingRow(
+    "Keep history (days)",
+    "Every session's output is recorded and browsable from the ◷ button, even after the session dies. 0 disables recording.",
+    mkNumber(config.history_days ?? 14, 0, 365, (v) => {
+      config.history_days = v;
+      saveConfig();
+    })
+  );
+  settingRow(
+    "Autocomplete suggestions",
+    "PSReadLine prediction for new PowerShell tabs. Smart modes pull from your command history (and predictor plugins); List shows a navigable dropdown.",
+    mkSelect(
+      [
+        ["shell", "Shell default"],
+        ["inline", "Smart inline ghost text"],
+        ["list", "Smart dropdown list"],
+        ["off", "Off"],
+      ],
+      config.prediction ?? "shell",
+      (v) => {
+        config.prediction = v === "shell" ? undefined : v;
+        saveConfig();
+      }
+    )
+  );
+  settingRow(
     "Undo window (minutes)",
     "Closed or exited sessions stay restorable this long before they actually die. 0 disables the grace period.",
     mkNumber(config.grace_minutes ?? 5, 0, 120, (v) => {
@@ -2446,9 +2644,25 @@ async function main() {
   settingsBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     closeMenus();
+    closeHistory();
     if (settingsOpen()) closeSettings();
     else openSettings();
   });
+  const historyBtn = document.getElementById("historybtn")!;
+  historyBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    closeMenus();
+    closeSettings();
+    if (historyOpen()) closeHistory();
+    else openHistory();
+  });
+  document.getElementById("history-close")!.addEventListener("click", closeHistory);
+  document.getElementById("history-back")!.addEventListener("click", closeViewer);
+  const histSearch = document.getElementById("history-search") as HTMLInputElement;
+  histSearch.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") void buildHistoryPage(histSearch.value);
+  });
+  window.addEventListener("resize", () => viewerFit?.fit());
   document.addEventListener("mousedown", (e) => {
     const target = e.target as Node;
     for (const m of [restoreMenu, overflowMenu, hiddenMenu, ctxMenu]) {
@@ -2462,10 +2676,22 @@ async function main() {
   window.addEventListener("contextmenu", (e) => e.preventDefault());
   document.getElementById("settings-close")!.addEventListener("click", closeSettings);
   window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && settingsOpen()) {
-      e.preventDefault();
-      closeSettings();
-      return;
+    if (e.key === "Escape") {
+      if (document.getElementById("history-viewer")!.classList.contains("open")) {
+        e.preventDefault();
+        closeViewer();
+        return;
+      }
+      if (historyOpen()) {
+        e.preventDefault();
+        closeHistory();
+        return;
+      }
+      if (settingsOpen()) {
+        e.preventDefault();
+        closeSettings();
+        return;
+      }
     }
     if (e.ctrlKey && e.shiftKey && e.key.toUpperCase() === "T") {
       e.preventDefault();

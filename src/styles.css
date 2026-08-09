@@ -179,6 +179,8 @@ body,
   min-width: 0;
   display: flex;
   flex-direction: column;
+  /* anchors the full-screen transcript viewer overlay */
+  position: relative;
 }
 
 #tabbar-row {
@@ -581,6 +583,142 @@ input.set-control {
 
 #app.settings-on #panes {
   display: none;
+}
+
+/* ── history page (transcripts of past sessions) ─────────────────────── */
+
+#history-page {
+  display: none;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+#app.history-on #history-page {
+  display: block;
+}
+
+#app.history-on #panes,
+#app.history-on #settings-page {
+  display: none;
+}
+
+#history-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 14px;
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--border2);
+  border-radius: 5px;
+  font: 13px "Segoe UI", sans-serif;
+  padding: 6px 10px;
+}
+
+.hist-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.hist-row:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.hist-when {
+  font: 12px "Segoe UI", sans-serif;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.hist-live {
+  color: var(--accent);
+  font: 11px "Segoe UI", sans-serif;
+}
+
+.hist-cwd {
+  flex: 1;
+  min-width: 0;
+  font: 12px Consolas, monospace;
+  color: var(--muted2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.hist-shell,
+.hist-size {
+  font: 11px "Segoe UI", sans-serif;
+  color: var(--muted2);
+  white-space: nowrap;
+}
+
+.hist-empty {
+  padding: 18px 8px;
+  color: var(--muted2);
+  font: 13px "Segoe UI", sans-serif;
+}
+
+/* full-screen read-only transcript viewer */
+#history-viewer {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  background: var(--bg);
+  flex-direction: column;
+}
+
+#history-viewer.open {
+  display: flex;
+}
+
+#history-viewer-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+#history-viewer-bar button {
+  background: none;
+  border: 1px solid var(--border2);
+  color: var(--text);
+  border-radius: 5px;
+  font: 12px "Segoe UI", sans-serif;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+#history-viewer-bar button:hover {
+  border-color: var(--accent);
+}
+
+#history-viewer-title {
+  font: 12px "Segoe UI", sans-serif;
+  color: var(--muted2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#history-term {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 0 6px 8px;
+}
+
+#history-term .xterm-viewport {
+  background-color: transparent !important;
 }
 
 .settings-inner {

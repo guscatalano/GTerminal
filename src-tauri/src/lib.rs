@@ -166,6 +166,69 @@ fn set_config(value: serde_json::Value) -> Result<(), String> {
     mux::write_config(&value)
 }
 
+/// A history transcript row for the History page. `stem` names the
+/// transcript file pair; `bytes` is the transcript's size on disk.
+#[derive(serde::Serialize)]
+struct HistoryEntry {
+    stem: String,
+    id: u32,
+    created_ms: u64,
+    ended_ms: Option<u64>,
+    cwd: String,
+    shell: String,
+    bytes: u64,
+}
+
+#[tauri::command]
+fn history_list() -> Result<Vec<HistoryEntry>, String> {
+    let dir = mux::history_dir();
+    let mut out = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            let Some(meta) = std::fs::read_to_string(&p)
+                .ok()
+                .and_then(|t| serde_json::from_str::<mux::HistoryMeta>(&t).ok())
+            else {
+                continue;
+            };
+            let stem = p
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let bytes = std::fs::metadata(dir.join(format!("{stem}.log")))
+                .map(|m| m.len())
+                .unwrap_or(0);
+            out.push(HistoryEntry {
+                stem,
+                id: meta.id,
+                created_ms: meta.created_ms,
+                ended_ms: meta.ended_ms,
+                cwd: meta.cwd,
+                shell: meta.shell,
+                bytes,
+            });
+        }
+    }
+    out.sort_by(|a, b| b.created_ms.cmp(&a.created_ms));
+    Ok(out)
+}
+
+#[tauri::command]
+fn history_read(stem: String) -> Result<String, String> {
+    // Stems are "{created_ms}-{id}" — digits and dashes only, so the
+    // path below can't escape the history directory.
+    if stem.is_empty() || !stem.chars().all(|c| c.is_ascii_digit() || c == '-') {
+        return Err("bad stem".into());
+    }
+    let bytes = std::fs::read(mux::history_dir().join(format!("{stem}.log")))
+        .map_err(|e| e.to_string())?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if std::env::args().any(|a| a == "--daemon") {
@@ -184,7 +247,9 @@ pub fn run() {
             detach_session,
             kill_session,
             get_config,
-            set_config
+            set_config,
+            history_list,
+            history_read
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

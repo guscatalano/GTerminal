@@ -21,6 +21,7 @@
           <div id="hiddenbar"></div>
           <button id="newtab" title="New tab (Ctrl+Shift+T) — right-click for shell choice">+</button>
           <button id="restore" title="Restore a detached session (Ctrl+Shift+Z)">⟳</button>
+          <button id="historybtn" title="Session history — transcripts of past sessions">◷</button>
           <button id="settingsbtn" title="Settings">⚙</button>
           <div id="restore-menu" class="menu"></div>
           <div id="overflow-menu" class="menu"></div>
@@ -35,6 +36,23 @@
             </div>
             <div id="settings-list"></div>
           </div>
+        </div>
+        <div id="history-page">
+          <div class="settings-inner">
+            <div class="settings-h1">
+              <span>History</span>
+              <button id="history-close" title="Close (Esc)">×</button>
+            </div>
+            <input id="history-search" type="text" placeholder="Search transcripts… (Enter)" />
+            <div id="history-list"></div>
+          </div>
+        </div>
+        <div id="history-viewer">
+          <div id="history-viewer-bar">
+            <button id="history-back">← history</button>
+            <span id="history-viewer-title"></span>
+          </div>
+          <div id="history-term"></div>
         </div>
       </div>
     </div>

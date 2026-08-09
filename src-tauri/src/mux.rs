@@ -28,6 +28,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const RING_MAX: usize = 512 * 1024;
 const FLUSH_INTERVAL: Duration = Duration::from_secs(3);
+/// Per-session transcript size cap; recording stops (with a notice) beyond it.
+const HISTORY_MAX: u64 = 10 * 1024 * 1024;
 
 /// Undo terminal modes a dead TUI may have left enabled in the replayed
 /// scrollback: mouse tracking (1000/1002/1003/1005/1006 — the "mouse types
@@ -145,6 +147,9 @@ struct Session {
     /// Soft-killed: the process is still running but will be killed for
     /// real at this time unless an attach cancels the doom.
     doomed_until: Option<u64>,
+    /// Durable history transcript; None when disabled or size-capped.
+    transcript: Option<std::fs::File>,
+    transcript_len: u64,
 }
 
 /// A persisted session whose process is gone (reboot, daemon crash, or a
@@ -188,6 +193,84 @@ fn meta_path(id: u32) -> PathBuf {
 
 fn ring_path(id: u32) -> PathBuf {
     sessions_dir().join(format!("{id}.ring"))
+}
+
+/// Durable transcripts: every session's raw output is appended to
+/// history/{created_ms}-{id}.log with a {stem}.json meta beside it, kept
+/// for config.history_days after the session ends (default 14, 0 = off).
+pub fn history_dir() -> PathBuf {
+    state_dir().join("history")
+}
+
+fn history_days() -> u64 {
+    read_config()
+        .get("history_days")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(14)
+}
+
+/// Meta sidecar for a transcript. ended_ms is stamped when the session
+/// ends (or at daemon startup for sessions lost to a crash/reboot).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryMeta {
+    pub id: u32,
+    pub created_ms: u64,
+    #[serde(default)]
+    pub ended_ms: Option<u64>,
+    pub cwd: String,
+    pub shell: String,
+}
+
+fn history_stem(created_ms: u64, id: u32) -> String {
+    format!("{created_ms}-{id}")
+}
+
+fn write_history_meta(meta: &HistoryMeta) {
+    let stem = history_stem(meta.created_ms, meta.id);
+    let _ = std::fs::write(
+        history_dir().join(format!("{stem}.json")),
+        serde_json::to_string(meta).expect("serialize"),
+    );
+}
+
+fn finish_history(s: &Session, id: u32) {
+    if history_days() == 0 {
+        return;
+    }
+    let stem = history_stem(s.created_ms, id);
+    if history_dir().join(format!("{stem}.json")).exists() {
+        write_history_meta(&HistoryMeta {
+            id,
+            created_ms: s.created_ms,
+            ended_ms: Some(now_ms()),
+            cwd: s.cwd.clone(),
+            shell: s.shell.clone(),
+        });
+    }
+}
+
+/// Stamp ended_ms on any transcript left open by a daemon that died with
+/// live sessions (crash or reboot); nothing is live at startup.
+fn finalize_stale_history() {
+    let Ok(rd) = std::fs::read_dir(history_dir()) else {
+        return;
+    };
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(mut meta) = std::fs::read_to_string(&p)
+            .ok()
+            .and_then(|t| serde_json::from_str::<HistoryMeta>(&t).ok())
+        else {
+            continue;
+        };
+        if meta.ended_ms.is_none() {
+            meta.ended_ms = Some(now_ms());
+            write_history_meta(&meta);
+        }
+    }
 }
 
 fn delete_persist(id: u32) {
@@ -316,6 +399,7 @@ pub fn run_daemon() {
     std::fs::create_dir_all(state_dir()).ok();
     std::fs::write(port_file(), port.to_string()).expect("write port file");
 
+    finalize_stale_history();
     spawn_flush_thread(sessions.clone());
     spawn_purge_thread(sessions.clone());
     spawn_child_monitor(sessions.clone());
@@ -411,6 +495,7 @@ fn end_session(sessions: &Sessions, id: u32) {
             let _ = write_line(&mut w, &json!({"ev": "exit"}));
         }
         let _ = s.child.kill();
+        finish_history(&s, id);
         if let Some(grace) = grace_ms() {
             let meta = Meta {
                 id,
@@ -487,6 +572,7 @@ fn spawn_purge_thread(sessions: Sessions) {
             for id in doomed {
                 if let Some(mut s) = state.live.remove(&id) {
                     let _ = s.child.kill();
+                    finish_history(&s, id);
                     purged.push(id);
                 }
             }
@@ -501,6 +587,7 @@ fn spawn_purge_thread(sessions: Sessions) {
                 purged.push(id);
             }
         }
+        purge_history(&sessions, now);
         if !purged.is_empty() {
             for id in &purged {
                 delete_persist(*id);
@@ -508,6 +595,44 @@ fn spawn_purge_thread(sessions: Sessions) {
             exit_if_idle(&sessions);
         }
     });
+}
+
+/// Delete transcript pairs older than the retention window. Sessions that
+/// are still live or restorable keep their transcripts regardless of age.
+fn purge_history(sessions: &Sessions, now: u64) {
+    let days = history_days();
+    if days == 0 {
+        return;
+    }
+    let cutoff = now.saturating_sub(days * 24 * 3600 * 1000);
+    let keep: std::collections::HashSet<String> = {
+        let state = sessions.lock().unwrap();
+        state
+            .live
+            .iter()
+            .map(|(id, s)| history_stem(s.created_ms, *id))
+            .chain(
+                state
+                    .cold
+                    .iter()
+                    .map(|(id, c)| history_stem(c.created_ms, *id)),
+            )
+            .collect()
+    };
+    let Ok(rd) = std::fs::read_dir(history_dir()) else {
+        return;
+    };
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        let stem = name
+            .trim_end_matches(".log")
+            .trim_end_matches(".json")
+            .to_string();
+        let created: Option<u64> = stem.split('-').next().and_then(|t| t.parse().ok());
+        if created.is_some_and(|t| t < cutoff) && !keep.contains(&stem) {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
 }
 
 fn exit_if_idle(sessions: &Sessions) {
@@ -775,9 +900,29 @@ fn start_session(
     } else {
         std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\".into())
     };
+    // PSReadLine prediction ("autocomplete ghost text") per config: smarter
+    // sources / list view / off. try/catch keeps old PSReadLine versions
+    // (Windows PowerShell 5.1) from erroring at startup.
+    let prediction = read_config()
+        .get("prediction")
+        .and_then(|v| v.as_str())
+        .unwrap_or("shell")
+        .to_string();
+    let ps_init = match prediction.as_str() {
+        "inline" | "list" => {
+            let view = if prediction == "list" { "ListView" } else { "InlineView" };
+            format!(
+                "{PROMPT_CMD}; try {{ Set-PSReadLineOption -PredictionSource HistoryAndPlugin -PredictionViewStyle {view} -ErrorAction Stop }} catch {{ try {{ Set-PSReadLineOption -PredictionSource History -PredictionViewStyle {view} }} catch {{}} }}"
+            )
+        }
+        "off" => format!(
+            "{PROMPT_CMD}; try {{ Set-PSReadLineOption -PredictionSource None -ErrorAction Stop }} catch {{}}"
+        ),
+        _ => PROMPT_CMD.to_string(),
+    };
     let build_ps = |exe: &str| {
         let mut cmd = CommandBuilder::new(exe);
-        cmd.args(["-NoLogo", "-NoExit", "-Command", PROMPT_CMD]);
+        cmd.args(["-NoLogo", "-NoExit", "-Command", &ps_init]);
         cmd.cwd(&cwd);
         cmd.env("TERM", "xterm-256color");
         cmd
@@ -817,6 +962,33 @@ fn start_session(
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
 
+    // Transcript opens in append mode: a resurrected session (same
+    // created_ms + id) continues the transcript of its past life.
+    let (transcript, transcript_len) = if history_days() > 0 {
+        let _ = std::fs::create_dir_all(history_dir());
+        let stem = history_stem(created_ms, id);
+        write_history_meta(&HistoryMeta {
+            id,
+            created_ms,
+            ended_ms: None,
+            cwd: cwd.clone(),
+            shell: shell.to_string(),
+        });
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(history_dir().join(format!("{stem}.log")))
+        {
+            Ok(f) => {
+                let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+                (Some(f), len)
+            }
+            Err(_) => (None, 0),
+        }
+    } else {
+        (None, 0)
+    };
+
     let child_pid = child.process_id();
     sessions.lock().unwrap().live.insert(
         id,
@@ -833,6 +1005,8 @@ fn start_session(
             dirty: true,
             pending_input: None,
             doomed_until: None,
+            transcript,
+            transcript_len,
         },
     );
 
@@ -855,6 +1029,16 @@ fn start_session(
                 s.ring.drain(..excess);
             }
             s.dirty = true;
+            if let Some(f) = s.transcript.as_mut() {
+                let _ = f.write_all(&buf[..n]);
+                s.transcript_len += n as u64;
+                if s.transcript_len >= HISTORY_MAX {
+                    let _ = f.write_all(
+                        b"\r\n\x1b[90m[transcript size cap reached - recording stopped]\x1b[0m\r\n",
+                    );
+                    s.transcript = None;
+                }
+            }
             carry.extend_from_slice(&buf[..n]);
             if let Some(text) = take_valid_utf8(&mut carry) {
                 if let Some(cwd) = parse_cwd(&text) {

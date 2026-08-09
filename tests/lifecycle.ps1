@@ -288,6 +288,59 @@ $null = Request2 $port "{""cmd"":""kill"",""id"":$id7}"
 try { $null = Request2 $port "{""cmd"":""kill"",""id"":$id7}" 0 } catch {}
 Remove-Item $defDir -Recurse -Force -ErrorAction SilentlyContinue
 
+# ── history transcripts: output recorded durably, meta finalized ──
+$hist = "$env:LOCALAPPDATA\GTerminal\history"
+$log = Get-ChildItem $hist -Filter *.log -ErrorAction SilentlyContinue |
+  Where-Object { (Get-Content $_.FullName -Raw) -like "*lifecycle-marker-999*" } |
+  Select-Object -First 1
+if (-not $log) { Fail "history-transcript" "no transcript contains the session-1 marker" }
+else {
+  Pass "history transcript captured session output"
+  $hmPath = Join-Path $hist ($log.BaseName + ".json")
+  if (-not (Test-Path $hmPath)) { Fail "history-meta" "meta json missing for $($log.Name)" }
+  else {
+    $hm = Get-Content $hmPath -Raw | ConvertFrom-Json
+    if ($hm.ended_ms) { Pass "history meta finalized with ended_ms" }
+    else { Fail "history-meta" "ended_ms not stamped after session death" }
+  }
+}
+# retention: plant an ancient transcript pair and wait out a purge tick.
+# A keeper session holds the daemon (and its purge thread) alive meanwhile.
+$keep = (Request2 $port '{"cmd":"create","cols":80,"rows":24}').id
+$oldTs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - 90L * 24 * 3600 * 1000
+Set-Content "$hist\$oldTs-99.log" "ancient output"
+Set-Content "$hist\$oldTs-99.json" "{""id"":99,""created_ms"":$oldTs,""ended_ms"":$oldTs,""cwd"":""C:\\"",""shell"":""auto""}"
+Start-Sleep -Seconds 20
+if ((Test-Path "$hist\$oldTs-99.log") -or (Test-Path "$hist\$oldTs-99.json")) {
+  Fail "history-purge" "90-day-old transcript survived the retention purge"
+} else { Pass "history retention purge removes expired transcripts" }
+$null = Request2 $port "{""cmd"":""kill"",""id"":$keep}"
+try { $null = Request2 $port "{""cmd"":""kill"",""id"":$keep}" 0 } catch {}
+
+# ── prediction "off": PSReadLine ghost suggestions suppressed ──
+# The inline ghost renders as dim+italic (ESC[2m ESC[3m — see the SGR probe);
+# with PredictionSource None those sequences must not appear while typing.
+Set-Content "$env:LOCALAPPDATA\GTerminal\config.json" '{"grace_minutes": 5, "prediction": "off"}'
+$id9 = (Request2 $port '{"cmd":"create","cols":100,"rows":30}').id
+$n2 = New-Conn $port
+$n2.Writer.WriteLine("{""cmd"":""attach"",""id"":$id9}")
+$null = Read-Line2 $n2
+$n2.Writer.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')
+Start-Sleep -Seconds 5
+$null = Drain2 $n2
+foreach ($c in "git sta".ToCharArray()) {
+  $n2.Writer.WriteLine("{""cmd"":""write"",""data"":""$c""}")
+  Start-Sleep -Milliseconds 120
+}
+Start-Sleep -Seconds 1
+$typed = Drain2 $n2 800
+if ($typed.Contains('\u001b[2m\u001b[3m')) { Fail "prediction-off" "ghost suggestion escapes present with prediction=off" }
+elseif (-not $typed.Contains('g')) { Fail "prediction-off" "no echo received while typing" }
+else { Pass "prediction off suppresses ghost suggestions" }
+$n2.Client.Close()
+$null = Request2 $port "{""cmd"":""kill"",""id"":$id9}"
+try { $null = Request2 $port "{""cmd"":""kill"",""id"":$id9}" 0 } catch {}
+
 # ════ cleanup ════
 foreach ($d in $script:daemons) {
   if (Get-Process -Id $d -ErrorAction SilentlyContinue) { Stop-DaemonTree $d }
