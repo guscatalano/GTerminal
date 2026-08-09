@@ -459,35 +459,35 @@ function mkTheme(
 }
 
 const THEMES: Record<string, ThemeDef> = {
-  "one-dark": mkTheme("One Dark", "white", ['"Cascadia Mono", Consolas, monospace', 1.1, "bar"], "radial-gradient(ellipse 70% 50% at 30% 10%, rgba(97,175,239,0.35), transparent 60%), radial-gradient(ellipse 60% 50% at 80% 90%, rgba(198,120,221,0.28), transparent 60%), linear-gradient(170deg, #090b10, #182030)", "#0f1115", "#d7dae0", [
+  "one-dark": mkTheme("One Dark", "white", ['"Cascadia Mono", Consolas, monospace', 1.1, "bar"], "radial-gradient(ellipse 55% 40% at 78% 12%, rgba(97,175,239,0.3), transparent 65%), linear-gradient(115deg, transparent 42%, rgba(198,120,221,0.1) 50%, transparent 58%), linear-gradient(200deg, #131a2b, #0a0c12)", "#0f1115", "#d7dae0", [
     "#1c1f26", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd", "#56b6c2", "#d7dae0",
     "#5c6370", "#ef7d85", "#a9d387", "#f0cd8a", "#74bdf7", "#d48ce8", "#67c5d0", "#f0f2f6",
   ]),
-  dracula: mkTheme("Dracula", "white", ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "block"], "radial-gradient(ellipse 65% 50% at 25% 15%, rgba(189,147,249,0.38), transparent 60%), radial-gradient(ellipse 55% 45% at 80% 85%, rgba(255,121,198,0.28), transparent 60%), linear-gradient(165deg, #17181f, #343a52)", "#282a36", "#f8f8f2", [
+  dracula: mkTheme("Dracula", "white", ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "block"], "radial-gradient(circle at 80% 20%, rgba(248,248,242,0.12) 0 110px, rgba(189,147,249,0.3) 112px 128px, transparent 130px), radial-gradient(ellipse 90% 60% at 78% 18%, rgba(189,147,249,0.28), transparent 60%), radial-gradient(ellipse 70% 50% at 15% 100%, rgba(255,121,198,0.14), transparent 60%), linear-gradient(210deg, #2c2745, #16171f)", "#282a36", "#f8f8f2", [
     "#21222c", "#ff5555", "#50fa7b", "#f1fa8c", "#bd93f9", "#ff79c6", "#8be9fd", "#f8f8f2",
     "#6272a4", "#ff6e6e", "#69ff94", "#ffffa5", "#d6acff", "#ff92df", "#a4ffff", "#ffffff",
   ]),
-  nord: mkTheme("Nord", "white", ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"], "radial-gradient(ellipse 75% 55% at 20% 0%, rgba(136,192,208,0.3), transparent 60%), radial-gradient(ellipse 60% 50% at 85% 95%, rgba(129,161,193,0.28), transparent 60%), linear-gradient(175deg, #20242d, #3d4658)", "#2e3440", "#d8dee9", [
+  nord: mkTheme("Nord", "white", ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"], "linear-gradient(100deg, transparent 18%, rgba(136,192,208,0.26) 30%, transparent 42%), linear-gradient(95deg, transparent 42%, rgba(163,190,140,0.18) 53%, transparent 64%), linear-gradient(107deg, transparent 62%, rgba(180,142,173,0.16) 72%, transparent 84%), linear-gradient(180deg, #1e222b 0%, #2e3440 60%, #272c37 100%)", "#2e3440", "#d8dee9", [
     "#3b4252", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#88c0d0", "#e5e9f0",
     "#7b88a1", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#8fbcbb", "#eceff4",
   ]),
-  gruvbox: mkTheme("Gruvbox Dark", "white", ["Consolas, monospace", 1.1, "block"], "radial-gradient(ellipse 70% 50% at 25% 10%, rgba(215,153,33,0.3), transparent 60%), radial-gradient(ellipse 55% 45% at 80% 90%, rgba(204,36,29,0.22), transparent 60%), linear-gradient(170deg, #191715, #383028)", "#282828", "#ebdbb2", [
+  gruvbox: mkTheme("Gruvbox Dark", "white", ["Consolas, monospace", 1.1, "block"], "radial-gradient(ellipse 75% 40% at 50% 112%, rgba(251,73,52,0.32), transparent 65%), linear-gradient(0deg, rgba(215,153,33,0.22) 0%, transparent 32%), linear-gradient(0deg, rgba(254,128,25,0.12) 8%, transparent 45%), linear-gradient(180deg, #171512, #322d26)", "#282828", "#ebdbb2", [
     "#282828", "#fb4934", "#98971a", "#d79921", "#458588", "#b16286", "#689d6a", "#a89984",
     "#928374", "#fb4934", "#b8bb26", "#fabd2f", "#83a598", "#d3869b", "#8ec07c", "#ebdbb2",
   ]),
-  "tokyo-night": mkTheme("Tokyo Night", "white", ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "bar"], "radial-gradient(ellipse 70% 50% at 30% 5%, rgba(122,162,247,0.38), transparent 60%), radial-gradient(ellipse 60% 45% at 80% 90%, rgba(187,154,247,0.3), transparent 55%), linear-gradient(170deg, #0e0f1c, #262a4a)", "#1a1b26", "#c0caf5", [
+  "tokyo-night": mkTheme("Tokyo Night", "white", ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "bar"], "repeating-linear-gradient(0deg, rgba(122,162,247,0.13) 0 1px, transparent 1px 38px), repeating-linear-gradient(90deg, rgba(122,162,247,0.13) 0 1px, transparent 1px 38px), radial-gradient(ellipse 85% 50% at 50% 0%, rgba(187,154,247,0.34), transparent 62%), linear-gradient(180deg, #171830, #0d0e1a)", "#1a1b26", "#c0caf5", [
     "#15161e", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#a9b1d6",
     "#7982b4", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#c0caf5",
   ]),
-  catppuccin: mkTheme("Catppuccin Mocha", "white", ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"], "radial-gradient(ellipse 70% 50% at 25% 10%, rgba(203,166,247,0.3), transparent 60%), radial-gradient(ellipse 60% 45% at 80% 90%, rgba(137,180,250,0.28), transparent 55%), linear-gradient(170deg, #131320, #2e2e4d)", "#1e1e2e", "#cdd6f4", [
+  catppuccin: mkTheme("Catppuccin Mocha", "white", ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"], "radial-gradient(circle at 18% 25%, rgba(245,194,231,0.2) 0 70px, transparent 110px), radial-gradient(circle at 78% 18%, rgba(137,180,250,0.18) 0 90px, transparent 140px), radial-gradient(circle at 62% 78%, rgba(166,227,161,0.13) 0 80px, transparent 130px), radial-gradient(circle at 28% 85%, rgba(250,179,135,0.16) 0 60px, transparent 100px), linear-gradient(180deg, #1e1e30, #141420)", "#1e1e2e", "#cdd6f4", [
     "#45475a", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#bac2de",
     "#7f849c", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#a6adc8",
   ]),
-  "solarized-dark": mkTheme("Solarized Dark", "white", ["Consolas, monospace", 1.1, "underline"], "radial-gradient(ellipse 75% 55% at 25% 5%, rgba(42,161,152,0.34), transparent 60%), radial-gradient(ellipse 60% 45% at 85% 95%, rgba(38,139,210,0.26), transparent 55%), linear-gradient(175deg, #001a22, #00465a)", "#002b36", "#839496", [
+  "solarized-dark": mkTheme("Solarized Dark", "white", ["Consolas, monospace", 1.1, "underline"], "linear-gradient(180deg, rgba(42,161,152,0.3) 0%, transparent 32%), linear-gradient(180deg, transparent 55%, rgba(0,8,12,0.5) 100%), radial-gradient(ellipse 90% 45% at 50% -5%, rgba(147,161,161,0.16), transparent 60%), linear-gradient(180deg, #00323f, #001217)", "#002b36", "#839496", [
     "#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198", "#eee8d5",
     "#657b83", "#cb4b16", "#78909a", "#657b83", "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
   ]),
-  "solarized-light": mkTheme("Solarized Light", "black", ["Consolas, monospace", 1.1, "underline"], "radial-gradient(ellipse 75% 55% at 25% 5%, rgba(181,137,0,0.22), transparent 60%), radial-gradient(ellipse 60% 45% at 85% 95%, rgba(38,139,210,0.16), transparent 55%), linear-gradient(175deg, #fdf6e3, #e9debe)", "#fdf6e3", "#586e75", [
+  "solarized-light": mkTheme("Solarized Light", "black", ["Consolas, monospace", 1.1, "underline"], "radial-gradient(circle at 80% 10%, rgba(181,137,0,0.38) 0 70px, rgba(203,75,22,0.16) 72px 130px, transparent 200px), radial-gradient(ellipse 100% 55% at 50% 0%, rgba(203,75,22,0.08), transparent 55%), linear-gradient(180deg, #fdf6e3, #eadfc0)", "#fdf6e3", "#586e75", [
     "#073642", "#dc322f", "#6f7d00", "#8f6c00", "#268bd2", "#d33682", "#1f857c", "#eee8d5",
     "#49606a", "#b04214", "#5c727b", "#657b83", "#66787f", "#6c71c4", "#6d838b", "#fdf6e3",
   ]),
