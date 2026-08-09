@@ -877,13 +877,20 @@ function makeShortcutHandler(getId: () => number) {
       if (key === "C") {
         const tab = tabs.get(getId());
         const sel = tab?.term.getSelection();
-        if (sel) navigator.clipboard.writeText(sel).catch(() => {});
+        if (sel) {
+          pushClip(sel);
+          navigator.clipboard.writeText(sel).catch(() => {});
+        }
         return false;
       }
       if (key === "V") {
         navigator.clipboard
           .readText()
-          .then((text) => text && invoke("write_session", { id: getId(), data: text }))
+          .then((text) => {
+            if (!text) return;
+            pushClip(text);
+            return invoke("write_session", { id: getId(), data: text });
+          })
           .catch(() => {});
         return false;
       }
@@ -943,6 +950,24 @@ function cycleTab(dir: number) {
   if (ids.length < 2 || activeId === null) return;
   const i = ids.indexOf(activeId);
   setActive(ids[(i + dir + ids.length) % ids.length]);
+}
+
+// Clipboard history for the paste picker: recent texts seen on the
+// clipboard (in-app copies plus whatever's current when the terminal
+// menu opens). Newest first, deduped, capped.
+const clipHist: string[] = JSON.parse(localStorage.getItem("gterm-cliphist") ?? "[]");
+function pushClip(text: string) {
+  if (!text) return;
+  const i = clipHist.indexOf(text);
+  if (i === 0) return;
+  if (i > 0) clipHist.splice(i, 1);
+  clipHist.unshift(text);
+  if (clipHist.length > 8) clipHist.length = 8;
+  localStorage.setItem("gterm-cliphist", JSON.stringify(clipHist));
+}
+function clipPreview(text: string): string {
+  const t = text.replace(/\r?\n/g, " ⏎ ").replace(/\t/g, " ").trim();
+  return t.length > 46 ? t.slice(0, 45) + "…" : t;
 }
 
 async function createTab(attachId?: number, shell?: string, cwd?: string, title?: string) {
@@ -1070,35 +1095,62 @@ async function createTab(attachId?: number, shell?: string, cwd?: string, title?
       .catch(() => {});
   pane.addEventListener("contextmenu", (e) => {
     e.preventDefault();
-    const sel = term.getSelection();
-    const items: CtxItem[] = [];
-    if (sel) {
-      items.push({
-        label: "Copy",
+    const x = e.clientX;
+    const y = e.clientY;
+    void (async () => {
+      const sel = term.getSelection();
+      let current = "";
+      try {
+        current = await navigator.clipboard.readText();
+      } catch {}
+      if (current) pushClip(current);
+      const items: CtxItem[] = [];
+      if (sel) {
+        items.push({
+          label: "Copy",
+          action: () => {
+            pushClip(sel);
+            navigator.clipboard.writeText(sel).catch(() => {});
+            term.clearSelection();
+            term.focus();
+          },
+        });
+      }
+      // Focus returns to the terminal after every menu action so typing
+      // (especially right after a paste) lands where it belongs.
+      const writePaste = (text: string) => {
+        pushClip(text);
+        invoke("write_session", { id, data: text }).catch(() => {});
+        term.focus();
+      };
+      if (current) {
+        items.push({ label: `Paste: ${clipPreview(current)}`, action: () => writePaste(current) });
+      } else {
+        items.push({
+          label: "Paste",
+          action: () => {
+            void paste();
+            term.focus();
+          },
+        });
+      }
+      // Older clipboard entries: pick anything recently copied.
+      const rest = clipHist.filter((t) => t !== current).slice(0, 5);
+      if (rest.length) {
+        items.push("sep");
+        for (const t of rest) {
+          items.push({ label: `Paste: ${clipPreview(t)}`, action: () => writePaste(t) });
+        }
+      }
+      items.push("sep", {
+        label: "Select all",
         action: () => {
-          navigator.clipboard.writeText(sel).catch(() => {});
-          term.clearSelection();
+          term.selectAll();
           term.focus();
         },
       });
-    }
-    // Focus returns to the terminal after every menu action so typing
-    // (especially right after a paste) lands where it belongs.
-    items.push({
-      label: "Paste",
-      action: () => {
-        void paste();
-        term.focus();
-      },
-    });
-    items.push("sep", {
-      label: "Select all",
-      action: () => {
-        term.selectAll();
-        term.focus();
-      },
-    });
-    showContextMenu(e.clientX, e.clientY, items);
+      showContextMenu(x, y, items);
+    })();
   });
 
   term.onData((data) => {
