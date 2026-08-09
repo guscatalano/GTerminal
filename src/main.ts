@@ -187,7 +187,7 @@ function makeShortcutHandler(getId: () => number) {
         return false;
       }
       if (key === "W") {
-        closeTab(getId());
+        closeTabViaKeyboard(getId());
         return false;
       }
       if (key === "H") {
@@ -222,6 +222,48 @@ function makeShortcutHandler(getId: () => number) {
     }
     return true;
   };
+}
+
+/// Two-step confirm for destructive buttons: first click arms (red "?"),
+/// second click within 2s executes. A stray click does nothing.
+function requireConfirm(el: HTMLElement, run: () => void) {
+  const orig = el.textContent;
+  let timer: number | undefined;
+  el.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (el.classList.contains("armed")) {
+      window.clearTimeout(timer);
+      el.classList.remove("armed");
+      el.textContent = orig;
+      run();
+    } else {
+      el.classList.add("armed");
+      el.textContent = "?";
+      timer = window.setTimeout(() => {
+        el.classList.remove("armed");
+        el.textContent = orig;
+      }, 2000);
+    }
+  });
+}
+
+// Ctrl+Shift+W must be pressed twice within 2s to detach.
+let closeKeyId = -1;
+let closeKeyAt = 0;
+function closeTabViaKeyboard(id: number) {
+  const now = Date.now();
+  if (closeKeyId === id && now - closeKeyAt < 2000) {
+    closeKeyId = -1;
+    closeTab(id);
+    return;
+  }
+  closeKeyId = id;
+  closeKeyAt = now;
+  const btn = tabs.get(id)?.button.querySelectorAll<HTMLElement>(".tab-close")[1];
+  if (btn) {
+    btn.classList.add("armed");
+    window.setTimeout(() => btn.classList.remove("armed"), 2000);
+  }
 }
 
 function cycleTab(dir: number) {
@@ -287,7 +329,7 @@ async function createTab(attachId?: number) {
   const close = document.createElement("button");
   close.className = "tab-close";
   close.textContent = "×";
-  close.title = "Detach tab — session keeps running (Ctrl+Shift+W)";
+  close.title = "Detach tab — click twice to confirm (Ctrl+Shift+W ×2)";
   button.append(label, hide, close);
   tabbar.appendChild(button);
   tabOrder.push(id);
@@ -298,9 +340,6 @@ async function createTab(attachId?: number) {
   button.addEventListener("mousedown", (e) => {
     if (e.target !== close && e.target !== hide) setActive(id);
   });
-  button.addEventListener("auxclick", (e) => {
-    if (e.button === 1) closeTab(id);
-  });
   button.addEventListener("dblclick", (e) => {
     if (e.target === label) renameTab(id);
   });
@@ -310,7 +349,7 @@ async function createTab(attachId?: number) {
     showTabContextMenu(e.clientX, e.clientY, id);
   });
   hide.addEventListener("click", () => hideTab(id));
-  close.addEventListener("click", () => closeTab(id));
+  requireConfirm(close, () => closeTab(id));
 
   // Right-click in the terminal: copy the selection if there is one,
   // otherwise paste — Windows Terminal behavior. (The WebView2 default
@@ -431,7 +470,7 @@ function closeMenus(except?: HTMLElement) {
   }
 }
 
-type CtxItem = { label: string; action: () => void; color?: string } | "sep";
+type CtxItem = { label: string; action: () => void; color?: string; confirm?: boolean } | "sep";
 function showContextMenu(x: number, y: number, items: CtxItem[]) {
   ctxMenu.innerHTML = "";
   for (const it of items) {
@@ -441,7 +480,31 @@ function showContextMenu(x: number, y: number, items: CtxItem[]) {
       ctxMenu.appendChild(s);
       continue;
     }
-    const row = menuRow(it.label, it.action);
+    let row: HTMLElement;
+    if (it.confirm) {
+      // Destructive items arm on first click and run on the second.
+      row = document.createElement("div");
+      row.className = "menu-row";
+      const span = document.createElement("span");
+      span.className = "menu-label";
+      span.textContent = it.label;
+      row.appendChild(span);
+      row.addEventListener("click", () => {
+        if (row.classList.contains("armed")) {
+          closeMenus();
+          it.action();
+        } else {
+          row.classList.add("armed");
+          span.textContent = `${it.label} — sure?`;
+          window.setTimeout(() => {
+            row.classList.remove("armed");
+            span.textContent = it.label;
+          }, 2000);
+        }
+      });
+    } else {
+      row = menuRow(it.label, it.action);
+    }
     if (it.color) {
       const dot = document.createElement("span");
       dot.className = "menu-dot";
@@ -476,8 +539,8 @@ function showTabContextMenu(x: number, y: number, id: number) {
   items.push(
     "sep",
     { label: "Hide tab", action: () => hideTab(id) },
-    { label: "Detach tab", action: () => closeTab(id) },
-    { label: "Kill session", action: () => killAndClose(id) }
+    { label: "Detach tab", action: () => closeTab(id), confirm: true },
+    { label: "Kill session", action: () => killAndClose(id), confirm: true }
   );
   showContextMenu(x, y, items);
 }
@@ -641,8 +704,8 @@ function menuRow(
     killBtn = document.createElement("button");
     killBtn.className = "menu-kill";
     killBtn.textContent = "×";
-    killBtn.title = "Kill session";
-    killBtn.addEventListener("click", onKill);
+    killBtn.title = "Kill session (click twice)";
+    requireConfirm(killBtn, onKill);
     row.appendChild(killBtn);
   }
   row.addEventListener("click", (e) => {
@@ -734,13 +797,13 @@ function renderHiddenPills() {
     const kill = document.createElement("button");
     kill.className = "hidden-pill-kill";
     kill.textContent = "×";
-    kill.title = "Kill session";
+    kill.title = "Kill session (click twice)";
     pill.append(label, kill);
     pill.addEventListener("click", (e) => {
       if (e.target === kill) return;
       restoreHidden(id);
     });
-    kill.addEventListener("click", () => killSession(id));
+    requireConfirm(kill, () => killSession(id));
     hiddenbar.appendChild(pill);
   }
 }
@@ -759,7 +822,7 @@ async function renderSidebar() {
     label: string,
     isActive: boolean,
     onClick: () => void,
-    actions: Array<[string, string, () => void]>
+    actions: Array<[string, string, () => void, boolean?]>
   ) => {
     const row = document.createElement("div");
     row.className = "side-row" + (isActive ? " active" : "");
@@ -771,15 +834,19 @@ async function renderSidebar() {
     l.textContent = label;
     const acts = document.createElement("span");
     acts.className = "side-actions";
-    for (const [text, tip, fn] of actions) {
+    for (const [text, tip, fn, confirm] of actions) {
       const b = document.createElement("button");
       b.className = "side-act";
       b.textContent = text;
       b.title = tip;
-      b.addEventListener("click", (e) => {
-        e.stopPropagation();
-        fn();
-      });
+      if (confirm) {
+        requireConfirm(b, fn);
+      } else {
+        b.addEventListener("click", (e) => {
+          e.stopPropagation();
+          fn();
+        });
+      }
       acts.appendChild(b);
     }
     row.append(d, l, acts);
@@ -803,15 +870,15 @@ async function renderSidebar() {
   const openRow = (id: number) =>
     addRow("●", "open", titleOf(id), id === activeId, () => setActive(id), [
       ["–", "Hide (Ctrl+Shift+H)", () => hideTab(id)],
-      ["×", "Detach (Ctrl+Shift+W)", () => closeTab(id)],
+      ["×", "Detach — click twice", () => closeTab(id), true],
     ]);
   const hiddenRow = (id: number) =>
     addRow("◌", "hidden", titleOf(id), false, () => restoreHidden(id), [
-      ["×", "Kill session", () => killSession(id)],
+      ["×", "Kill session — click twice", () => killSession(id), true],
     ]);
   const coldRow = (s: SessionInfo) =>
     addRow("○", "cold", `${titleOf(s.id)}${s.alive ? "" : " (cold)"}`, false, () => createTab(s.id), [
-      ["×", "Kill session", () => killSession(s.id)],
+      ["×", "Kill session — click twice", () => killSession(s.id), true],
     ]);
 
   const inGroup = (id: number, gid: string) => groupState.assign[id] === gid;

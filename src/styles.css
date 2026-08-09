@@ -305,6 +305,13 @@ body,
   z-index: 100;
 }
 
+/* Armed (click-again-to-confirm) state for destructive controls */
+button.armed,
+.menu-row.armed {
+  background: #e06c75 !important;
+  color: #fff !important;
+}
+
 .menu-sep {
   height: 1px;
   margin: 4px 6px;
