@@ -646,7 +646,7 @@ input.set-control {
   min-height: 0;
   overflow-y: auto;
   /* translucent wash: the theme background art on #main shows through */
-  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
 }
 
 #app.settings-on #settings-page {
@@ -664,7 +664,7 @@ input.set-control {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
 }
 
 #app.history-on #history-page {
