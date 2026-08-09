@@ -1,0 +1,198 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  overflow: hidden;
+  background: #0f1115;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+}
+
+#tabbar-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px 0 8px;
+  background: #171a21;
+  user-select: none;
+  flex: none;
+}
+
+#tabbar {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 6px 8px 6px 12px;
+  border-radius: 8px 8px 0 0;
+  color: #8b93a1;
+  font: 12px "Segoe UI", sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tab:hover {
+  background: #1e222b;
+}
+
+.tab.active {
+  background: #0f1115;
+  color: #d7dae0;
+}
+
+.tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 170px;
+}
+
+.tab-close {
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.tab-close:hover {
+  background: #333a47;
+  color: #fff;
+}
+
+#newtab {
+  border: none;
+  background: none;
+  color: #8b93a1;
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex: none;
+}
+
+#newtab:hover {
+  background: #1e222b;
+  color: #d7dae0;
+}
+
+#restore {
+  border: none;
+  background: none;
+  color: #8b93a1;
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex: none;
+}
+
+#restore:hover {
+  background: #1e222b;
+  color: #d7dae0;
+}
+
+#restore-menu {
+  display: none;
+  position: absolute;
+  top: 34px;
+  right: 8px;
+  z-index: 10;
+  min-width: 220px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: #1e222b;
+  border: 1px solid #2b3140;
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+#restore-menu.open {
+  display: block;
+}
+
+.restore-empty {
+  padding: 8px 10px;
+  color: #5c6370;
+  font: 12px "Segoe UI", sans-serif;
+}
+
+.restore-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: #d7dae0;
+  font: 12px "Segoe UI", sans-serif;
+  cursor: pointer;
+}
+
+.restore-row:hover {
+  background: #262c38;
+}
+
+.restore-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.restore-kill {
+  border: none;
+  background: none;
+  color: #8b93a1;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.restore-kill:hover {
+  background: #3a4152;
+  color: #fff;
+}
+
+#panes {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+}
+
+.pane {
+  position: absolute;
+  inset: 0;
+  padding: 8px 4px 4px 10px;
+  display: none;
+}
+
+.pane.active {
+  display: block;
+}
+
+.pane .xterm {
+  height: 100%;
+}

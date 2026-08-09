@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GTerminal</title>
+  </head>
+  <body>
+    <div id="app">
+      <div id="tabbar-row">
+        <div id="tabbar"></div>
+        <button id="newtab" title="New tab (Ctrl+Shift+T)">+</button>
+        <button id="restore" title="Restore a detached session (Ctrl+Shift+Z)">⟳</button>
+        <div id="restore-menu"></div>
+      </div>
+      <div id="panes"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
