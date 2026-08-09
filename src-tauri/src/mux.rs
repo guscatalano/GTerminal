@@ -74,6 +74,8 @@ pub struct SessionInfo {
     /// Current working directory (from the OSC 9;9 prompt hook), used
     /// for distinctive tab labels.
     pub cwd: String,
+    /// Shell profile this session runs ("auto"/"pwsh"/"powershell"/"cmd").
+    pub shell: String,
 }
 
 /// The "oops I screwed up" window: killed sessions keep their process
@@ -568,6 +570,7 @@ fn conn_loop(
                                 expires_ms: s.doomed_until,
                                 running: Vec::new(),
                                 cwd: s.cwd.clone(),
+                                shell: s.shell.clone(),
                             },
                             s.child_pid,
                         )
@@ -582,6 +585,7 @@ fn conn_loop(
                                 expires_ms: s.expires,
                                 running: s.running.clone(),
                                 cwd: s.cwd.clone(),
+                                shell: s.shell.clone(),
                             },
                             None,
                         )

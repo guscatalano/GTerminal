@@ -147,6 +147,15 @@ body,
   color: var(--text);
 }
 
+#sidebar-legend {
+  padding: 6px 12px;
+  color: var(--muted2);
+  font: 10.5px "Segoe UI", sans-serif;
+  white-space: nowrap;
+  overflow: hidden;
+  border-top: 1px solid var(--border);
+}
+
 #sidebar-new {
   margin: 6px;
   padding: 7px;

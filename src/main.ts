@@ -27,6 +27,7 @@ interface SessionInfo {
   expires_ms: number | null;
   running: string[];
   cwd?: string;
+  shell?: string;
 }
 
 // Latest per-session info from the daemon (cwd, running), for labels.
@@ -154,14 +155,33 @@ function cwdParts(id: number): string[] {
   return cwd ? cwd.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean) : [];
 }
 
+function shellDisplayName(id: number): string {
+  switch (lastInfo.get(id)?.shell) {
+    case "cmd":
+      return "Command Prompt";
+    case "powershell":
+      return "Windows PowerShell";
+    default:
+      return "PowerShell";
+  }
+}
+
 function baseLabel(id: number): { text: string; fromCwd: boolean } {
   if (customTitles[id]) return { text: customTitles[id], fromCwd: false };
   if (aiTitles[id]) return { text: aiTitles[id], fromCwd: false };
   const t = titles[id];
   if (t && !BORING_TITLE.test(t)) return { text: t, fromCwd: false };
   const parts = cwdParts(id);
-  if (parts.length) return { text: parts[parts.length - 1], fromCwd: true };
-  return { text: t ? "PowerShell" : `Session ${id}`, fromCwd: false };
+  const tail = parts[parts.length - 1];
+  // The home directory's name (the username) makes a confusing label.
+  const isHome = parts.length === 3 && parts[1].toLowerCase() === "users";
+  // A running program auto-labels the tab: "claude · GTerminal".
+  const prog = (lastInfo.get(id)?.running ?? []).find((n) => !SHELLS.test(n));
+  if (prog) {
+    return { text: tail && !isHome ? `${prog} · ${tail}` : prog, fromCwd: false };
+  }
+  if (tail && !isHome) return { text: tail, fromCwd: true };
+  return { text: shellDisplayName(id), fromCwd: false };
 }
 
 // Duplicate labels get disambiguated: different directories sharing a tail
@@ -1453,6 +1473,12 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
     const d = document.createElement("span");
     d.className = `side-dot ${dotClass}`;
     d.textContent = dot;
+    d.title = {
+      open: "Open in a tab",
+      hidden: "Hidden (parked) — click to restore",
+      cold: "Detached, still running or restorable — click to restore",
+      doomed: "Closing soon — click to restore before the timer runs out",
+    }[dotClass] ?? "";
     const l = document.createElement("span");
     l.className = "side-label";
     l.textContent = label;
