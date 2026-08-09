@@ -1149,6 +1149,11 @@ async function restoreHidden(id: number) {
 }
 
 async function killSession(id: number) {
+  // Kill means NOW: the daemon's first kill on a live session is soft
+  // (grace window) — that's what tab-close uses. This button is armed
+  // with a two-step confirm, so send the second kill too and skip the
+  // "Closing soon" stop entirely.
+  await invoke("kill_session", { id }).catch(() => {});
   await invoke("kill_session", { id }).catch(() => {});
   hidden.delete(id);
   saveHidden();
