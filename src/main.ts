@@ -896,8 +896,12 @@ async function updateLiveInfo() {
   const sessions = await invoke<SessionInfo[]>("list_sessions").catch(() => []);
   for (const s of sessions) {
     const tab = tabs.get(s.id);
+    if (!tab) continue;
     // `?? []` tolerates an older daemon that predates the running field.
-    if (tab) tab.icon.textContent = iconFor(s.running ?? []);
+    const icon = iconFor(s.running ?? []);
+    // Only mutate on change: rewriting the icon every poll invalidates
+    // layout, resizes the pane, and makes the terminal caret stutter.
+    if (tab.icon.textContent !== icon) tab.icon.textContent = icon;
   }
   renderSidebar(sessions);
 }

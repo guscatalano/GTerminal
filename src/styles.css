@@ -176,7 +176,8 @@ body,
   flex: 1 1 160px;
   min-width: 100px;
   max-width: 220px;
-  padding: 6px 6px 6px 12px;
+  height: 28px; /* fixed: emoji icons must not wobble the bar height */
+  padding: 0 6px 0 12px;
   border-radius: 8px 8px 0 0;
   color: #8b93a1;
   font: 12px "Segoe UI", sans-serif;
@@ -195,7 +196,12 @@ body,
 
 .tab-icon {
   flex: none;
+  width: 16px;
+  height: 16px;
+  line-height: 16px;
   font-size: 12px;
+  text-align: center;
+  overflow: hidden;
 }
 
 .tab-icon:empty {
