@@ -159,6 +159,11 @@ fn get_config() -> serde_json::Value {
     mux::read_config()
 }
 
+#[tauri::command]
+fn set_config(value: serde_json::Value) -> Result<(), String> {
+    mux::write_config(&value)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if std::env::args().any(|a| a == "--daemon") {
@@ -176,7 +181,8 @@ pub fn run() {
             resize_session,
             detach_session,
             kill_session,
-            get_config
+            get_config,
+            set_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

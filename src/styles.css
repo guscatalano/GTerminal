@@ -524,6 +524,32 @@ button.armed,
   color: var(--text);
 }
 
+/* ── settings panel ──────────────────────────────────────────────────── */
+
+.set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 10px;
+  color: var(--text);
+  font: 12px "Segoe UI", sans-serif;
+}
+
+.set-control {
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--border2);
+  border-radius: 5px;
+  font: 12px "Segoe UI", sans-serif;
+  padding: 3px 6px;
+  max-width: 150px;
+}
+
+input.set-control {
+  width: 64px;
+}
+
 .restore-empty {
   padding: 8px 10px;
   color: var(--muted2);

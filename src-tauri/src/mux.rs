@@ -80,6 +80,15 @@ pub fn read_config() -> serde_json::Value {
         .unwrap_or_else(|| serde_json::json!({}))
 }
 
+pub fn write_config(value: &serde_json::Value) -> Result<(), String> {
+    std::fs::create_dir_all(state_dir()).map_err(|e| e.to_string())?;
+    std::fs::write(
+        state_dir().join("config.json"),
+        serde_json::to_string_pretty(value).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
+}
+
 fn grace_ms() -> Option<u64> {
     let minutes = read_config()
         .get("grace_minutes")

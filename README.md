@@ -12,7 +12,7 @@ A lightweight terminal for Windows with tmux-style session persistence: closing 
 
 | Action | Result |
 | --- | --- |
-| × / `Ctrl+Shift+W` / middle-click | Detach — shell keeps running |
+| × / `Ctrl+Shift+W` (twice) | Close — session enters "Closing soon" with a countdown, restorable until the timer runs out, then dies |
 | Close the window | All sessions keep running; next launch restores them |
 | Reboot | Sessions restored cold: cwd + scrollback, fresh shell |
 | `exit` in the shell | Session genuinely ends |
@@ -42,7 +42,7 @@ Tabs shrink browser-style as they multiply; overflow collapses into a `+N` menu.
 
 `cursor_style` is `bar` (default, Windows Terminal-like), `block`, or `underline`; `cursor_blink` defaults to true. Cursor settings apply to new windows/tabs.
 
-**Themes**: pick via the 🎨 button — One Dark, Dracula, Nord, Gruvbox Dark, Tokyo Night, Catppuccin Mocha, Solarized Dark, Solarized Light. The whole chrome (tab bar, sidebar, menus) recolors along with the terminal. The picker persists; `config.json`'s `theme` sets the initial default.
+**Settings** (⚙ button): theme, font family/size, line height, cursor style/blink, and the undo window — applied live and saved to `config.json`. Themes are a whole look, not just colors — each carries its own font, line spacing, and cursor personality, individually overridable: One Dark, Dracula, Nord, Gruvbox Dark, Tokyo Night, Catppuccin Mocha, Solarized Dark, Solarized Light. The whole chrome (tab bar, sidebar, menus) recolors along with the terminal.
 
 Sessions in their grace window get a dedicated **Closing soon** sidebar section with a live m:ss countdown; click to restore, × (twice) to kill immediately.
 

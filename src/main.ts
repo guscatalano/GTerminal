@@ -54,10 +54,13 @@ function iconFor(running: string[]): string {
 // cursor_style: "bar" | "block" | "underline" (default bar, like Windows
 // Terminal); cursor_blink: boolean (default true).
 interface AppConfig {
-  cursor_style?: "bar" | "block" | "underline";
+  cursor_style?: CursorStyle;
   cursor_blink?: boolean;
   grace_minutes?: number;
   theme?: string;
+  font_family?: string;
+  font_size?: number;
+  line_height?: number;
 }
 let config: AppConfig = {};
 
@@ -88,7 +91,7 @@ const restoreMenu = document.getElementById("restore-menu")!;
 const overflowBtn = document.getElementById("overflow") as HTMLButtonElement;
 const overflowMenu = document.getElementById("overflow-menu")!;
 const hiddenMenu = document.getElementById("hidden-menu")!;
-const themeMenu = document.getElementById("theme-menu")!;
+const settingsMenu = document.getElementById("settings-menu")!;
 const sidebarList = document.getElementById("sidebar-list")!;
 
 // Sessions the user parked with "hide" — detached in the daemon but shown
@@ -202,15 +205,23 @@ function moveTab(dragged: number, refId: number | undefined, before: boolean, gi
   refreshChrome();
 }
 
+type CursorStyle = "bar" | "block" | "underline";
+
 interface ThemeDef {
   label: string;
   tint: "white" | "black"; // chrome derives by mixing bg toward this
+  // A theme is a whole look, not just colors — these are its defaults,
+  // each individually overridable in settings.
+  font: string;
+  lineHeight: number;
+  cursorStyle: CursorStyle;
   xterm: ITheme;
 }
 
 function mkTheme(
   label: string,
   tint: "white" | "black",
+  look: [string, number, CursorStyle],
   bg: string,
   fg: string,
   ansi: string[]
@@ -218,6 +229,9 @@ function mkTheme(
   return {
     label,
     tint,
+    font: look[0],
+    lineHeight: look[1],
+    cursorStyle: look[2],
     xterm: {
       background: bg,
       foreground: fg,
@@ -233,35 +247,35 @@ function mkTheme(
 }
 
 const THEMES: Record<string, ThemeDef> = {
-  "one-dark": mkTheme("One Dark", "white", "#0f1115", "#d7dae0", [
+  "one-dark": mkTheme("One Dark", "white", ['"Cascadia Mono", Consolas, monospace', 1.1, "bar"], "#0f1115", "#d7dae0", [
     "#1c1f26", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd", "#56b6c2", "#d7dae0",
     "#5c6370", "#ef7d85", "#a9d387", "#f0cd8a", "#74bdf7", "#d48ce8", "#67c5d0", "#f0f2f6",
   ]),
-  dracula: mkTheme("Dracula", "white", "#282a36", "#f8f8f2", [
+  dracula: mkTheme("Dracula", "white", ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "block"], "#282a36", "#f8f8f2", [
     "#21222c", "#ff5555", "#50fa7b", "#f1fa8c", "#bd93f9", "#ff79c6", "#8be9fd", "#f8f8f2",
     "#6272a4", "#ff6e6e", "#69ff94", "#ffffa5", "#d6acff", "#ff92df", "#a4ffff", "#ffffff",
   ]),
-  nord: mkTheme("Nord", "white", "#2e3440", "#d8dee9", [
+  nord: mkTheme("Nord", "white", ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"], "#2e3440", "#d8dee9", [
     "#3b4252", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#88c0d0", "#e5e9f0",
     "#4c566a", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#8fbcbb", "#eceff4",
   ]),
-  gruvbox: mkTheme("Gruvbox Dark", "white", "#282828", "#ebdbb2", [
+  gruvbox: mkTheme("Gruvbox Dark", "white", ["Consolas, monospace", 1.1, "block"], "#282828", "#ebdbb2", [
     "#282828", "#cc241d", "#98971a", "#d79921", "#458588", "#b16286", "#689d6a", "#a89984",
     "#928374", "#fb4934", "#b8bb26", "#fabd2f", "#83a598", "#d3869b", "#8ec07c", "#ebdbb2",
   ]),
-  "tokyo-night": mkTheme("Tokyo Night", "white", "#1a1b26", "#c0caf5", [
+  "tokyo-night": mkTheme("Tokyo Night", "white", ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "bar"], "#1a1b26", "#c0caf5", [
     "#15161e", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#a9b1d6",
     "#414868", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#c0caf5",
   ]),
-  catppuccin: mkTheme("Catppuccin Mocha", "white", "#1e1e2e", "#cdd6f4", [
+  catppuccin: mkTheme("Catppuccin Mocha", "white", ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"], "#1e1e2e", "#cdd6f4", [
     "#45475a", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#bac2de",
     "#585b70", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#a6adc8",
   ]),
-  "solarized-dark": mkTheme("Solarized Dark", "white", "#002b36", "#839496", [
+  "solarized-dark": mkTheme("Solarized Dark", "white", ["Consolas, monospace", 1.1, "underline"], "#002b36", "#839496", [
     "#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198", "#eee8d5",
     "#002b36", "#cb4b16", "#586e75", "#657b83", "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
   ]),
-  "solarized-light": mkTheme("Solarized Light", "black", "#fdf6e3", "#657b83", [
+  "solarized-light": mkTheme("Solarized Light", "black", ["Consolas, monospace", 1.1, "underline"], "#fdf6e3", "#657b83", [
     "#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198", "#eee8d5",
     "#002b36", "#cb4b16", "#586e75", "#657b83", "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
   ]),
@@ -270,6 +284,45 @@ const THEMES: Record<string, ThemeDef> = {
 let themeKey = "one-dark";
 function currentTheme(): ThemeDef {
   return THEMES[themeKey] ?? THEMES["one-dark"];
+}
+
+// Effective appearance: explicit setting > theme default > baseline.
+function effFont(): string {
+  return config.font_family || currentTheme().font;
+}
+function effFontSize(): number {
+  return config.font_size || 14;
+}
+function effLineHeight(): number {
+  return config.line_height || currentTheme().lineHeight;
+}
+function effCursorStyle(): CursorStyle {
+  return config.cursor_style || currentTheme().cursorStyle;
+}
+function effCursorBlink(): boolean {
+  return config.cursor_blink ?? true;
+}
+
+let saveTimer: number | undefined;
+function saveConfig() {
+  window.clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(() => {
+    invoke("set_config", { value: config }).catch(() => {});
+  }, 300);
+}
+
+/// Push current appearance settings into every open terminal.
+function applyAppearance() {
+  const t = currentTheme();
+  for (const tab of tabs.values()) {
+    tab.term.options.theme = t.xterm;
+    tab.term.options.fontFamily = effFont();
+    tab.term.options.fontSize = effFontSize();
+    tab.term.options.lineHeight = effLineHeight();
+    tab.term.options.cursorStyle = effCursorStyle();
+    tab.term.options.cursorBlink = effCursorBlink();
+    if (tab.id === activeId) fitTab(tab);
+  }
 }
 
 function applyTheme(key: string) {
@@ -281,10 +334,9 @@ function applyTheme(key: string) {
   root.setProperty("--tint", t.tint);
   root.setProperty("--accent", t.xterm.blue!);
   root.setProperty("--danger", t.xterm.red!);
-  for (const tab of tabs.values()) {
-    tab.term.options.theme = t.xterm;
-  }
-  localStorage.setItem("gterm-theme", themeKey);
+  applyAppearance();
+  config.theme = themeKey;
+  saveConfig();
 }
 
 function orderedIds(): number[] {
@@ -425,11 +477,11 @@ async function createTab(attachId?: number) {
   panes.appendChild(pane);
 
   const term = new Terminal({
-    fontFamily: '"Cascadia Mono", Consolas, monospace',
-    fontSize: 14,
-    lineHeight: 1.1,
-    cursorStyle: config.cursor_style ?? "bar",
-    cursorBlink: config.cursor_blink ?? true,
+    fontFamily: effFont(),
+    fontSize: effFontSize(),
+    lineHeight: effLineHeight(),
+    cursorStyle: effCursorStyle(),
+    cursorBlink: effCursorBlink(),
     scrollback: 10000,
     theme: currentTheme().xterm,
     allowProposedApi: true,
@@ -478,7 +530,7 @@ async function createTab(attachId?: number) {
   const close = document.createElement("button");
   close.className = "tab-close";
   close.textContent = "×";
-  close.title = "Detach tab — click twice to confirm (Ctrl+Shift+W ×2)";
+  close.title = "Close tab — restorable from Closing soon until its timer runs out (Ctrl+Shift+W ×2)";
   button.append(icon, label, hide, close);
   tabbar.appendChild(button);
   tabOrder.push(id);
@@ -591,11 +643,13 @@ function removeTab(id: number, closeWindowIfLast = true) {
   refreshChrome();
 }
 
-// Closing a tab detaches: the shell keeps running in the daemon and can be
-// restored from the ⟳ menu, Ctrl+Shift+Z, the sidebar, or the next launch.
+// Closing a tab starts its grace window: the session lands in "Closing
+// soon" with a countdown, restorable (from the sidebar, ⟳ menu, or
+// Ctrl+Shift+Z) until the timer runs out — then it actually dies.
 function closeTab(id: number) {
-  invoke("detach_session", { id }).catch(() => {});
+  invoke("kill_session", { id }).catch(() => {});
   removeTab(id);
+  window.setTimeout(() => refreshChrome(), 500);
 }
 
 // Hiding also detaches, but parks the session visibly for one-click restore.
@@ -638,7 +692,7 @@ ctxMenu.className = "menu ctx";
 document.body.appendChild(ctxMenu);
 
 function closeMenus(except?: HTMLElement) {
-  for (const m of [restoreMenu, overflowMenu, hiddenMenu, themeMenu, ctxMenu]) {
+  for (const m of [restoreMenu, overflowMenu, hiddenMenu, settingsMenu, ctxMenu]) {
     if (m !== except) m.classList.remove("open");
   }
 }
@@ -712,7 +766,7 @@ function showTabContextMenu(x: number, y: number, id: number) {
   items.push(
     "sep",
     { label: "Hide tab", action: () => hideTab(id) },
-    { label: "Detach tab", action: () => closeTab(id), confirm: true },
+    { label: "Close tab", action: () => closeTab(id), confirm: true },
     { label: "Kill session", action: () => killAndClose(id), confirm: true }
   );
   showContextMenu(x, y, items);
@@ -1072,7 +1126,7 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
   const openRow = (id: number) =>
     addRow("●", "open", titleOf(id), id === activeId, () => setActive(id), [
       ["–", "Hide (Ctrl+Shift+H)", () => hideTab(id)],
-      ["×", "Detach — click twice", () => closeTab(id), true],
+      ["×", "Close — click twice", () => closeTab(id), true],
     ]);
   const hiddenRow = (id: number) =>
     addRow("◌", "hidden", titleOf(id), false, () => restoreHidden(id), [
@@ -1162,9 +1216,151 @@ async function renderRestoreMenu() {
   }
 }
 
+function setRow(label: string, control: HTMLElement): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "set-row";
+  const l = document.createElement("span");
+  l.className = "set-label";
+  l.textContent = label;
+  row.append(l, control);
+  return row;
+}
+
+function mkSelect(
+  options: Array<[string, string]>,
+  value: string,
+  onChange: (v: string) => void
+): HTMLSelectElement {
+  const sel = document.createElement("select");
+  sel.className = "set-control";
+  for (const [v, label] of options) {
+    const o = document.createElement("option");
+    o.value = v;
+    o.textContent = label;
+    sel.appendChild(o);
+  }
+  sel.value = value;
+  sel.addEventListener("change", () => onChange(sel.value));
+  return sel;
+}
+
+function mkNumber(
+  value: number,
+  min: number,
+  max: number,
+  onChange: (v: number) => void
+): HTMLInputElement {
+  const input = document.createElement("input");
+  input.className = "set-control";
+  input.type = "number";
+  input.min = String(min);
+  input.max = String(max);
+  input.value = String(value);
+  input.addEventListener("change", () => {
+    const v = Math.min(max, Math.max(min, Number(input.value) || min));
+    input.value = String(v);
+    onChange(v);
+  });
+  return input;
+}
+
+function buildSettingsMenu() {
+  settingsMenu.innerHTML = "";
+  const changed = () => {
+    applyAppearance();
+    saveConfig();
+  };
+  settingsMenu.appendChild(
+    setRow(
+      "Theme",
+      mkSelect(
+        Object.entries(THEMES).map(([k, t]) => [k, t.label] as [string, string]),
+        themeKey,
+        (v) => {
+          applyTheme(v);
+          buildSettingsMenu(); // theme defaults shown elsewhere follow along
+        }
+      )
+    )
+  );
+  settingsMenu.appendChild(
+    setRow(
+      "Font",
+      mkSelect(
+        [
+          ["", "Theme default"],
+          ['"Cascadia Mono", Consolas, monospace', "Cascadia Mono"],
+          ['"Cascadia Code", "Cascadia Mono", monospace', "Cascadia Code"],
+          ["Consolas, monospace", "Consolas"],
+          ['"Lucida Console", monospace', "Lucida Console"],
+          ['"Courier New", monospace', "Courier New"],
+        ],
+        config.font_family ?? "",
+        (v) => {
+          config.font_family = v || undefined;
+          changed();
+        }
+      )
+    )
+  );
+  settingsMenu.appendChild(
+    setRow(
+      "Font size",
+      mkNumber(effFontSize(), 9, 24, (v) => {
+        config.font_size = v;
+        changed();
+      })
+    )
+  );
+  settingsMenu.appendChild(
+    setRow(
+      "Line height",
+      mkSelect(
+        [["", "Theme default"], ["1", "1.0"], ["1.1", "1.1"], ["1.2", "1.2"], ["1.3", "1.3"], ["1.4", "1.4"]],
+        config.line_height ? String(config.line_height) : "",
+        (v) => {
+          config.line_height = v ? Number(v) : undefined;
+          changed();
+        }
+      )
+    )
+  );
+  settingsMenu.appendChild(
+    setRow(
+      "Cursor",
+      mkSelect(
+        [["", "Theme default"], ["bar", "Bar"], ["block", "Block"], ["underline", "Underline"]],
+        config.cursor_style ?? "",
+        (v) => {
+          config.cursor_style = (v || undefined) as CursorStyle | undefined;
+          changed();
+        }
+      )
+    )
+  );
+  settingsMenu.appendChild(
+    setRow(
+      "Cursor blink",
+      mkSelect([["on", "On"], ["off", "Off"]], effCursorBlink() ? "on" : "off", (v) => {
+        config.cursor_blink = v === "on";
+        changed();
+      })
+    )
+  );
+  settingsMenu.appendChild(
+    setRow(
+      "Undo window (min)",
+      mkNumber(config.grace_minutes ?? 5, 0, 120, (v) => {
+        config.grace_minutes = v;
+        saveConfig();
+      })
+    )
+  );
+}
+
 async function main() {
   config = await invoke<AppConfig>("get_config").catch(() => ({}));
-  applyTheme(localStorage.getItem("gterm-theme") ?? config.theme ?? "one-dark");
+  applyTheme(config.theme ?? localStorage.getItem("gterm-theme") ?? "one-dark");
   await listen<{ id: number; data: string }>("pty-output", (event) => {
     const tab = tabs.get(event.payload.id);
     if (tab) {
@@ -1201,21 +1397,16 @@ async function main() {
     closeMenus(restoreMenu);
     restoreMenu.classList.toggle("open");
   });
-  const themeBtn = document.getElementById("themebtn")!;
-  themeBtn.addEventListener("click", (e) => {
+  const settingsBtn = document.getElementById("settingsbtn")!;
+  settingsBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    themeMenu.innerHTML = "";
-    for (const [key, t] of Object.entries(THEMES)) {
-      themeMenu.appendChild(
-        menuRow((key === themeKey ? "✓ " : "  ") + t.label, () => applyTheme(key))
-      );
-    }
-    closeMenus(themeMenu);
-    themeMenu.classList.toggle("open");
+    if (!settingsMenu.classList.contains("open")) buildSettingsMenu();
+    closeMenus(settingsMenu);
+    settingsMenu.classList.toggle("open");
   });
   document.addEventListener("mousedown", (e) => {
     const target = e.target as Node;
-    for (const m of [restoreMenu, overflowMenu, hiddenMenu, themeMenu, ctxMenu]) {
+    for (const m of [restoreMenu, overflowMenu, hiddenMenu, settingsMenu, ctxMenu]) {
       if (m.classList.contains("open") && !m.contains(target)) {
         m.classList.remove("open");
       }
