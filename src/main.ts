@@ -793,7 +793,7 @@ const THEMES: Record<string, ThemeDef> = {
     "#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198", "#eee8d5",
     "#657b83", "#cb4b16", "#78909a", "#eed968", "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
   ]),
-  "solarized-light": mkTheme("Solarized Light", "black", ["Consolas, monospace", 1.1, "underline"], "radial-gradient(circle at 80% 10%, rgba(181,137,0,0.38) 0 70px, rgba(203,75,22,0.16) 72px 130px, transparent 200px), radial-gradient(ellipse 100% 55% at 50% 0%, rgba(203,75,22,0.08), transparent 55%), linear-gradient(180deg, #fdf6e3, #eadfc0)", "#fdf6e3", "#586e75", [
+  "solarized-light": mkTheme("Solarized Light", "black", ["Consolas, monospace", 1.1, "underline"], 'linear-gradient(rgba(253,246,227,0.45), rgba(253,246,227,0.58)), url("/backgrounds/solarizedlight.png") center / cover no-repeat, linear-gradient(180deg, rgb(253,246,227), rgb(253,246,227))', "#fdf6e3", "#586e75", [
     "#073642", "#dc322f", "#6f7d00", "#8f6c00", "#268bd2", "#d33682", "#1f857c", "#eee8d5",
     "#49606a", "#b04214", "#5c727b", "#705a00", "#66787f", "#6c71c4", "#6d838b", "#fdf6e3",
   ]),
@@ -838,7 +838,7 @@ THEMES.monokai = mkTheme(
   "Monokai",
   "white",
   ["Consolas, monospace", 1.1, "block"],
-  "linear-gradient(100deg, transparent 68%, rgba(249,38,114,0.14) 68.5% 72%, transparent 72.5%), linear-gradient(100deg, transparent 74%, rgba(166,226,46,0.12) 74.5% 77%, transparent 77.5%), linear-gradient(100deg, transparent 79%, rgba(102,217,239,0.12) 79.5% 81.5%, transparent 82%), radial-gradient(ellipse 70% 50% at 20% 0%, rgba(230,219,116,0.1), transparent 60%), linear-gradient(180deg, #2b2c24, #21221c)",
+  'linear-gradient(rgba(39,40,34,0.45), rgba(39,40,34,0.6)), url("/backgrounds/monokai.png") center / cover no-repeat, linear-gradient(180deg, rgb(39,40,34), rgb(39,40,34))',
   "#272822",
   "#f8f8f2",
   [
@@ -924,7 +924,7 @@ THEMES.tron = mkTheme(
   "TRON",
   "white",
   ['"Cascadia Mono", Consolas, monospace', 1.2, "block"],
-  "linear-gradient(90deg, transparent 0 14%, rgba(0,229,255,0.4) 14.05% 14.3%, transparent 14.6%), linear-gradient(0deg, transparent 0 22%, rgba(0,229,255,0.3) 22.05% 22.3%, transparent 22.6%), linear-gradient(90deg, transparent 0 88%, rgba(255,136,54,0.35) 88.05% 88.3%, transparent 88.6%), radial-gradient(ellipse 70% 45% at 50% 110%, rgba(0,140,180,0.2), transparent 65%), linear-gradient(180deg, #060a10, #04060a)",
+  'linear-gradient(rgba(5,8,12,0.35), rgba(5,8,12,0.5)), url("/backgrounds/tron.png") center / cover no-repeat, linear-gradient(180deg, rgb(5,8,12), rgb(5,8,12))',
   "#05080c",
   "#bfefff",
   [
@@ -939,7 +939,7 @@ THEMES.lcars = mkTheme(
   "LCARS",
   "white",
   ['"Cascadia Mono", Consolas, monospace', 1.15, "bar"],
-  "linear-gradient(180deg, #ff9933 0 18%, #000 18% 19.5%, #9999ff 19.5% 34%, #000 34% 35.5%, #cc99cc 35.5% 46%, #000 46% 47.5%, #ffcc66 47.5% 70%, #000 70% 71.5%, #e07a66 71.5% 100%) left/7px 100% no-repeat, radial-gradient(circle at 0% 0%, transparent 56px, rgba(255,153,51,0.55) 58px 64px, transparent 66px) no-repeat, linear-gradient(#000, #000)",
+  'linear-gradient(rgba(0,0,0,0.3), rgba(0,0,0,0.42)), url("/backgrounds/lcars.png") center / cover no-repeat, linear-gradient(180deg, rgb(0,0,0), rgb(0,0,0))',
   "#000000",
   "#ffcc99",
   [

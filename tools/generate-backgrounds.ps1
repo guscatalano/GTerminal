@@ -34,6 +34,19 @@ function Glow {
   $g.FillEllipse($br, $x - $r, $y - $r, 2 * $r, 2 * $r)
   $br.Dispose(); $path.Dispose()
 }
+# Typed Point[] builder: FillPolygon/DrawPolygon reject PowerShell's
+# loosely-typed @() arrays. Input is an array of @(x, y) pairs.
+# NOTE: parenthesize arithmetic inside these pairs -- the comma operator
+# binds tighter than minus, so @($a - 1, $b - 2) parses as $a - (1,$b) - 2.
+function MkPts {
+  param($list)
+  $arr = New-Object 'System.Drawing.Point[]' $list.Count
+  for ($i = 0; $i -lt $list.Count; $i++) {
+    $arr[$i] = New-Object System.Drawing.Point([int]$list[$i][0], [int]$list[$i][1])
+  }
+  return , $arr
+}
+
 function Save {
   param($bmp, $g, $name)
   $g.Dispose()
@@ -348,6 +361,25 @@ for ($i = 0; $i -lt 26; $i++) {
   $b = New-Object System.Drawing.SolidBrush((C 150 226 168 62))
   $g.FillEllipse($b, $ex - 3, $ey - 3, 6, 6); $b.Dispose()
 }
+# icarus delta: nested gold triangles, glowing, with radiating spokes
+$dcx = 1320; $dcy = 460
+Glow $g $dcx $dcy 340 (C 70 226 168 62)
+foreach ($sc in @(250, 175, 105)) {
+  $pen = New-Object System.Drawing.Pen((C 170 226 168 62), 3)
+  $g.DrawPolygon($pen, (MkPts @(@($dcx, ($dcy - $sc)), @(($dcx + [int]($sc * 0.87)), ($dcy + [int]($sc / 2))), @(($dcx - [int]($sc * 0.87)), ($dcy + [int]($sc / 2))))))
+  $pen.Dispose()
+}
+$b = New-Object System.Drawing.SolidBrush((C 220 226 168 62))
+$g.FillPolygon($b, (MkPts @(@($dcx, ($dcy - 44)), @(($dcx + 38), ($dcy + 22)), @(($dcx - 38), ($dcy + 22)))))
+$b.Dispose()
+for ($k = 0; $k -lt 12; $k++) {
+  $ang = $k * [math]::PI / 6 + 0.26
+  $pen = New-Object System.Drawing.Pen((C 46 226 168 62), 1)
+  $g.DrawLine($pen,
+    ($dcx + [int](280 * [math]::Cos($ang))), ($dcy + [int](280 * [math]::Sin($ang))),
+    ($dcx + [int](430 * [math]::Cos($ang))), ($dcy + [int](430 * [math]::Sin($ang))))
+  $pen.Dispose()
+}
 # vignette
 foreach ($corner in @(@(0,0), @($W,0), @(0,$H), @($W,$H))) {
   Glow $g $corner[0] $corner[1] 620 (C 120 0 0 0)
@@ -390,6 +422,30 @@ for ($sx = -80; $sx -lt $W; $sx += 76) {
   $pts[3] = New-Object System.Drawing.Point(($sx + 38), ($stripeY + 74))
   $b = New-Object System.Drawing.SolidBrush((C 42 190 22 28)); $g.FillPolygon($b, $pts); $b.Dispose()
 }
+# double helix down the left: two strands with base-pair rungs
+Glow $g 330 540 300 (C 26 200 20 24)
+for ($yy = 90; $yy -lt 960; $yy += 7) {
+  $ph = $yy / 64.0
+  $x1 = 330 + [int](100 * [math]::Sin($ph))
+  $x2 = 330 + [int](100 * [math]::Sin($ph + [math]::PI))
+  $b = New-Object System.Drawing.SolidBrush((C 110 190 22 28)); $g.FillEllipse($b, $x1, $yy, 6, 6); $b.Dispose()
+  $b = New-Object System.Drawing.SolidBrush((C 85 226 226 220)); $g.FillEllipse($b, $x2, $yy, 6, 6); $b.Dispose()
+  if (($yy % 49) -lt 7) {
+    $pen = New-Object System.Drawing.Pen((C 46 226 226 220), 2)
+    $g.DrawLine($pen, ($x1 + 3), ($yy + 3), ($x2 + 3), ($yy + 3)); $pen.Dispose()
+  }
+}
+# faint containment hexes scattered mid-field
+for ($i = 0; $i -lt 10; $i++) {
+  $hx = $rng.Next(600, 1000); $hy = $rng.Next(150, 900); $hr2 = $rng.Next(28, 60)
+  $pts = New-Object 'System.Drawing.Point[]' 6
+  for ($k = 0; $k -lt 6; $k++) {
+    $ang = [math]::PI / 3 * $k
+    $pts[$k] = New-Object System.Drawing.Point(([int]($hx + $hr2 * [math]::Cos($ang))), ([int]($hy + $hr2 * [math]::Sin($ang))))
+  }
+  $pen = New-Object System.Drawing.Pen((C $rng.Next(14, 34) 200 20 24), 1)
+  $g.DrawPolygon($pen, $pts); $pen.Dispose()
+}
 # specimen dust
 for ($i = 0; $i -lt 1400; $i++) {
   $b = New-Object System.Drawing.SolidBrush((C $rng.Next(6, 20) 220 225 230))
@@ -397,84 +453,113 @@ for ($i = 0; $i -lt 1400; $i++) {
 }
 Save $bmp $g "umbrella.png"
 
-# Typed Point[] builder: FillPolygon/DrawPolygon reject PowerShell's
-# loosely-typed @() arrays. Input is an array of @(x, y) pairs.
-# NOTE: parenthesize arithmetic inside these pairs -- the comma operator
-# binds tighter than minus, so @($a - 1, $b - 2) parses as $a - (1,$b) - 2.
-function MkPts {
-  param($list)
-  $arr = New-Object 'System.Drawing.Point[]' $list.Count
-  for ($i = 0; $i -lt $list.Count; $i++) {
-    $arr[$i] = New-Object System.Drawing.Point([int]$list[$i][0], [int]$list[$i][1])
-  }
-  return , $arr
-}
-
-# ── One Dark: blurred code — light shaft over syntax-colored bars ──
+# ── One Dark: an editor at dusk — gutter, indent guides, bright tokens ──
 $rng = New-Object System.Random(2014)
 $bmp, $g = New-Canvas
-Fill-Vertical $g (C 255 22 27 42) (C 255 10 12 18)
-Glow $g 1500 120 620 (C 40 97 175 239)
-Glow $g 380 950 520 (C 26 198 120 221)
-$syntax = @((C 255 97 175 239), (C 255 152 195 121), (C 255 198 120 221), (C 255 229 192 123), (C 255 224 108 117))
-# "code lines": indented bars in muted syntax colors
-$lineY = 40
+Fill-Vertical $g (C 255 24 29 45) (C 255 12 14 20)
+Glow $g 1520 120 620 (C 44 97 175 239)
+Glow $g 340 980 520 (C 30 198 120 221)
+$syntax = @((C 255 97 175 239), (C 255 152 195 121), (C 255 198 120 221), (C 255 229 192 123), (C 255 224 108 117), (C 255 86 182 194))
+# gutter with line-number dashes
+$b = New-Object System.Drawing.SolidBrush((C 40 40 44 60)); $g.FillRectangle($b, 90, 0, 90, $H); $b.Dispose()
+for ($lineY = 40; $lineY -lt $H; $lineY += 34) {
+  $b = New-Object System.Drawing.SolidBrush((C 70 92 99 112))
+  $g.FillRectangle($b, 118, $lineY, 34, 6); $b.Dispose()
+}
+# indent guides
+for ($k = 0; $k -lt 6; $k++) {
+  $pen = New-Object System.Drawing.Pen((C 20 92 99 112), 1)
+  $g.DrawLine($pen, (230 + 70 * $k), 0, (230 + 70 * $k), $H); $pen.Dispose()
+}
+# current-line band + block cursor
+$b = New-Object System.Drawing.SolidBrush((C 24 97 175 239)); $g.FillRectangle($b, 90, 448, 1500, 30); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 220 97 175 239)); $g.FillRectangle($b, 760, 452, 13, 22); $b.Dispose()
+Glow $g 766 462 60 (C 70 97 175 239)
+# code tokens: bright rounded bars with indentation structure
+$lineY = 44
+$indent = 0
 while ($lineY -lt $H) {
-  $indent = 90 + 60 * $rng.Next(0, 4)
-  $segs = $rng.Next(1, 5)
-  $bx = $indent
+  $roll = $rng.NextDouble()
+  if ($roll -lt 0.2 -and $indent -lt 4) { $indent++ } elseif ($roll -gt 0.85 -and $indent -gt 0) { $indent-- }
+  $bx = 230 + 70 * $indent
+  $segs = $rng.Next(2, 6)
   for ($s = 0; $s -lt $segs; $s++) {
-    $segw = $rng.Next(60, 260)
+    $segw = $rng.Next(46, 210)
     $cc = $syntax[$rng.Next(0, $syntax.Count)]
-    $b = New-Object System.Drawing.SolidBrush((C $rng.Next(10, 26) $cc.R $cc.G $cc.B))
-    $g.FillRectangle($b, $bx, $lineY, $segw, 12); $b.Dispose()
-    $bx += $segw + $rng.Next(18, 46)
-    if ($bx -gt $W - 100) { break }
+    $al = $rng.Next(38, 84)
+    $b = New-Object System.Drawing.SolidBrush((C $al $cc.R $cc.G $cc.B))
+    $g.FillRectangle($b, $bx, $lineY, $segw, 15); $b.Dispose()
+    $b = New-Object System.Drawing.SolidBrush((C $al $cc.R $cc.G $cc.B))
+    $g.FillEllipse($b, ($bx - 7), $lineY, 15, 15); $g.FillEllipse($b, ($bx + $segw - 8), $lineY, 15, 15); $b.Dispose()
+    $bx += $segw + $rng.Next(22, 52)
+    if ($bx -gt $W - 160) { break }
   }
-  $lineY += 30
+  $lineY += 34
 }
 # diagonal light shaft
 $path = New-Object System.Drawing.Drawing2D.GraphicsPath
 $path.AddPolygon((MkPts @(@(700, 0), @(1180, 0), @(560, $H), @(80, $H))))
 $br = New-Object System.Drawing.Drawing2D.PathGradientBrush($path)
-$br.CenterColor = (C 22 255 255 255)
+$br.CenterColor = (C 20 255 255 255)
 $br.SurroundColors = @((C 0 255 255 255))
 $g.FillPath($br, $path); $br.Dispose(); $path.Dispose()
 Save $bmp $g "onedark.png"
 
-# ── Dracula: full moon, castle silhouette, bats, violet fog ──
+# ── Dracula: castle on a crag against a huge moon, fog and bats ──
 $rng = New-Object System.Random(1897)
 $bmp, $g = New-Canvas
-Fill-Vertical $g (C 255 46 40 78) (C 255 18 16 28)
-Glow $g 1430 260 420 (C 90 189 147 249)
-$b = New-Object System.Drawing.SolidBrush((C 235 248 248 242))
-$g.FillEllipse($b, 1330, 160, 200, 200); $b.Dispose()
-Glow $g 1430 260 150 (C 60 255 121 198)
-for ($i = 0; $i -lt 260; $i++) {
-  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(30, 120) 248 248 242))
-  $g.FillEllipse($b, $rng.Next(0, $W), $rng.Next(0, 620), $rng.Next(1, 3), $rng.Next(1, 3)); $b.Dispose()
+Fill-Vertical $g (C 255 48 42 84) (C 255 16 14 24)
+for ($i = 0; $i -lt 320; $i++) {
+  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(30, 130) 248 248 242))
+  $g.FillEllipse($b, $rng.Next(0, $W), $rng.Next(0, 700), $rng.Next(1, 3), $rng.Next(1, 3)); $b.Dispose()
 }
-# castle: towers with pointed roofs and lit windows
-$dark = New-Object System.Drawing.SolidBrush((C 255 12 10 20))
-$baseY = $H - 210
-$g.FillRectangle($dark, 120, $baseY, 620, 260)
-foreach ($t in @(@(150, 300), @(330, 380), @(520, 330), @(660, 250))) {
-  $tx = $t[0]; $th = $t[1]
-  $g.FillRectangle($dark, $tx, ($H - $th), 90, $th)
-  $g.FillPolygon($dark, (MkPts @(@(($tx - 12), ($H - $th)), @(($tx + 45), ($H - $th - 90)), @(($tx + 102), ($H - $th)))))
-  for ($k = 0; $k -lt 3; $k++) {
-    if ($rng.NextDouble() -lt 0.45) { continue }
-    $b = New-Object System.Drawing.SolidBrush((C 190 255 184 108))
-    $g.FillRectangle($b, ($tx + 20 + 30 * $rng.Next(0, 2)), ($H - $th + 40 + 70 * $k), 12, 18); $b.Dispose()
-  }
+# the moon: huge, haloed, cratered
+Glow $g 1310 330 520 (C 90 189 147 249)
+$b = New-Object System.Drawing.SolidBrush((C 248 248 248 242)); $g.FillEllipse($b, 1100, 120, 420, 420); $b.Dispose()
+foreach ($cr in @(@(1210, 240, 46), @(1350, 400, 64), @(1430, 220, 30), @(1250, 430, 26))) {
+  $b = New-Object System.Drawing.SolidBrush((C 34 98 90 130))
+  $g.FillEllipse($b, $cr[0], $cr[1], $cr[2], $cr[2]); $b.Dispose()
 }
-$dark.Dispose()
-# bats
-$pen = New-Object System.Drawing.Pen((C 200 12 10 20), 3)
-foreach ($bat in @(@(980, 300, 26), @(1080, 420, 18), @(880, 480, 14), @(1180, 200, 12))) {
+# crag rising from the right, castle silhouetted inside the moon disc
+$ink = New-Object System.Drawing.SolidBrush((C 255 13 11 22))
+$g.FillPolygon($ink, (MkPts @(@(900, $H), @(1020, 760), @(1140, 620), @(1240, 590), @(1420, 610), @(1560, 700), @(1720, 860), @($W, 980), @($W, $H))))
+# keep + towers on the crag
+$g.FillRectangle($ink, 1180, 430, 200, 170)
+foreach ($t in @(@(1150, 340, 54), @(1300, 300, 64), @(1420, 380, 44))) {
+  $tx = $t[0]; $ty = $t[1]; $tw = $t[2]
+  $g.FillRectangle($ink, $tx, $ty, $tw, (620 - $ty))
+  $g.FillPolygon($ink, (MkPts @(@(($tx - 10), $ty), @(($tx + [int]($tw / 2)), ($ty - 70)), @(($tx + $tw + 10), $ty))))
+  $pen = New-Object System.Drawing.Pen((C 255 13 11 22), 2)
+  $g.DrawLine($pen, ($tx + [int]($tw / 2)), ($ty - 70), ($tx + [int]($tw / 2)), ($ty - 100)); $pen.Dispose()
+  $g.FillPolygon($ink, (MkPts @(@(($tx + [int]($tw / 2)), ($ty - 100)), @(($tx + [int]($tw / 2) + 26), ($ty - 92)), @(($tx + [int]($tw / 2)), ($ty - 84)))))
+}
+$ink.Dispose()
+# lit windows on the keep and towers
+foreach ($wpos in @(@(1225, 470), @(1290, 500), @(1170, 380), @(1322, 340), @(1440, 420), @(1330, 460))) {
+  $b = New-Object System.Drawing.SolidBrush((C 210 255 184 108))
+  $g.FillRectangle($b, $wpos[0], $wpos[1], 10, 16); $b.Dispose()
+}
+# fog bands drifting across the crag
+foreach ($fy in @(700, 800, 900)) {
+  $b = New-Object System.Drawing.SolidBrush((C 16 189 147 249))
+  $g.FillRectangle($b, 0, $fy, $W, 46); $b.Dispose()
+  Glow $g $rng.Next(400, 1500) ($fy + 20) 260 (C 22 189 147 249)
+}
+# pine forest along the bottom
+$ink = New-Object System.Drawing.SolidBrush((C 255 10 9 18))
+$tx = -20
+while ($tx -lt $W) {
+  $th = $rng.Next(80, 180)
+  $g.FillPolygon($ink, (MkPts @(@(($tx - 34), $H), @($tx, ($H - $th)), @(($tx + 34), $H))))
+  $tx += $rng.Next(36, 70)
+}
+$ink.Dispose()
+# bats silhouetted against the moon
+$pen = New-Object System.Drawing.Pen((C 230 13 11 22), 4)
+foreach ($bat in @(@(1180, 250, 30), @(1370, 300, 22), @(1260, 480, 26), @(980, 380, 18), @(1500, 180, 16))) {
   $bxx = $bat[0]; $byy = $bat[1]; $bs = $bat[2]
-  $g.DrawArc($pen, ($bxx - $bs), ($byy - $bs / 2), $bs, $bs, 200, 140)
-  $g.DrawArc($pen, $bxx, ($byy - $bs / 2), $bs, $bs, 200, 140)
+  $g.DrawArc($pen, ($bxx - $bs), ($byy - [int]($bs / 2)), $bs, $bs, 200, 140)
+  $g.DrawArc($pen, $bxx, ($byy - [int]($bs / 2)), $bs, $bs, 200, 140)
 }
 $pen.Dispose()
 Save $bmp $g "dracula.png"
@@ -620,38 +705,56 @@ for ($i = 0; $i -lt 5; $i++) {
 }
 Save $bmp $g "solarizeddark.png"
 
-# ── Everforest: misty pine layers ──
+# ── Everforest: sun through mist over a pine valley ──
 $rng = New-Object System.Random(1990)
 $bmp, $g = New-Canvas
-Fill-Vertical $g (C 255 61 71 77) (C 255 45 53 59)
-Glow $g 1400 220 420 (C 40 219 188 127)
+Fill-Vertical $g (C 255 74 85 86) (C 255 42 50 54)
+# low sun with rays
+Glow $g 1360 300 520 (C 70 219 188 127)
+$b = New-Object System.Drawing.SolidBrush((C 130 219 188 127)); $g.FillEllipse($b, 1300, 240, 120, 120); $b.Dispose()
+for ($k = 0; $k -lt 7; $k++) {
+  $ang = -0.5 + $k * 0.28
+  $pen = New-Object System.Drawing.Pen((C 22 219 188 127), 22)
+  $g.DrawLine($pen, 1360, 300, (1360 + [int](900 * [math]::Cos($ang))), (300 + [int](900 * [math]::Sin($ang)))); $pen.Dispose()
+}
+# far ridge
+$g.FillPolygon((New-Object System.Drawing.SolidBrush((C 255 64 76 76))),
+  (MkPts @(@(0, $H), @(0, 620), @(300, 520), @(640, 640), @(1000, 540), @(1400, 660), @($W, 560), @($W, $H))))
+# pine layers: small trees, dense rows, mist between
 $layers = @(
-  @(560, (C 255 66 78 74), 150, 210),
-  @(720, (C 255 55 66 63), 190, 260),
-  @(880, (C 255 45 54 52), 240, 330),
-  @(1010, (C 255 36 43 42), 300, 420)
+  @(700, (C 255 56 68 68), 60, 110),
+  @(830, (C 255 47 57 58), 80, 140),
+  @(960, (C 255 38 47 49), 100, 170),
+  @(1075, (C 255 30 38 40), 120, 200)
 )
 foreach ($ly in $layers) {
   $baseY = $ly[0]; $col = $ly[1]; $minH = $ly[2]; $maxH = $ly[3]
   $b = New-Object System.Drawing.SolidBrush($col)
-  $tx = -60
-  while ($tx -lt $W + 60) {
+  $tx = -30
+  while ($tx -lt $W + 30) {
     $th = $rng.Next($minH, $maxH)
-    $tw = [int]($th * 0.46)
-    # three stacked triangles per pine
+    $half = [int]($th * 0.34)
+    # tiered pine: three overlapping triangles, each tier narrower
     for ($k = 0; $k -lt 3; $k++) {
-      $ty = $baseY - [int]($th * (0.30 * $k))
-      $kw = [int]($tw * (1 - 0.16 * $k))
-      $g.FillPolygon($b, (MkPts @(@(($tx - $kw), $ty), @($tx, ($ty - $th * 0.62)), @(($tx + $kw), $ty))))
+      $tierBase = $baseY - [int]($th * 0.26 * $k)
+      $tierHalf = [int]($half * (1.0 - 0.26 * $k))
+      $tierTop = $tierBase - [int]($th * 0.5)
+      $g.FillPolygon($b, (MkPts @(@(($tx - $tierHalf), $tierBase), @($tx, $tierTop), @(($tx + $tierHalf), $tierBase))))
     }
-    $g.FillRectangle($b, ($tx - 5), $baseY, 10, 60)
-    $tx += $rng.Next(46, 96)
+    $tx += $rng.Next(26, 52)
   }
   $b.Dispose()
-  # mist band between layers
-  $mist = New-Object System.Drawing.SolidBrush((C 26 211 198 170))
-  $g.FillRectangle($mist, 0, ($baseY - 24), $W, 74); $mist.Dispose()
+  $mist = New-Object System.Drawing.SolidBrush((C 38 211 198 170))
+  $g.FillRectangle($mist, 0, ($baseY - 14), $W, 56); $mist.Dispose()
+  Glow $g $rng.Next(300, 1600) $baseY 300 (C 26 211 198 170)
 }
+# birds
+$pen = New-Object System.Drawing.Pen((C 120 35 42 44), 3)
+foreach ($bd in @(@(420, 300), @(500, 340), @(360, 380), @(620, 260))) {
+  $g.DrawArc($pen, $bd[0], $bd[1], 26, 18, 200, 140)
+  $g.DrawArc($pen, ($bd[0] + 26), $bd[1], 26, 18, 200, 140)
+}
+$pen.Dispose()
 Save $bmp $g "everforest.png"
 
 # ── Game Boy: DMG dot-matrix with 8-bit sprites ──
@@ -679,10 +782,40 @@ function Stamp {
     }
   }
 }
-Stamp $g $heart 1380 220 16 (C 70 155 188 15)
-Stamp $g $alien 300 700 18 (C 60 139 172 15)
-Stamp $g $alien 1500 820 12 (C 45 139 172 15)
-Stamp $g $heart 640 320 11 (C 40 155 188 15)
+Stamp $g $heart 250 180 18 (C 90 155 188 15)
+Stamp $g $alien 420 560 22 (C 80 139 172 15)
+Stamp $g $alien 180 820 14 (C 60 139 172 15)
+Stamp $g $heart 660 380 12 (C 55 155 188 15)
+# a Tetris well mid-right: settled stack, falling T piece, side panel
+$wellX = 1120; $wellY = 220; $cellPx = 44; $wellCols = 10; $wellRows = 17
+$pen = New-Object System.Drawing.Pen((C 110 139 172 15), 4)
+$g.DrawRectangle($pen, ($wellX - 8), ($wellY - 8), ($wellCols * $cellPx + 16), ($wellRows * $cellPx + 16)); $pen.Dispose()
+$stack = @(
+  "0000000000", "0000000000", "0000000000", "0000000000", "0000000000",
+  "0000000000", "0000000000", "0000000000", "0000000000", "0000000000",
+  "0000110000", "0001111000", "1101111011", "1111111111", "1111110111",
+  "1111111111", "1110111111"
+)
+for ($r = 0; $r -lt $wellRows; $r++) {
+  for ($c2 = 0; $c2 -lt $wellCols; $c2++) {
+    if ($stack[$r][$c2] -ne '1') { continue }
+    $al = 70 + 20 * ($r % 3)
+    $b = New-Object System.Drawing.SolidBrush((C $al 139 172 15))
+    $g.FillRectangle($b, ($wellX + $c2 * $cellPx), ($wellY + $r * $cellPx), ($cellPx - 5), ($cellPx - 5)); $b.Dispose()
+    $pen = New-Object System.Drawing.Pen((C 60 15 56 15), 2)
+    $g.DrawRectangle($pen, ($wellX + $c2 * $cellPx), ($wellY + $r * $cellPx), ($cellPx - 5), ($cellPx - 5)); $pen.Dispose()
+  }
+}
+# falling T piece
+foreach ($pc in @(@(4, 4), @(3, 5), @(4, 5), @(5, 5))) {
+  $b = New-Object System.Drawing.SolidBrush((C 130 155 188 15))
+  $g.FillRectangle($b, ($wellX + $pc[0] * $cellPx), ($wellY + $pc[1] * $cellPx), ($cellPx - 5), ($cellPx - 5)); $b.Dispose()
+}
+# score panel: label dashes + digits blocks
+for ($k = 0; $k -lt 5; $k++) {
+  $b = New-Object System.Drawing.SolidBrush((C 70 139 172 15))
+  $g.FillRectangle($b, 1650, (260 + $k * 70), (140 - 18 * ($k % 3)), 18); $b.Dispose()
+}
 # screen edge vignette (DMG bezel shadow)
 foreach ($corner in @(@(0, 0), @($W, 0), @(0, $H), @($W, $H))) {
   Glow $g $corner[0] $corner[1] 700 (C 90 4 20 4)
@@ -717,5 +850,164 @@ foreach ($corner in @(@(0, 0), @($W, 0), @(0, $H), @($W, $H))) {
   Glow $g $corner[0] $corner[1] 640 (C 150 0 0 0)
 }
 Save $bmp $g "ambercrt.png"
+
+# ── LCARS: the classic rail-and-elbow console frame ──
+$rng = New-Object System.Random(2364)
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 4 4 6) (C 255 0 0 0)
+$lc = @((C 255 255 153 51), (C 255 153 153 255), (C 255 204 153 204), (C 255 255 204 102), (C 255 224 122 102), (C 255 153 204 255))
+# elbow: top bar + left rail joined with a rounded inner corner
+$path = New-Object System.Drawing.Drawing2D.GraphicsPath
+$path.AddLine(80, 150, 1420, 150)
+$path.AddLine(1420, 200, 340, 200)
+$path.AddArc(240, 200, 200, 200, 270, -90)
+$path.AddLine(240, 300, 240, 540)
+$path.AddLine(240, 540, 80, 540)
+$path.CloseFigure()
+$b = New-Object System.Drawing.SolidBrush($lc[0]); $g.FillPath($b, $path); $b.Dispose(); $path.Dispose()
+# capsule cap on the top bar's right end
+$b = New-Object System.Drawing.SolidBrush($lc[0]); $g.FillEllipse($b, 1395, 150, 50, 50); $b.Dispose()
+# secondary thin bar under the top bar
+$b = New-Object System.Drawing.SolidBrush($lc[1]); $g.FillRectangle($b, 420, 216, 620, 22); $g.FillEllipse($b, 1029, 216, 22, 22); $g.FillEllipse($b, 409, 216, 22, 22); $b.Dispose()
+# left rail segments below the elbow
+$railY = 556
+$si = 1
+while ($railY -lt $H - 40) {
+  $segH = $rng.Next(70, 200)
+  if ($railY + $segH -gt $H - 20) { $segH = $H - 20 - $railY }
+  $b = New-Object System.Drawing.SolidBrush($lc[$si % $lc.Count])
+  $g.FillRectangle($b, 80, $railY, 160, $segH); $b.Dispose()
+  $railY += $segH + 14
+  $si++
+}
+# data blocks: short colored bars right of the rail, like readouts
+for ($k = 0; $k -lt 9; $k++) {
+  $cc = $lc[$rng.Next(0, $lc.Count)]
+  $bw2 = $rng.Next(40, 180)
+  $b = New-Object System.Drawing.SolidBrush((C 200 $cc.R $cc.G $cc.B))
+  $g.FillRectangle($b, (1560 + $rng.Next(0, 120)), (300 + $k * 78), $bw2, 26); $b.Dispose()
+}
+# bottom-right footer bar with capsule ends
+$b = New-Object System.Drawing.SolidBrush($lc[3]); $g.FillRectangle($b, 420, ($H - 70), 900, 34); $g.FillEllipse($b, 403, ($H - 70), 34, 34); $g.FillEllipse($b, 1303, ($H - 70), 34, 34); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush($lc[4]); $g.FillRectangle($b, 1370, ($H - 70), 220, 34); $b.Dispose()
+Save $bmp $g "lcars.png"
+
+# ── TRON: grid floor, light-cycle trails, recognizer ──
+$rng = New-Object System.Random(1982)
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 7 11 18) (C 255 2 4 8)
+$horizon = 430
+# sky: faint arcs of the MCP disc
+foreach ($r in @(200, 260, 330)) {
+  $pen = New-Object System.Drawing.Pen((C 26 0 229 255), 2)
+  $g.DrawEllipse($pen, (1450 - $r), (150 - $r), (2 * $r), (2 * $r)); $pen.Dispose()
+}
+# horizon glow line
+Glow $g 960 $horizon 560 (C 46 0 229 255)
+$pen = New-Object System.Drawing.Pen((C 140 0 229 255), 2); $g.DrawLine($pen, 0, $horizon, $W, $horizon); $pen.Dispose()
+# perspective grid floor
+for ($i = -16; $i -le 16; $i++) {
+  $pen = New-Object System.Drawing.Pen((C 60 0 170 200), 1)
+  $g.DrawLine($pen, (960 + $i * 34), $horizon, (960 + $i * 260), $H); $pen.Dispose()
+}
+$gy = $horizon + 5; $step = 5
+while ($gy -lt $H) {
+  $pen = New-Object System.Drawing.Pen((C 66 0 170 200), 1)
+  $g.DrawLine($pen, 0, $gy, $W, $gy); $pen.Dispose()
+  $step = [int]($step * 1.33) + 1; $gy += $step
+}
+# light-cycle trails: glowing walls with right-angle jogs
+$cyan = (C 235 0 240 255)
+foreach ($seg in @(@(330, 1080, 330, 800), @(330, 800, 880, 800), @(880, 800, 880, 620))) {
+  $pen = New-Object System.Drawing.Pen($cyan, 6)
+  $g.DrawLine($pen, $seg[0], $seg[1], $seg[2], $seg[3]); $pen.Dispose()
+  Glow $g ([int](($seg[0] + $seg[2]) / 2)) ([int](($seg[1] + $seg[3]) / 2)) 120 (C 60 0 240 255)
+}
+$orange = (C 235 255 136 54)
+foreach ($seg in @(@(1610, 1080, 1610, 720), @(1610, 720, 1150, 720), @(1150, 720, 1150, 560))) {
+  $pen = New-Object System.Drawing.Pen($orange, 6)
+  $g.DrawLine($pen, $seg[0], $seg[1], $seg[2], $seg[3]); $pen.Dispose()
+  Glow $g ([int](($seg[0] + $seg[2]) / 2)) ([int](($seg[1] + $seg[3]) / 2)) 120 (C 60 255 136 54)
+}
+# recognizer silhouette hovering top-center
+$ink = New-Object System.Drawing.SolidBrush((C 255 4 7 12))
+$g.FillRectangle($ink, 820, 110, 60, 190)
+$g.FillRectangle($ink, 1060, 110, 60, 190)
+$g.FillRectangle($ink, 820, 70, 300, 60)
+$ink.Dispose()
+$pen = New-Object System.Drawing.Pen((C 170 0 229 255), 2)
+$g.DrawRectangle($pen, 820, 70, 300, 60); $g.DrawRectangle($pen, 820, 110, 60, 190); $g.DrawRectangle($pen, 1060, 110, 60, 190)
+$pen.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 200 255 136 54)); $g.FillRectangle($b, 940, 84, 60, 30); $b.Dispose()
+Save $bmp $g "tron.png"
+
+# ── Monokai: neon ribbon sweep with drifting code glyphs ──
+$rng = New-Object System.Random(2006)
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 43 44 36) (C 255 28 29 24)
+$mk = @((C 255 249 38 114), (C 255 166 226 46), (C 255 102 217 239), (C 255 253 151 31), (C 255 230 219 116))
+for ($k = 0; $k -lt 5; $k++) {
+  $cc = $mk[$k]
+  $off = 900 + $k * 190
+  $al = 96 - 12 * $k
+  $b = New-Object System.Drawing.SolidBrush((C $al $cc.R $cc.G $cc.B))
+  $g.FillPolygon($b, (MkPts @(@($off, 0), @(($off + 90), 0), @(($off - 610), $H), @(($off - 700), $H))))
+  $b.Dispose()
+  Glow $g ($off - 300) 540 200 (C ([int]($al / 3)) $cc.R $cc.G $cc.B)
+}
+$font = New-Object System.Drawing.Font("Consolas", 26, [System.Drawing.FontStyle]::Bold)
+$glyphs = "{}();=<>[]&|!?:".ToCharArray()
+for ($i = 0; $i -lt 70; $i++) {
+  $cc = $mk[$rng.Next(0, $mk.Count)]
+  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(16, 60) $cc.R $cc.G $cc.B))
+  $g.DrawString($glyphs[$rng.Next(0, $glyphs.Count)], $font, $b, $rng.Next(0, $W), $rng.Next(0, $H)); $b.Dispose()
+}
+$font.Dispose()
+foreach ($corner in @(@(0, 0), @($W, 0), @(0, $H), @($W, $H))) {
+  Glow $g $corner[0] $corner[1] 560 (C 70 0 0 0)
+}
+Save $bmp $g "monokai.png"
+
+# ── Solarized Light: ink sun and arcs on warm paper ──
+$rng = New-Object System.Random(1854)
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 253 246 227) (C 255 238 232 213)
+# faint ruled grid
+$pen = New-Object System.Drawing.Pen((C 10 101 123 131), 1)
+for ($gx = 0; $gx -lt $W; $gx += 120) { $g.DrawLine($pen, $gx, 0, $gx, $H) }
+for ($gy = 0; $gy -lt $H; $gy += 120) { $g.DrawLine($pen, 0, $gy, $W, $gy) }
+$pen.Dispose()
+# sun upper-right with concentric arc rings
+Glow $g 1430 300 460 (C 60 181 137 0)
+$b = New-Object System.Drawing.SolidBrush((C 210 181 137 0)); $g.FillEllipse($b, 1340, 210, 180, 180); $b.Dispose()
+foreach ($r in @(170, 240, 320, 410, 510)) {
+  $pen = New-Object System.Drawing.Pen((C 60 181 137 0), 2)
+  $g.DrawArc($pen, (1430 - $r), (300 - $r), (2 * $r), (2 * $r), 100, 250); $pen.Dispose()
+}
+$pen = New-Object System.Drawing.Pen((C 70 203 75 22), 2)
+$g.DrawArc($pen, (1430 - 280), (300 - 280), 560, 560, 140, 90); $pen.Dispose()
+# horizon + dune hills in ink washes
+$pen = New-Object System.Drawing.Pen((C 70 101 123 131), 2); $g.DrawLine($pen, 0, 800, $W, 800); $pen.Dispose()
+$path = New-Object System.Drawing.Drawing2D.GraphicsPath
+$path.AddBezier(0, 890, 500, 810, 900, 950, $W, 860)
+$path.AddLine($W, 860, $W, $H); $path.AddLine($W, $H, 0, $H); $path.CloseFigure()
+$b = New-Object System.Drawing.SolidBrush((C 30 181 137 0)); $g.FillPath($b, $path); $b.Dispose(); $path.Dispose()
+$path = New-Object System.Drawing.Drawing2D.GraphicsPath
+$path.AddBezier(0, 980, 600, 930, 1200, 1030, $W, 950)
+$path.AddLine($W, 950, $W, $H); $path.AddLine($W, $H, 0, $H); $path.CloseFigure()
+$b = New-Object System.Drawing.SolidBrush((C 34 203 75 22)); $g.FillPath($b, $path); $b.Dispose(); $path.Dispose()
+# birds
+$pen = New-Object System.Drawing.Pen((C 110 88 110 117), 2)
+foreach ($bd in @(@(420, 330), @(520, 290), @(360, 420), @(640, 370), @(760, 300))) {
+  $g.DrawArc($pen, $bd[0], $bd[1], 30, 20, 200, 140)
+  $g.DrawArc($pen, ($bd[0] + 30), $bd[1], 30, 20, 200, 140)
+}
+$pen.Dispose()
+# paper grain
+for ($i = 0; $i -lt 4000; $i++) {
+  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(4, 10) 88 70 50))
+  $g.FillRectangle($b, $rng.Next(0, $W), $rng.Next(0, $H), 1, 1); $b.Dispose()
+}
+Save $bmp $g "solarizedlight.png"
 
 "done -> $out"
