@@ -1577,39 +1577,45 @@ function makeGroupChip(g: TabGroup, count: number): HTMLElement {
   chip.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    showContextMenu(e.clientX, e.clientY, [
-      {
-        label: "Rename group",
-        action: () =>
-          inlineRename(name, g.name, (v) => {
-            if (v) g.name = v;
-            saveGroups();
-            refreshChrome();
-          }),
-      },
-      {
-        label: "Change color",
-        color: g.color,
-        action: () => {
-          g.color = GROUP_COLORS[(GROUP_COLORS.indexOf(g.color) + 1) % GROUP_COLORS.length];
-          saveGroups();
-          refreshChrome();
-        },
-      },
-      {
-        label: "Ungroup",
-        action: () => {
-          for (const k of Object.keys(groupState.assign)) {
-            if (groupState.assign[k] === g.id) delete groupState.assign[k];
-          }
-          pruneGroups();
-          saveGroups();
-          refreshChrome();
-        },
-      },
-    ]);
+    showContextMenu(e.clientX, e.clientY, groupMenuItems(g, name));
   });
   return chip;
+}
+
+/// Shared group actions (tab-bar chip and sidebar header). "Ungroup"
+/// deletes the group; its tabs stay open, just ungrouped.
+function groupMenuItems(g: TabGroup, nameEl: HTMLElement): CtxItem[] {
+  return [
+    {
+      label: "Rename group",
+      action: () =>
+        inlineRename(nameEl, g.name, (v) => {
+          if (v) g.name = v;
+          saveGroups();
+          refreshChrome();
+        }),
+    },
+    {
+      label: "Change color",
+      color: g.color,
+      action: () => {
+        g.color = GROUP_COLORS[(GROUP_COLORS.indexOf(g.color) + 1) % GROUP_COLORS.length];
+        saveGroups();
+        refreshChrome();
+      },
+    },
+    {
+      label: "Ungroup (delete group)",
+      action: () => {
+        for (const k of Object.keys(groupState.assign)) {
+          if (groupState.assign[k] === g.id) delete groupState.assign[k];
+        }
+        pruneGroups();
+        saveGroups();
+        refreshChrome();
+      },
+    },
+  ];
 }
 
 function menuRow(
@@ -2052,7 +2058,7 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
     sidebarList.appendChild(row);
   };
 
-  const addHeader = (name: string, color?: string) => {
+  const addHeader = (name: string, color?: string, g?: TabGroup) => {
     const h = document.createElement("div");
     h.className = "side-header";
     if (color) {
@@ -2061,7 +2067,17 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
       dot.style.background = color;
       h.appendChild(dot);
     }
-    h.appendChild(document.createTextNode(name));
+    const label = document.createElement("span");
+    label.textContent = name;
+    h.appendChild(label);
+    if (g) {
+      h.title = "Right-click for group actions (rename, color, ungroup)";
+      h.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showContextMenu(e.clientX, e.clientY, groupMenuItems(g, label));
+      });
+    }
     sidebarList.appendChild(h);
   };
 
@@ -2092,7 +2108,7 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
 
   const inGroup = (id: number, gid: string) => groupState.assign[id] === gid;
   for (const g of groupState.groups) {
-    addHeader(g.name, g.color);
+    addHeader(g.name, g.color, g);
     for (const id of orderedIds()) if (inGroup(id, g.id)) openRow(id);
     for (const id of hidden) if (inGroup(id, g.id) && !isClosing(id)) hiddenRow(id);
     for (const s of sessions) {
