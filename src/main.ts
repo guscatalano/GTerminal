@@ -69,6 +69,7 @@ interface AppConfig {
   ai_api_key?: string;
   ai_model?: string;
   ai_base_url?: string;
+  ai_flavor?: string;
   ai_auto_titles?: boolean;
   default_shell?: string;
 }
@@ -880,9 +881,7 @@ function renameTabAnywhere(id: number) {
 function showTabContextMenu(x: number, y: number, id: number) {
   const current = groupState.assign[id];
   const items: CtxItem[] = [{ label: "Rename tab", action: () => renameTabAnywhere(id) }];
-  if (config.ai_api_key?.trim()) {
-    items.push({ label: "✨ AI title", action: () => aiTitleFor(id) });
-  }
+  items.push({ label: "Suggest title…", action: () => suggestTitles(id) });
   items.push("sep");
   for (const g of groupState.groups) {
     if (g.id === current) continue;
@@ -1186,7 +1185,7 @@ function renderHiddenPills() {
   }
 }
 
-// ── AI titles (optional; needs an API key in settings) ──────────────────
+// ── title suggestions: local heuristics + optional AI ───────────────────
 
 /// Last ~N meaningful lines of a terminal's buffer, as plain text.
 function terminalTail(term: Terminal, maxLines = 30): string {
@@ -1200,65 +1199,174 @@ function terminalTail(term: Terminal, maxLines = 30): string {
   return lines.slice(-maxLines).join("\n");
 }
 
+function aiEnabled(): boolean {
+  return !!config.ai_base_url?.trim();
+}
+
+/// Title candidates computed locally from what's on the terminal:
+/// running program, last command typed, directory, shell title.
+function heuristicTitles(id: number): string[] {
+  const out: string[] = [];
+  const push = (t: string | undefined | null) => {
+    const v = t?.trim().slice(0, 40);
+    if (v && !out.some((o) => o.toLowerCase() === v.toLowerCase())) out.push(v);
+  };
+  const info = lastInfo.get(id);
+  const parts = cwdParts(id);
+  const tail = parts[parts.length - 1];
+  const prog = (info?.running ?? []).find((n) => !SHELLS.test(n));
+
+  if (prog && tail) push(`${prog} · ${tail}`);
+  push(prog);
+
+  // Last command typed at a prompt (PowerShell "PS ...>" or cmd "C:\...>").
+  const tab = tabs.get(id);
+  if (tab) {
+    const lines = terminalTail(tab.term, 30).split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const m = lines[i].match(/^(?:PS\s+)?[A-Za-z]:[^>]*>\s*(\S.*)$/);
+      if (m && m[1] && !/^(exit|cls|clear)\b/i.test(m[1])) {
+        push(m[1].split(/\s+/).slice(0, 3).join(" "));
+        break;
+      }
+    }
+  }
+
+  push(tail);
+  if (parts.length >= 2) push(`${parts[parts.length - 2]}/${tail}`);
+  const t = titles[id];
+  if (t && !BORING_TITLE.test(t)) push(t);
+  return out.slice(0, 5);
+}
+
 const aiTitleInFlight = new Set<number>();
 const aiTitleLastRun = new Map<number, { at: number; tail: string }>();
 
-async function aiTitleFor(id: number): Promise<void> {
-  const key = config.ai_api_key?.trim();
+/// Fetch candidate titles from the configured endpoint (Anthropic- or
+/// OpenAI-compatible). Blank endpoint = AI disabled, never called.
+async function fetchAiCandidates(id: number): Promise<string[]> {
   const tab = tabs.get(id);
-  if (!key || !tab || aiTitleInFlight.has(id)) return;
-  aiTitleInFlight.add(id);
-  try {
-    const info = lastInfo.get(id);
-    const context = [
-      `Working directory: ${info?.cwd ?? "unknown"}`,
-      `Running programs: ${(info?.running ?? []).join(", ") || "just the shell"}`,
-      "Recent terminal output:",
-      terminalTail(tab.term) || "(no output yet)",
-    ].join("\n");
+  const base = config.ai_base_url?.trim().replace(/\/+$/, "");
+  if (!tab || !base) return [];
+  const key = config.ai_api_key?.trim() ?? "";
+  const model = config.ai_model?.trim() || "claude-opus-5";
+  const info = lastInfo.get(id);
+  const context = [
+    `Working directory: ${info?.cwd ?? "unknown"}`,
+    `Running programs: ${(info?.running ?? []).join(", ") || "just the shell"}`,
+    "Recent terminal output:",
+    terminalTail(tab.term) || "(no output yet)",
+  ].join("\n");
+  const system =
+    "You name terminal tabs. Reply with exactly 5 candidate titles, one per line. Each is 2-4 words describing what this terminal session is being used for. No numbering, no quotes, no other text.";
 
+  let raw = "";
+  if (config.ai_flavor === "openai") {
+    const url = /\/v\d+$/.test(base) ? `${base}/chat/completions` : `${base}/v1/chat/completions`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(key ? { authorization: `Bearer ${key}` } : {}),
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 2000,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: context },
+        ],
+      }),
+    });
+    if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+    const data = await res.json();
+    raw = data.choices?.[0]?.message?.content ?? "";
+  } else {
     const client = new Anthropic({
-      apiKey: key,
-      baseURL: config.ai_base_url?.trim() || undefined,
+      apiKey: key || "none",
+      baseURL: base,
       dangerouslyAllowBrowser: true,
     });
-    const response = (await client.beta.messages.create({
-      model: config.ai_model || "claude-opus-5",
-      max_tokens: 1000,
-      output_config: { effort: "low" },
-      // Server-side fallback: if safety classifiers decline (terminal
-      // content can trip them during e.g. security work), another model
-      // titles the tab instead of failing silently.
-      betas: ["server-side-fallback-2026-07-01"],
-      system:
-        "You name terminal tabs. Reply with only a title of 2-4 words describing what this terminal session is being used for. No quotes, no trailing punctuation, no explanation.",
+    const response = await client.messages.create({
+      model,
+      max_tokens: 2000,
+      system,
       messages: [{ role: "user", content: context }],
-      // SDK typings may lag the "default" fallbacks mode; pass it through.
-      ...({ fallbacks: "default" } as object),
-    })) as Anthropic.Beta.BetaMessage;
-
-    if (response.stop_reason === "refusal") return; // keep the current title
+    });
+    if (response.stop_reason === "refusal") return [];
     const text = response.content.find(
-      (b): b is Anthropic.Beta.BetaTextBlock => b.type === "text"
+      (b): b is Anthropic.TextBlock => b.type === "text"
     );
-    const title = text ? text.text.trim().split("\n")[0].slice(0, 40) : "";
-    if (title) {
-      aiTitles[id] = title;
-      saveAiTitles();
-      sidebarSig = "";
-      refreshChrome();
-    }
-  } catch (err) {
-    console.error("AI title failed:", err);
-  } finally {
-    aiTitleInFlight.delete(id);
+    raw = text?.text ?? "";
   }
+  return raw
+    .split("\n")
+    .map((l) => l.trim().replace(/^[-*\d.)\s]+/, "").replace(/^["']|["']$/g, "").trim())
+    .filter(Boolean)
+    .slice(0, 5)
+    .map((t) => t.slice(0, 40));
 }
 
-/// Auto mode: every tick, title at most one open tab that has no custom
-/// name and whose content changed since its last AI pass.
+function applyPickedTitle(id: number, title: string) {
+  aiTitles[id] = title;
+  saveAiTitles();
+  sidebarSig = "";
+  refreshChrome();
+}
+
+function anchorForTab(id: number): { x: number; y: number } {
+  const btn = tabs.get(id)?.button;
+  if (btn && btn.offsetParent) {
+    const r = btn.getBoundingClientRect();
+    return { x: r.left, y: r.bottom + 4 };
+  }
+  const row = sidebarList.querySelector(`.side-row[data-id="${id}"]`);
+  if (row) {
+    const r = row.getBoundingClientRect();
+    return { x: r.right + 4, y: r.top };
+  }
+  return { x: 120, y: 60 };
+}
+
+/// The picker: local heuristic candidates immediately, plus an "Ask AI"
+/// entry when an endpoint is configured.
+function suggestTitles(id: number) {
+  const { x, y } = anchorForTab(id);
+  const items: CtxItem[] = heuristicTitles(id).map((t) => ({
+    label: t,
+    action: () => applyPickedTitle(id, t),
+  }));
+  if (aiEnabled()) {
+    if (items.length) items.push("sep");
+    items.push({
+      label: "✨ Ask AI for titles…",
+      action: async () => {
+        if (aiTitleInFlight.has(id)) return;
+        aiTitleInFlight.add(id);
+        try {
+          const candidates = await fetchAiCandidates(id);
+          if (!candidates.length) return;
+          const a = anchorForTab(id);
+          showContextMenu(
+            a.x,
+            a.y,
+            candidates.map((t) => ({ label: t, action: () => applyPickedTitle(id, t) }))
+          );
+        } catch (err) {
+          console.error("AI titles failed:", err);
+        } finally {
+          aiTitleInFlight.delete(id);
+        }
+      },
+    });
+  }
+  if (items.length) showContextMenu(x, y, items);
+}
+
+/// Auto mode: every tick, AI-title at most one open tab that has no
+/// custom name and whose content changed since its last pass.
 async function aiAutoTitleTick() {
-  if (!config.ai_auto_titles || !config.ai_api_key?.trim()) return;
+  if (!config.ai_auto_titles || !aiEnabled()) return;
   const now = Date.now();
   for (const id of orderedIds()) {
     if (customTitles[id]) continue;
@@ -1269,7 +1377,16 @@ async function aiAutoTitleTick() {
     const last = aiTitleLastRun.get(id);
     if (last && (now - last.at < 5 * 60_000 || last.tail === tail)) continue;
     aiTitleLastRun.set(id, { at: now, tail });
-    await aiTitleFor(id);
+    if (aiTitleInFlight.has(id)) continue;
+    aiTitleInFlight.add(id);
+    try {
+      const candidates = await fetchAiCandidates(id);
+      if (candidates.length) applyPickedTitle(id, candidates[0]);
+    } catch (err) {
+      console.error("AI auto-title failed:", err);
+    } finally {
+      aiTitleInFlight.delete(id);
+    }
     return; // one per tick keeps cost bounded
   }
 }
@@ -1655,18 +1772,47 @@ function buildSettingsPage() {
   );
 
   settingsSection("AI titles");
+  const urlInput2 = document.createElement("input");
+  urlInput2.className = "set-control set-wide";
+  urlInput2.type = "text";
+  urlInput2.placeholder = "blank = disabled";
+  urlInput2.value = config.ai_base_url ?? "";
+  urlInput2.addEventListener("change", () => {
+    config.ai_base_url = urlInput2.value.trim() || undefined;
+    saveConfig();
+  });
+  settingRow(
+    "API endpoint",
+    "Blank disables AI titles entirely — nothing is ever called. Set an Anthropic- or OpenAI-compatible base URL to enable.",
+    urlInput2
+  );
+  settingRow(
+    "API flavor",
+    "Which request format the endpoint speaks.",
+    mkSelect(
+      [
+        ["anthropic", "Anthropic-compatible"],
+        ["openai", "OpenAI-compatible"],
+      ],
+      config.ai_flavor ?? "anthropic",
+      (v) => {
+        config.ai_flavor = v === "anthropic" ? undefined : v;
+        saveConfig();
+      }
+    )
+  );
   const keyInput = document.createElement("input");
   keyInput.className = "set-control set-wide";
   keyInput.type = "password";
-  keyInput.placeholder = "sk-ant-…";
+  keyInput.placeholder = "optional";
   keyInput.value = config.ai_api_key ?? "";
   keyInput.addEventListener("change", () => {
     config.ai_api_key = keyInput.value.trim() || undefined;
     saveConfig();
   });
   settingRow(
-    "Anthropic API key",
-    "Enables AI tab titles. Stored in config.json on this machine.",
+    "API key",
+    "Optional — local gateways often need none. Stored in config.json on this machine.",
     keyInput
   );
   const modelInput = document.createElement("input");
@@ -1680,22 +1826,8 @@ function buildSettingsPage() {
   });
   settingRow(
     "Model",
-    "Any model ID. claude-opus-5 gives the best titles; claude-haiku-4-5 is faster and cheaper.",
+    "Model ID your endpoint understands (e.g. claude-opus-5, or a local model name).",
     modelInput
-  );
-  const urlInput = document.createElement("input");
-  urlInput.className = "set-control set-wide";
-  urlInput.type = "text";
-  urlInput.placeholder = "https://api.anthropic.com";
-  urlInput.value = config.ai_base_url ?? "";
-  urlInput.addEventListener("change", () => {
-    config.ai_base_url = urlInput.value.trim() || undefined;
-    saveConfig();
-  });
-  settingRow(
-    "API endpoint",
-    "Base URL for API requests. Leave empty for api.anthropic.com; set for a proxy or compatible gateway.",
-    urlInput
   );
   settingRow(
     "Auto-titles",

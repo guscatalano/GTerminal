@@ -46,7 +46,7 @@ Tabs shrink browser-style as they multiply; overflow collapses into a `+N` menu.
 
 Sessions in their grace window get a dedicated **Closing soon** sidebar section with a live m:ss countdown; click to restore, × (twice) to kill immediately.
 
-**AI titles (optional)**: add an Anthropic API key in ⚙ settings and tabs can be named by AI from what's actually happening in them (cwd, running programs, recent output). Right-click a tab → "✨ AI title" for on-demand naming, or enable auto-titles to quietly name unnamed tabs every couple of minutes (one tab per tick, skips unchanged ones). Manual renames always win over AI titles. Model is configurable (Claude Opus 5 default, Haiku 4.5 for cheaper titles); requests use low effort and server-side fallback so classifier-declined content still gets titled. The key lives in `config.json` — plaintext on your own machine.
+**Title suggestions**: right-click a tab → "Suggest title…" opens a picker with candidates computed locally from what's on the terminal — running program + folder, the last command you typed, directory paths, the shell's title. No network, always available. Optionally, configure an **AI endpoint** in ⚙ settings (blank = disabled, nothing is ever called): any Anthropic- or OpenAI-compatible base URL (hosted API, proxy, or local gateway like Ollama), with flavor, model ID, and optional key. With an endpoint set, the picker gains "✨ Ask AI for titles…" (five candidates to choose from), and an auto-titles toggle can quietly name unnamed tabs in the background. Manual renames always win.
 
 ## Development
 
