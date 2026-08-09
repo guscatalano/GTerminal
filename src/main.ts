@@ -528,6 +528,90 @@ THEMES.nous = mkTheme(
 THEMES.nous.xterm.cursor = "#0471a9";
 THEMES.nous.xterm.selectionBackground = "#0471a935";
 
+THEMES.monokai = mkTheme(
+  "Monokai",
+  "white",
+  ["Consolas, monospace", 1.1, "block"],
+  "linear-gradient(100deg, transparent 68%, rgba(249,38,114,0.14) 68.5% 72%, transparent 72.5%), linear-gradient(100deg, transparent 74%, rgba(166,226,46,0.12) 74.5% 77%, transparent 77.5%), linear-gradient(100deg, transparent 79%, rgba(102,217,239,0.12) 79.5% 81.5%, transparent 82%), radial-gradient(ellipse 70% 50% at 20% 0%, rgba(230,219,116,0.1), transparent 60%), linear-gradient(180deg, #2b2c24, #21221c)",
+  "#272822",
+  "#f8f8f2",
+  [
+    "#272822", "#f92672", "#a6e22e", "#e6db74", "#66d9ef", "#ae81ff", "#a1efe4", "#f8f8f2",
+    "#75715e", "#ff6188", "#b9f18d", "#f1e694", "#8be9ff", "#c39fff", "#c1f5ec", "#ffffff",
+  ]
+);
+
+THEMES.matrix = mkTheme(
+  "Matrix",
+  "white",
+  ["Consolas, monospace", 1.15, "block"],
+  "repeating-linear-gradient(90deg, rgba(0,230,92,0.06) 0 2px, transparent 2px 16px), repeating-linear-gradient(180deg, rgba(0,0,0,0.32) 0 2px, transparent 2px 4px), radial-gradient(ellipse 80% 60% at 50% 0%, rgba(0,230,92,0.14), transparent 65%), linear-gradient(180deg, #04140a, #010604)",
+  "#020a02",
+  "#00f050",
+  [
+    "#020a02", "#ff7a68", "#00e65c", "#b3f05a", "#33cc99", "#55e0b5", "#7dffd4", "#ccffdd",
+    "#1f8f4a", "#ff9c8a", "#4dff8f", "#d0ff85", "#66d9ad", "#99ffcc", "#b3ffe6", "#eafff2",
+  ]
+);
+THEMES.matrix.xterm.cursor = "#00ff66";
+THEMES.matrix.xterm.selectionBackground = "#00ff6633";
+
+THEMES["amber-crt"] = mkTheme(
+  "Amber CRT",
+  "white",
+  ['"Lucida Console", Consolas, monospace', 1.1, "block"],
+  "repeating-linear-gradient(180deg, rgba(0,0,0,0.35) 0 1px, transparent 1px 3px), radial-gradient(ellipse 90% 80% at 50% 45%, rgba(255,176,0,0.13), transparent 70%), radial-gradient(ellipse 140% 110% at 50% 50%, transparent 55%, rgba(0,0,0,0.55) 100%), linear-gradient(180deg, #140d02, #0a0600)",
+  "#100b00",
+  "#ffb000",
+  [
+    "#100b00", "#ff8c42", "#e0a500", "#ffcf40", "#d1a05a", "#ff9966", "#ffd27a", "#ffe0b3",
+    "#8a6a1a", "#ffa26b", "#ffc23d", "#ffe066", "#e6b877", "#ffb98a", "#ffe2a1", "#fff2d9",
+  ]
+);
+THEMES["amber-crt"].xterm.cursor = "#ffb000";
+THEMES["amber-crt"].xterm.selectionBackground = "#ffb00033";
+
+THEMES.synthwave = mkTheme(
+  "Synthwave '84",
+  "white",
+  ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "block"],
+  "radial-gradient(circle 150px at 50% 88%, rgba(254,222,93,0.4) 0 55px, rgba(255,126,219,0.38) 56px 105px, transparent 145px), repeating-linear-gradient(180deg, transparent 0 30px, rgba(255,126,219,0.1) 30px 31px), radial-gradient(ellipse 90% 50% at 50% 0%, rgba(3,237,249,0.1), transparent 60%), linear-gradient(180deg, #1b1430 0%, #2d1f45 60%, #241b2f 100%)",
+  "#241b2f",
+  "#f0eff1",
+  [
+    "#241b2f", "#fe4450", "#72f1b8", "#fede5d", "#61b8ff", "#ff7edb", "#03edf9", "#f0eff1",
+    "#8a7fb3", "#ff6b74", "#94f5cb", "#ffe97d", "#85caff", "#ff9ce6", "#66f5ff", "#ffffff",
+  ]
+);
+THEMES.synthwave.xterm.cursor = "#ff7edb";
+THEMES.synthwave.xterm.selectionBackground = "#ff7edb3d";
+
+THEMES["rose-pine"] = mkTheme(
+  "Rosé Pine",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"],
+  "radial-gradient(ellipse 60% 45% at 20% 20%, rgba(235,111,146,0.2), transparent 60%), radial-gradient(circle at 70% 30%, rgba(196,167,231,0.13) 0 90px, transparent 140px), radial-gradient(ellipse 70% 45% at 85% 95%, rgba(49,116,143,0.3), transparent 62%), linear-gradient(180deg, #1d1a2c, #131120)",
+  "#191724",
+  "#e0def4",
+  [
+    "#191724", "#eb6f92", "#82c4a0", "#f6c177", "#6aa5c9", "#c4a7e7", "#9ccfd8", "#e0def4",
+    "#6e6a86", "#f08eab", "#9bd8b8", "#f9d193", "#86bbdd", "#d5bff0", "#b5e0e6", "#f5f3ff",
+  ]
+);
+
+THEMES.everforest = mkTheme(
+  "Everforest",
+  "white",
+  ["Consolas, monospace", 1.2, "bar"],
+  "radial-gradient(ellipse 90% 55% at 25% 118%, rgba(88,118,98,0.5), transparent 65%), radial-gradient(ellipse 90% 55% at 80% 122%, rgba(64,92,76,0.55), transparent 68%), radial-gradient(ellipse 100% 40% at 50% -5%, rgba(219,188,127,0.11), transparent 55%), linear-gradient(180deg, #333c43, #262d33)",
+  "#2d353b",
+  "#d3c6aa",
+  [
+    "#2d353b", "#e67e80", "#a7c080", "#dbbc7f", "#7fbbb3", "#d699b6", "#83c092", "#d3c6aa",
+    "#7a8478", "#ec8f91", "#b4cf9a", "#e3c78f", "#93cbc4", "#e0accd", "#9ad0a9", "#ece2c8",
+  ]
+);
+
 let themeKey = "one-dark";
 function currentTheme(): ThemeDef {
   return THEMES[themeKey] ?? THEMES["one-dark"];
