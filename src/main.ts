@@ -1078,13 +1078,25 @@ async function createTab(attachId?: number, shell?: string, cwd?: string, title?
         action: () => {
           navigator.clipboard.writeText(sel).catch(() => {});
           term.clearSelection();
+          term.focus();
         },
       });
     }
-    items.push({ label: "Paste", action: paste });
+    // Focus returns to the terminal after every menu action so typing
+    // (especially right after a paste) lands where it belongs.
+    items.push({
+      label: "Paste",
+      action: () => {
+        void paste();
+        term.focus();
+      },
+    });
     items.push("sep", {
       label: "Select all",
-      action: () => term.selectAll(),
+      action: () => {
+        term.selectAll();
+        term.focus();
+      },
     });
     showContextMenu(e.clientX, e.clientY, items);
   });
