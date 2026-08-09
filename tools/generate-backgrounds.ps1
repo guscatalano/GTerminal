@@ -266,73 +266,125 @@ for ($i = 0; $i -lt 5000; $i++) {
 }
 Save $bmp $g "nous.png"
 
-# ── Cyberpunk: key-art minimalism — flat chrome-yellow spine on the
-# right edge, glitch steps on its edge, chromatic fringe, black-on-yellow
-# schematic 2077, cyan partner dashes, vast dark negative space ──
+# ── Cyberpunk: neon night city — magenta/cyan/yellow, edge-lit towers,
+# holo-ad, katakana signboards, light trails, street-glow reflections ──
 $rng = New-Object System.Random(2077)
 $bmp, $g = New-Canvas
-Fill-Vertical $g (C 255 13 13 17) (C 255 8 8 11)
-# the yellow spine: full-height slab anchored to the right edge, its left
-# edge broken by displacement steps (out, in, out)
-$b = New-Object System.Drawing.SolidBrush((C 250 252 238 10))
-$g.FillPolygon($b, (MkPts @(
-  @(1560, 0), @(1560, 260), @(1524, 260), @(1524, 332), @(1560, 332),
-  @(1560, 520), @(1596, 520), @(1596, 578), @(1560, 578),
-  @(1560, 788), @(1520, 788), @(1520, 848), @(1560, 848),
-  @(1560, $H), @($W, $H), @($W, 0))))
-$b.Dispose()
-# chromatic aberration fringes just off the edge (red near, cyan farther)
-$b = New-Object System.Drawing.SolidBrush((C 120 255 40 70)); $g.FillRectangle($b, 1548, 0, 4, $H); $b.Dispose()
-$b = New-Object System.Drawing.SolidBrush((C 85 0 240 255)); $g.FillRectangle($b, 1538, 0, 3, $H); $b.Dispose()
-# echo fringes on the step notches
-foreach ($st in @(@(1524, 260, 72), @(1520, 788, 60))) {
-  $b = New-Object System.Drawing.SolidBrush((C 110 255 40 70)); $g.FillRectangle($b, ($st[0] - 10), $st[1], 4, $st[2]); $b.Dispose()
-  $b = New-Object System.Drawing.SolidBrush((C 80 0 240 255)); $g.FillRectangle($b, ($st[0] - 18), $st[1], 3, $st[2]); $b.Dispose()
+Fill-Vertical $g (C 255 24 10 44) (C 255 8 6 16)
+# dusk bloom on the horizon
+Glow $g 960 660 760 (C 66 255 60 180)
+Glow $g 420 620 420 (C 40 0 240 255)
+Glow $g 1560 640 430 (C 44 80 110 255)
+# far skyline: violet silhouettes, sparse windows
+$far = New-Object System.Drawing.SolidBrush((C 255 20 11 38))
+$x = -20
+while ($x -lt $W) {
+  $bw = $rng.Next(60, 150); $h2 = $rng.Next(240, 430)
+  $g.FillRectangle($far, $x, (660 - $h2), $bw, (420 + $h2))
+  for ($i = 0; $i -lt [int]($bw * $h2 / 2600); $i++) {
+    $cc = if ($rng.NextDouble() -lt 0.5) { C $rng.Next(40, 100) 255 90 200 } else { C $rng.Next(40, 100) 90 230 255 }
+    $b = New-Object System.Drawing.SolidBrush($cc)
+    $g.FillRectangle($b, ($x + $rng.Next(4, $bw - 6)), (660 - $h2 + $rng.Next(8, $h2)), 3, 4); $b.Dispose()
+  }
+  $x += $bw + $rng.Next(4, 18)
 }
-# black-on-yellow: small seven-seg 2077 stacked vertically in the spine
-$segsFor = @{
-  "2" = @("A", "B", "G", "E", "D"); "0" = @("A", "B", "C", "D", "E", "F"); "7" = @("A", "B", "C")
-}
-$dw = 38; $dh = 62; $thk = 9
-$digits = @("2", "0", "7", "7")
-for ($di = 0; $di -lt $digits.Count; $di++) {
-  $ox = 1568; $oy = 120 + $di * 88
-  foreach ($sg in $segsFor[$digits[$di]]) {
-    $b = New-Object System.Drawing.SolidBrush((C 235 12 12 14))
-    switch ($sg) {
-      "A" { $g.FillRectangle($b, $ox, $oy, $dw, $thk) }
-      "B" { $g.FillRectangle($b, ($ox + $dw - $thk), $oy, $thk, [int]($dh / 2)) }
-      "C" { $g.FillRectangle($b, ($ox + $dw - $thk), ($oy + [int]($dh / 2)), $thk, [int]($dh / 2)) }
-      "D" { $g.FillRectangle($b, $ox, ($oy + $dh - $thk), $dw, $thk) }
-      "E" { $g.FillRectangle($b, $ox, ($oy + [int]($dh / 2)), $thk, [int]($dh / 2)) }
-      "F" { $g.FillRectangle($b, $ox, $oy, $thk, [int]($dh / 2)) }
-      "G" { $g.FillRectangle($b, $ox, ($oy + [int](($dh - $thk) / 2)), $dw, $thk) }
+$far.Dispose()
+# mid skyline: darker, denser windows, neon rooflines on some towers
+$mid = New-Object System.Drawing.SolidBrush((C 255 11 8 22))
+$x = -40
+while ($x -lt $W) {
+  $bw = $rng.Next(110, 260); $h2 = $rng.Next(360, 620)
+  $top = $H - $h2 - 60
+  $g.FillRectangle($mid, $x, $top, $bw, ($h2 + 60))
+  for ($wy = $top + 18; $wy -lt $H - 40; $wy += 26) {
+    for ($wx = $x + 12; $wx -lt $x + $bw - 14; $wx += 20) {
+      if ($rng.NextDouble() -lt 0.62) { continue }
+      $roll = $rng.NextDouble()
+      $cc = if ($roll -lt 0.4) { C $rng.Next(50, 140) 255 90 200 }
+      elseif ($roll -lt 0.75) { C $rng.Next(50, 140) 90 230 255 }
+      else { C $rng.Next(50, 130) 252 238 10 }
+      $b = New-Object System.Drawing.SolidBrush($cc); $g.FillRectangle($b, $wx, $wy, 7, 10); $b.Dispose()
     }
-    $b.Dispose()
+  }
+  if ($rng.NextDouble() -lt 0.6) {
+    $edge = if ($rng.NextDouble() -lt 0.5) { C 200 255 60 180 } else { C 200 0 240 255 }
+    $pen = New-Object System.Drawing.Pen($edge, 3)
+    $g.DrawLine($pen, $x, $top, ($x + $bw), $top)
+    $g.DrawLine($pen, $x, $top, $x, ($top + $rng.Next(40, 120)))
+    $pen.Dispose()
+    Glow $g ($x + [int]($bw / 2)) $top 90 (C 50 $edge.R $edge.G $edge.B)
+  }
+  $x += $bw + $rng.Next(10, 40)
+}
+$mid.Dispose()
+# framing megatowers left and right with katakana signboards
+$fg = New-Object System.Drawing.SolidBrush((C 255 6 5 13))
+$g.FillRectangle($fg, -60, 0, 300, $H)
+$g.FillRectangle($fg, 1690, 0, 300, $H)
+$fg.Dispose()
+$font = New-Object System.Drawing.Font("MS Gothic", 30, [System.Drawing.FontStyle]::Bold)
+$boards = @(
+  @(96, 130, 620, (C 235 255 60 180)),
+  @(178, 320, 520, (C 235 0 240 255)),
+  @(1724, 90, 700, (C 235 252 238 10)),
+  @(1830, 380, 480, (C 235 255 60 180))
+)
+foreach ($bd in $boards) {
+  $bx = $bd[0]; $by = $bd[1]; $bh = $bd[2]; $cc = $bd[3]
+  $b = New-Object System.Drawing.SolidBrush((C 40 $cc.R $cc.G $cc.B))
+  $g.FillRectangle($b, $bx, $by, 48, $bh); $b.Dispose()
+  $pen = New-Object System.Drawing.Pen((C 140 $cc.R $cc.G $cc.B), 2)
+  $g.DrawRectangle($pen, $bx, $by, 48, $bh); $pen.Dispose()
+  Glow $g ($bx + 24) ($by + [int]($bh / 2)) 130 (C 44 $cc.R $cc.G $cc.B)
+  $gy = $by + 12
+  while ($gy -lt $by + $bh - 40) {
+    $ch = [char](0x30A0 + $rng.Next(0, 96))
+    $b = New-Object System.Drawing.SolidBrush((C 220 $cc.R $cc.G $cc.B))
+    $g.DrawString($ch, $font, $b, ($bx + 7), $gy); $b.Dispose()
+    $gy += 44
   }
 }
-# schematic dashes + chip below the digits, still black-on-yellow
-$b = New-Object System.Drawing.SolidBrush((C 225 12 12 14))
-$g.FillRectangle($b, 1568, 508, 38, 8)
-$g.FillRectangle($b, 1568, 530, 24, 8)
-$g.FillRectangle($b, 1568, 552, 30, 8)
-$g.FillRectangle($b, 1568, 584, 38, 22)
-$b.Dispose()
-# cyan partner dashes hugging the spine's dark side
-for ($k = 0; $k -lt 6; $k++) {
-  $b = New-Object System.Drawing.SolidBrush((C 170 0 240 255))
-  $g.FillRectangle($b, 1478, (140 + $k * 26), 26, 9); $b.Dispose()
+$font.Dispose()
+# floating holo-ad between the towers: scanlined cyan panel, ghost offset
+foreach ($off in @(8, 0)) {
+  $al = if ($off -eq 0) { 40 } else { 16 }
+  $b = New-Object System.Drawing.SolidBrush((C $al 0 240 255))
+  $g.FillRectangle($b, (690 + $off), 170, 520, 190); $b.Dispose()
 }
-$b = New-Object System.Drawing.SolidBrush((C 170 255 40 70)); $g.FillRectangle($b, 1478, 320, 26, 6); $b.Dispose()
-# lone cyan schematic tick low on the dark field, echoing the duo
-$b = New-Object System.Drawing.SolidBrush((C 90 0 240 255)); $g.FillRectangle($b, 1290, 942, 214, 2); $b.Dispose()
-$b = New-Object System.Drawing.SolidBrush((C 150 0 240 255)); $g.FillRectangle($b, 1290, 938, 30, 10); $b.Dispose()
-# subtle scanlines + grain
-for ($y = 0; $y -lt $H; $y += 4) {
-  $pen = New-Object System.Drawing.Pen((C 15 0 0 0), 1)
-  $g.DrawLine($pen, 0, $y, $W, $y); $pen.Dispose()
+$pen = New-Object System.Drawing.Pen((C 150 0 240 255), 2)
+$g.DrawRectangle($pen, 690, 170, 520, 190); $pen.Dispose()
+for ($gy = 176; $gy -lt 356; $gy += 7) {
+  $pen = New-Object System.Drawing.Pen((C 40 8 6 16), 2)
+  $g.DrawLine($pen, 692, $gy, 1208, $gy); $pen.Dispose()
 }
-for ($i = 0; $i -lt 2200; $i++) {
+$font = New-Object System.Drawing.Font("MS Gothic", 60, [System.Drawing.FontStyle]::Bold)
+$b = New-Object System.Drawing.SolidBrush((C 150 120 245 255))
+$g.DrawString([string][char](0x30B5) + [string][char](0x30A4) + [string][char](0x30D0) + [string][char](0x30FC), $font, $b, 760, 220)
+$b.Dispose(); $font.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 220 255 40 70)); $g.FillEllipse($b, 1176, 184, 12, 12); $b.Dispose()
+Glow $g 950 265 260 (C 36 0 240 255)
+# flying-car light trails
+foreach ($tr in @(@(240, 470, 620, (C 170 252 238 10)), @(1120, 430, 540, (C 170 255 40 70)), @(520, 540, 420, (C 150 0 240 255)), @(1240, 560, 500, (C 150 252 238 10)))) {
+  $tx = $tr[0]; $ty = $tr[1]; $tl = $tr[2]; $cc = $tr[3]
+  for ($seg = 0; $seg -lt $tl; $seg += 6) {
+    $fade = [int]($cc.A * $seg / $tl)
+    $b = New-Object System.Drawing.SolidBrush((C $fade $cc.R $cc.G $cc.B))
+    $g.FillRectangle($b, ($tx + $seg), ($ty - [int]($seg / 40)), 5, 3); $b.Dispose()
+  }
+  Glow $g ($tx + $tl) ($ty - [int]($tl / 40)) 60 (C 70 $cc.R $cc.G $cc.B)
+}
+# street glow + neon reflections rising from the bottom edge
+Glow $g 700 1120 520 (C 90 255 60 180)
+Glow $g 1300 1140 560 (C 80 0 240 255)
+for ($k = 0; $k -lt 60; $k++) {
+  $rx = $rng.Next(240, 1690)
+  $roll = $rng.NextDouble()
+  $cc = if ($roll -lt 0.4) { C $rng.Next(24, 70) 255 60 180 } elseif ($roll -lt 0.75) { C $rng.Next(24, 70) 0 240 255 } else { C $rng.Next(20, 60) 252 238 10 }
+  $b = New-Object System.Drawing.SolidBrush($cc)
+  $g.FillRectangle($b, $rx, ($H - $rng.Next(50, 150)), $rng.Next(3, 8), 200); $b.Dispose()
+}
+# haze grain
+for ($i = 0; $i -lt 2600; $i++) {
   $tone = if ($rng.NextDouble() -lt 0.5) { 255 } else { 0 }
   $b = New-Object System.Drawing.SolidBrush((C $rng.Next(4, 11) $tone $tone $tone))
   $g.FillRectangle($b, $rng.Next(0, $W), $rng.Next(0, $H), 1, 1); $b.Dispose()
