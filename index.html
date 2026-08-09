@@ -7,14 +7,25 @@
   </head>
   <body>
     <div id="app">
-      <div id="tabbar-row">
-        <div id="tabbar"></div>
-        <div id="hiddenbar"></div>
-        <button id="newtab" title="New tab (Ctrl+Shift+T)">+</button>
-        <button id="restore" title="Restore a detached session (Ctrl+Shift+Z)">⟳</button>
-        <div id="restore-menu"></div>
+      <div id="sidebar">
+        <div id="sidebar-title">Sessions</div>
+        <div id="sidebar-list"></div>
+        <button id="sidebar-new">+ new session</button>
       </div>
-      <div id="panes"></div>
+      <div id="main">
+        <div id="tabbar-row">
+          <button id="sidebtn" title="Toggle session sidebar (Ctrl+Shift+B)">☰</button>
+          <div id="tabbar"></div>
+          <button id="overflow" class="chip" hidden></button>
+          <div id="hiddenbar"></div>
+          <button id="newtab" title="New tab (Ctrl+Shift+T)">+</button>
+          <button id="restore" title="Restore a detached session (Ctrl+Shift+Z)">⟳</button>
+          <div id="restore-menu" class="menu"></div>
+          <div id="overflow-menu" class="menu"></div>
+          <div id="hidden-menu" class="menu"></div>
+        </div>
+        <div id="panes"></div>
+      </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

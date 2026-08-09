@@ -14,6 +14,135 @@ body,
 
 #app {
   display: flex;
+}
+
+/* ── sidebar ─────────────────────────────────────────────────────────── */
+
+#sidebar {
+  display: none;
+  width: 220px;
+  flex: none;
+  flex-direction: column;
+  background: #12151b;
+  border-right: 1px solid #2b3140;
+  user-select: none;
+}
+
+#app.sidebar-on #sidebar {
+  display: flex;
+}
+
+#app.sidebar-on #tabbar,
+#app.sidebar-on #hiddenbar,
+#app.sidebar-on #overflow {
+  display: none !important;
+}
+
+#sidebar-title {
+  padding: 10px 12px 6px 12px;
+  color: #5c6370;
+  font: 600 11px "Segoe UI", sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+#sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 6px;
+}
+
+.side-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: #8b93a1;
+  font: 12px "Segoe UI", sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.side-row:hover {
+  background: #1a1e26;
+}
+
+.side-row.active {
+  background: #1e222b;
+  color: #d7dae0;
+}
+
+.side-dot {
+  flex: none;
+  font-size: 10px;
+}
+
+.side-dot.open {
+  color: #61afef;
+}
+
+.side-dot.hidden {
+  color: #6b7383;
+}
+
+.side-dot.cold {
+  color: #4a5160;
+}
+
+.side-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.side-actions {
+  display: none;
+  gap: 2px;
+}
+
+.side-row:hover .side-actions {
+  display: flex;
+}
+
+.side-act {
+  border: none;
+  background: none;
+  color: #8b93a1;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.side-act:hover {
+  background: #333a47;
+  color: #fff;
+}
+
+#sidebar-new {
+  margin: 6px;
+  padding: 7px;
+  border: 1px dashed #333a47;
+  border-radius: 6px;
+  background: none;
+  color: #8b93a1;
+  font: 12px "Segoe UI", sans-serif;
+  cursor: pointer;
+}
+
+#sidebar-new:hover {
+  background: #1a1e26;
+  color: #d7dae0;
+}
+
+/* ── main column & tab bar ───────────────────────────────────────────── */
+
+#main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   flex-direction: column;
 }
 
@@ -25,21 +154,25 @@ body,
   background: #171a21;
   user-select: none;
   flex: none;
+  position: relative;
 }
 
 #tabbar {
   display: flex;
   gap: 4px;
-  overflow-x: auto;
-  scrollbar-width: none;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .tab {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  flex: 1 1 160px;
+  min-width: 100px;
   max-width: 220px;
-  padding: 6px 8px 6px 12px;
+  padding: 6px 6px 6px 12px;
   border-radius: 8px 8px 0 0;
   color: #8b93a1;
   font: 12px "Segoe UI", sans-serif;
@@ -57,9 +190,9 @@ body,
 }
 
 .tab-label {
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 170px;
 }
 
 .tab-close {
@@ -71,6 +204,7 @@ body,
   padding: 2px 4px;
   border-radius: 4px;
   cursor: pointer;
+  flex: none;
 }
 
 .tab-close:hover {
@@ -78,23 +212,8 @@ body,
   color: #fff;
 }
 
-#newtab {
-  border: none;
-  background: none;
-  color: #8b93a1;
-  font-size: 16px;
-  line-height: 1;
-  padding: 4px 9px;
-  border-radius: 6px;
-  cursor: pointer;
-  flex: none;
-}
-
-#newtab:hover {
-  background: #1e222b;
-  color: #d7dae0;
-}
-
+#sidebtn,
+#newtab,
 #restore {
   border: none;
   background: none;
@@ -107,82 +226,42 @@ body,
   flex: none;
 }
 
+#newtab {
+  font-size: 16px;
+}
+
+#sidebtn:hover,
+#newtab:hover,
 #restore:hover {
   background: #1e222b;
   color: #d7dae0;
 }
 
-#restore-menu {
-  display: none;
-  position: absolute;
-  top: 34px;
-  right: 8px;
-  z-index: 10;
-  min-width: 220px;
-  max-height: 320px;
-  overflow-y: auto;
-  background: #1e222b;
-  border: 1px solid #2b3140;
-  border-radius: 8px;
-  padding: 4px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-}
-
-#restore-menu.open {
-  display: block;
-}
-
-.restore-empty {
-  padding: 8px 10px;
-  color: #5c6370;
-  font: 12px "Segoe UI", sans-serif;
-}
-
-.restore-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  color: #d7dae0;
-  font: 12px "Segoe UI", sans-serif;
+.chip {
+  border: 1px solid #333a47;
+  background: #1a1e26;
+  color: #8b93a1;
+  font: 11px "Segoe UI", sans-serif;
+  line-height: 1;
+  padding: 5px 8px;
+  border-radius: 999px;
   cursor: pointer;
-}
-
-.restore-row:hover {
-  background: #262c38;
-}
-
-.restore-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: none;
   white-space: nowrap;
 }
 
-.restore-kill {
-  border: none;
-  background: none;
-  color: #8b93a1;
-  font-size: 14px;
-  line-height: 1;
-  padding: 2px 5px;
-  border-radius: 4px;
-  cursor: pointer;
+.chip:hover {
+  color: #d7dae0;
+  border-color: #4a5468;
 }
 
-.restore-kill:hover {
-  background: #3a4152;
-  color: #fff;
-}
+/* ── hidden pills ────────────────────────────────────────────────────── */
 
 #hiddenbar {
   display: flex;
   gap: 4px;
   align-items: center;
   flex: none;
-  overflow-x: auto;
-  scrollbar-width: none;
 }
 
 #hiddenbar:not(:empty) {
@@ -232,6 +311,74 @@ body,
   background: #3a4152;
   color: #fff;
 }
+
+/* ── dropdown menus (restore / overflow / hidden) ────────────────────── */
+
+.menu {
+  display: none;
+  position: absolute;
+  top: 34px;
+  right: 8px;
+  z-index: 10;
+  min-width: 220px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: #1e222b;
+  border: 1px solid #2b3140;
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.menu.open {
+  display: block;
+}
+
+.menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: #d7dae0;
+  font: 12px "Segoe UI", sans-serif;
+  cursor: pointer;
+}
+
+.menu-row:hover {
+  background: #262c38;
+}
+
+.menu-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-kill {
+  border: none;
+  background: none;
+  color: #8b93a1;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.menu-kill:hover {
+  background: #3a4152;
+  color: #fff;
+}
+
+.restore-empty {
+  padding: 8px 10px;
+  color: #5c6370;
+  font: 12px "Segoe UI", sans-serif;
+}
+
+/* ── terminal panes ──────────────────────────────────────────────────── */
 
 #panes {
   flex: 1;

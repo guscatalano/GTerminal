@@ -20,6 +20,7 @@ interface SessionInfo {
   id: number;
   created_ms: number;
   attached: boolean;
+  alive: boolean;
 }
 
 const tabs = new Map<number, Tab>();
@@ -28,13 +29,18 @@ const tabs = new Map<number, Tab>();
 const pending = new Map<number, string[]>();
 let activeId: number | null = null;
 
+const app = document.getElementById("app")!;
 const tabbar = document.getElementById("tabbar")!;
 const hiddenbar = document.getElementById("hiddenbar")!;
 const panes = document.getElementById("panes")!;
 const restoreMenu = document.getElementById("restore-menu")!;
+const overflowBtn = document.getElementById("overflow") as HTMLButtonElement;
+const overflowMenu = document.getElementById("overflow-menu")!;
+const hiddenMenu = document.getElementById("hidden-menu")!;
+const sidebarList = document.getElementById("sidebar-list")!;
 
 // Sessions the user parked with "hide" — detached in the daemon but shown
-// as pills in the tab bar. Persisted so they stay parked across restarts.
+// as pills (or a chip) in the tab bar. Persisted across restarts.
 const hidden = new Set<number>(
   JSON.parse(localStorage.getItem("gterm-hidden") ?? "[]") as number[]
 );
@@ -49,6 +55,9 @@ const titles: Record<string, string> = JSON.parse(
 function saveTitle(id: number, title: string) {
   titles[id] = title;
   localStorage.setItem("gterm-titles", JSON.stringify(titles));
+}
+function titleOf(id: number): string {
+  return titles[id] ?? `Session ${id}`;
 }
 
 const THEME = {
@@ -89,6 +98,7 @@ function setActive(id: number) {
   }
   fitTab(tab);
   tab.term.focus();
+  refreshChrome();
 }
 
 function fitTab(tab: Tab) {
@@ -125,6 +135,10 @@ function makeShortcutHandler(getId: () => number) {
       }
       if (key === "H") {
         hideTab(getId());
+        return false;
+      }
+      if (key === "B") {
+        toggleSidebar();
         return false;
       }
       if (key === "Z") {
@@ -201,7 +215,6 @@ async function createTab(attachId?: number) {
 
   if (hidden.delete(id)) {
     saveHidden();
-    renderHiddenPills();
   }
 
   const button = document.createElement("div");
@@ -240,6 +253,7 @@ async function createTab(attachId?: number) {
     if (title.trim()) {
       label.textContent = title;
       saveTitle(id, title);
+      refreshChrome();
     }
   });
   term.attachCustomKeyEventHandler(makeShortcutHandler(() => id));
@@ -269,31 +283,32 @@ function removeTab(id: number, closeWindowIfLast = true) {
   tab.button.remove();
   if (tabs.size === 0) {
     if (closeWindowIfLast) getCurrentWindow().close();
+    refreshChrome();
     return;
   }
   if (activeId === id) {
     const remaining = orderedIds();
     setActive(remaining[Math.min(i, remaining.length - 1)]);
   }
+  refreshChrome();
 }
 
 // Closing a tab detaches: the shell keeps running in the daemon and can be
-// restored from the ⟳ menu, Ctrl+Shift+Z, or the next launch.
+// restored from the ⟳ menu, Ctrl+Shift+Z, the sidebar, or the next launch.
 function closeTab(id: number) {
   invoke("detach_session", { id }).catch(() => {});
   removeTab(id);
 }
 
-// Hiding also detaches, but parks the session as a visible pill in the tab
-// bar for one-click restore. Hidden state survives app restarts.
+// Hiding also detaches, but parks the session visibly for one-click restore.
 async function hideTab(id: number) {
   if (!tabs.has(id)) return;
   invoke("detach_session", { id }).catch(() => {});
   hidden.add(id);
   saveHidden();
   removeTab(id, false);
-  renderHiddenPills();
   if (tabs.size === 0) await createTab();
+  refreshChrome();
 }
 
 async function restoreHidden(id: number) {
@@ -304,18 +319,123 @@ async function restoreHidden(id: number) {
     // Session died while parked (e.g. killed elsewhere) — drop the pill.
     hidden.delete(id);
     saveHidden();
-    renderHiddenPills();
+    refreshChrome();
+  }
+}
+
+async function killSession(id: number) {
+  await invoke("kill_session", { id }).catch(() => {});
+  hidden.delete(id);
+  saveHidden();
+  refreshChrome();
+}
+
+// ───────────────────────── chrome: menus, pills, overflow, sidebar ──────────
+
+function closeMenus(except?: HTMLElement) {
+  for (const m of [restoreMenu, overflowMenu, hiddenMenu]) {
+    if (m !== except) m.classList.remove("open");
+  }
+}
+
+function menuRow(
+  label: string,
+  onClick: () => void,
+  onKill?: () => void
+): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "menu-row";
+  const span = document.createElement("span");
+  span.className = "menu-label";
+  span.textContent = label;
+  row.appendChild(span);
+  let killBtn: HTMLElement | null = null;
+  if (onKill) {
+    killBtn = document.createElement("button");
+    killBtn.className = "menu-kill";
+    killBtn.textContent = "×";
+    killBtn.title = "Kill session";
+    killBtn.addEventListener("click", onKill);
+    row.appendChild(killBtn);
+  }
+  row.addEventListener("click", (e) => {
+    if (killBtn && e.target === killBtn) return;
+    closeMenus();
+    onClick();
+  });
+  return row;
+}
+
+/// Browser-style overflow: tabs shrink via CSS down to a floor; tabs that
+/// still don't fit are hidden and listed under a "+N ⌄" chip. The active
+/// tab is always kept visible.
+const MIN_TAB_PX = 104; // tab min-width + gap
+const CHIP_PX = 60;
+function updateTabOverflow() {
+  const buttons = [...tabbar.children] as HTMLElement[];
+  if (app.classList.contains("sidebar-on")) {
+    overflowBtn.hidden = true;
+    return;
+  }
+  for (const b of buttons) b.style.display = "";
+  const avail = tabbar.clientWidth;
+  let fit = Math.max(1, Math.floor(avail / MIN_TAB_PX));
+  if (buttons.length <= fit) {
+    overflowBtn.hidden = true;
+    return;
+  }
+  fit = Math.max(1, Math.floor((avail - CHIP_PX) / MIN_TAB_PX));
+  const shown = buttons.slice(0, fit);
+  const activeBtn = buttons.find((b) => Number(b.dataset.id) === activeId);
+  if (activeBtn && !shown.includes(activeBtn)) {
+    shown[shown.length - 1] = activeBtn;
+  }
+  const overflowed: HTMLElement[] = [];
+  for (const b of buttons) {
+    if (shown.includes(b)) {
+      b.style.display = "";
+    } else {
+      b.style.display = "none";
+      overflowed.push(b);
+    }
+  }
+  overflowBtn.hidden = false;
+  overflowBtn.textContent = `+${overflowed.length} ⌄`;
+  overflowMenu.innerHTML = "";
+  for (const b of overflowed) {
+    const id = Number(b.dataset.id);
+    overflowMenu.appendChild(menuRow(titleOf(id), () => setActive(id)));
   }
 }
 
 function renderHiddenPills() {
   hiddenbar.innerHTML = "";
+  if (app.classList.contains("sidebar-on") || hidden.size === 0) return;
+  if (hidden.size > 2) {
+    // Too many pills would crowd the bar — collapse into one chip.
+    const chip = document.createElement("button");
+    chip.className = "chip";
+    chip.textContent = `◌ ${hidden.size} hidden ⌄`;
+    chip.addEventListener("click", (e) => {
+      e.stopPropagation();
+      hiddenMenu.innerHTML = "";
+      for (const id of hidden) {
+        hiddenMenu.appendChild(
+          menuRow(titleOf(id), () => restoreHidden(id), () => killSession(id))
+        );
+      }
+      closeMenus(hiddenMenu);
+      hiddenMenu.classList.toggle("open");
+    });
+    hiddenbar.appendChild(chip);
+    return;
+  }
   for (const id of hidden) {
     const pill = document.createElement("div");
     pill.className = "hidden-pill";
     const label = document.createElement("span");
     label.className = "hidden-pill-label";
-    label.textContent = titles[id] ?? `Session ${id}`;
+    label.textContent = titleOf(id);
     label.title = "Restore hidden session";
     const kill = document.createElement("button");
     kill.className = "hidden-pill-kill";
@@ -326,14 +446,85 @@ function renderHiddenPills() {
       if (e.target === kill) return;
       restoreHidden(id);
     });
-    kill.addEventListener("click", async () => {
-      await invoke("kill_session", { id }).catch(() => {});
-      hidden.delete(id);
-      saveHidden();
-      renderHiddenPills();
-    });
+    kill.addEventListener("click", () => killSession(id));
     hiddenbar.appendChild(pill);
   }
+}
+
+let sidebarVersion = 0;
+async function renderSidebar() {
+  if (!app.classList.contains("sidebar-on")) return;
+  const version = ++sidebarVersion;
+  const sessions = await invoke<SessionInfo[]>("list_sessions").catch(() => []);
+  if (version !== sidebarVersion) return;
+
+  sidebarList.innerHTML = "";
+  const addRow = (
+    dot: string,
+    dotClass: string,
+    label: string,
+    isActive: boolean,
+    onClick: () => void,
+    actions: Array<[string, string, () => void]>
+  ) => {
+    const row = document.createElement("div");
+    row.className = "side-row" + (isActive ? " active" : "");
+    const d = document.createElement("span");
+    d.className = `side-dot ${dotClass}`;
+    d.textContent = dot;
+    const l = document.createElement("span");
+    l.className = "side-label";
+    l.textContent = label;
+    const acts = document.createElement("span");
+    acts.className = "side-actions";
+    for (const [text, tip, fn] of actions) {
+      const b = document.createElement("button");
+      b.className = "side-act";
+      b.textContent = text;
+      b.title = tip;
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        fn();
+      });
+      acts.appendChild(b);
+    }
+    row.append(d, l, acts);
+    row.addEventListener("click", onClick);
+    sidebarList.appendChild(row);
+  };
+
+  for (const id of orderedIds()) {
+    addRow("●", "open", titleOf(id), id === activeId, () => setActive(id), [
+      ["–", "Hide (Ctrl+Shift+H)", () => hideTab(id)],
+      ["×", "Detach (Ctrl+Shift+W)", () => closeTab(id)],
+    ]);
+  }
+  for (const id of hidden) {
+    addRow("◌", "hidden", `${titleOf(id)}`, false, () => restoreHidden(id), [
+      ["×", "Kill session", () => killSession(id)],
+    ]);
+  }
+  for (const s of sessions) {
+    if (tabs.has(s.id) || hidden.has(s.id)) continue;
+    const suffix = s.alive ? "" : " (cold)";
+    addRow("○", "cold", `${titleOf(s.id)}${suffix}`, false, () => createTab(s.id), [
+      ["×", "Kill session", () => killSession(s.id)],
+    ]);
+  }
+}
+
+function refreshChrome() {
+  requestAnimationFrame(() => {
+    updateTabOverflow();
+    renderHiddenPills();
+    renderSidebar();
+  });
+}
+
+function toggleSidebar() {
+  const on = app.classList.toggle("sidebar-on");
+  localStorage.setItem("gterm-sidebar", on ? "1" : "0");
+  refreshChrome();
 }
 
 async function renderRestoreMenu() {
@@ -347,26 +538,12 @@ async function renderRestoreMenu() {
     return;
   }
   for (const s of detached) {
-    const row = document.createElement("div");
-    row.className = "restore-row";
-    const label = document.createElement("span");
-    label.className = "restore-label";
-    label.textContent = titles[s.id] ?? `Session ${s.id}`;
-    const kill = document.createElement("button");
-    kill.className = "restore-kill";
-    kill.textContent = "×";
-    kill.title = "Kill session";
-    row.append(label, kill);
-    row.addEventListener("click", (e) => {
-      if (e.target === kill) return;
-      restoreMenu.classList.remove("open");
-      createTab(s.id);
-    });
-    kill.addEventListener("click", async () => {
-      await invoke("kill_session", { id: s.id }).catch(() => {});
-      renderRestoreMenu();
-    });
-    restoreMenu.appendChild(row);
+    restoreMenu.appendChild(
+      menuRow(titleOf(s.id), () => createTab(s.id), async () => {
+        await killSession(s.id);
+        renderRestoreMenu();
+      })
+    );
   }
 }
 
@@ -384,19 +561,32 @@ async function main() {
   await listen<{ id: number }>("pty-exit", (event) => {
     delete titles[event.payload.id];
     localStorage.setItem("gterm-titles", JSON.stringify(titles));
+    hidden.delete(event.payload.id);
+    saveHidden();
     removeTab(event.payload.id);
   });
 
   document.getElementById("newtab")!.addEventListener("click", () => createTab());
+  document.getElementById("sidebar-new")!.addEventListener("click", () => createTab());
+  document.getElementById("sidebtn")!.addEventListener("click", toggleSidebar);
+  overflowBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    closeMenus(overflowMenu);
+    overflowMenu.classList.toggle("open");
+  });
   const restoreBtn = document.getElementById("restore")!;
-  restoreBtn.addEventListener("click", async () => {
+  restoreBtn.addEventListener("click", async (e) => {
+    e.stopPropagation();
     if (!restoreMenu.classList.contains("open")) await renderRestoreMenu();
+    closeMenus(restoreMenu);
     restoreMenu.classList.toggle("open");
   });
   document.addEventListener("mousedown", (e) => {
     const target = e.target as Node;
-    if (!restoreMenu.contains(target) && target !== restoreBtn) {
-      restoreMenu.classList.remove("open");
+    for (const m of [restoreMenu, overflowMenu, hiddenMenu]) {
+      if (m.classList.contains("open") && !m.contains(target)) {
+        m.classList.remove("open");
+      }
     }
   });
   window.addEventListener("keydown", (e) => {
@@ -408,21 +598,30 @@ async function main() {
       e.preventDefault();
       restoreLast();
     }
+    if (e.ctrlKey && e.shiftKey && e.key.toUpperCase() === "B") {
+      e.preventDefault();
+      toggleSidebar();
+    }
   });
+  new ResizeObserver(() => refreshChrome()).observe(tabbar);
+
+  if (localStorage.getItem("gterm-sidebar") === "1") {
+    app.classList.add("sidebar-on");
+  }
 
   // Reattach every surviving session from the daemon; sessions the user
-  // parked stay parked as pills. Fresh start otherwise.
+  // parked stay parked. Fresh start otherwise.
   const sessions = await invoke<SessionInfo[]>("list_sessions").catch(() => []);
   const known = new Set(sessions.map((s) => s.id));
   for (const h of [...hidden]) {
     if (!known.has(h)) hidden.delete(h);
   }
   saveHidden();
-  renderHiddenPills();
   for (const s of sessions) {
     if (!hidden.has(s.id)) await createTab(s.id);
   }
   if (tabs.size === 0) await createTab();
+  refreshChrome();
 }
 
 main();
