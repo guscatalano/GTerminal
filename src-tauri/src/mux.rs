@@ -60,6 +60,29 @@ pub struct SessionInfo {
     pub created_ms: u64,
     pub attached: bool,
     pub alive: bool,
+    /// Set when the session is in its "oops" grace window: it will be
+    /// purged for real at this timestamp unless restored first.
+    pub expires_ms: Option<u64>,
+    /// Programs currently running inside the session (exe names), for
+    /// tab icons and restore hints.
+    pub running: Vec<String>,
+}
+
+/// The "oops I screwed up" window: killed sessions keep their process
+/// running (hidden) and exited sessions keep their checkpoint, for this
+/// long, so a restore can undo the mistake. Configurable via
+/// config.json {"grace_minutes": N}; 0 disables the grace entirely.
+fn grace_ms() -> Option<u64> {
+    let minutes = std::fs::read_to_string(state_dir().join("config.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|v| v.get("grace_minutes").and_then(|g| g.as_u64()))
+        .unwrap_or(5);
+    if minutes == 0 {
+        None
+    } else {
+        Some(minutes * 60_000)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -84,14 +107,19 @@ struct Session {
     /// Typed into the shell once its first prompt renders (writing earlier
     /// gets dropped while ConPTY is still initializing).
     pending_input: Option<Vec<u8>>,
+    /// Soft-killed: the process is still running but will be killed for
+    /// real at this time unless an attach cancels the doom.
+    doomed_until: Option<u64>,
 }
 
-/// A persisted session whose process is gone (reboot, daemon crash). The
-/// ring stays on disk until the session is resurrected or killed.
+/// A persisted session whose process is gone (reboot, daemon crash, or a
+/// shell that exited within its grace window). The ring stays on disk until
+/// the session is resurrected, killed, or its grace expires.
 struct ColdSession {
     created_ms: u64,
     cwd: String,
     running: Vec<String>,
+    expires: Option<u64>,
 }
 
 #[derive(Default)]
@@ -253,6 +281,7 @@ pub fn run_daemon() {
     std::fs::write(port_file(), port.to_string()).expect("write port file");
 
     spawn_flush_thread(sessions.clone());
+    spawn_purge_thread(sessions.clone());
 
     for conn in listener.incoming() {
         if let Ok(stream) = conn {
@@ -287,6 +316,7 @@ fn load_cold(state: &mut DaemonState) {
                 created_ms: meta.created_ms,
                 cwd: meta.cwd,
                 running: meta.running,
+                expires: None,
             },
         );
     }
@@ -327,6 +357,47 @@ fn spawn_flush_thread(sessions: Sessions) {
                 );
                 let _ = std::fs::write(ring_path(meta.id), &ring);
             }
+        }
+    });
+}
+
+/// Enforce the "oops" grace windows: hard-kill soft-killed sessions and
+/// delete trashed checkpoints once their time is up.
+fn spawn_purge_thread(sessions: Sessions) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(15));
+        let now = now_ms();
+        let mut purged: Vec<u32> = Vec::new();
+        {
+            let mut state = sessions.lock().unwrap();
+            let doomed: Vec<u32> = state
+                .live
+                .iter()
+                .filter(|(_, s)| s.doomed_until.is_some_and(|t| t <= now))
+                .map(|(id, _)| *id)
+                .collect();
+            for id in doomed {
+                if let Some(mut s) = state.live.remove(&id) {
+                    let _ = s.child.kill();
+                    purged.push(id);
+                }
+            }
+            let expired: Vec<u32> = state
+                .cold
+                .iter()
+                .filter(|(_, c)| c.expires.is_some_and(|t| t <= now))
+                .map(|(id, _)| *id)
+                .collect();
+            for id in expired {
+                state.cold.remove(&id);
+                purged.push(id);
+            }
+        }
+        if !purged.is_empty() {
+            for id in &purged {
+                delete_persist(*id);
+            }
+            exit_if_idle(&sessions);
         }
     });
 }
@@ -378,23 +449,44 @@ fn conn_loop(
         match req {
             Request::List => {
                 let state = sessions.lock().unwrap();
-                let mut list: Vec<SessionInfo> = state
+                let mut list: Vec<(SessionInfo, Option<u32>)> = state
                     .live
                     .iter()
-                    .map(|(id, s)| SessionInfo {
-                        id: *id,
-                        created_ms: s.created_ms,
-                        attached: s.attached.is_some(),
-                        alive: true,
+                    .map(|(id, s)| {
+                        (
+                            SessionInfo {
+                                id: *id,
+                                created_ms: s.created_ms,
+                                attached: s.attached.is_some(),
+                                alive: true,
+                                expires_ms: s.doomed_until,
+                                running: Vec::new(),
+                            },
+                            s.child_pid,
+                        )
                     })
-                    .chain(state.cold.iter().map(|(id, s)| SessionInfo {
-                        id: *id,
-                        created_ms: s.created_ms,
-                        attached: false,
-                        alive: false,
+                    .chain(state.cold.iter().map(|(id, s)| {
+                        (
+                            SessionInfo {
+                                id: *id,
+                                created_ms: s.created_ms,
+                                attached: false,
+                                alive: false,
+                                expires_ms: s.expires,
+                                running: s.running.clone(),
+                            },
+                            None,
+                        )
                     }))
                     .collect();
                 drop(state);
+                // Process enumeration happens outside the sessions lock.
+                for (info, pid) in list.iter_mut() {
+                    if let Some(pid) = pid {
+                        info.running = descendant_programs(*pid);
+                    }
+                }
+                let mut list: Vec<SessionInfo> = list.into_iter().map(|(i, _)| i).collect();
                 list.sort_by_key(|s| s.created_ms);
                 write_line(&mut out, &json!({"ok": true, "sessions": list}))?;
             }
@@ -408,15 +500,35 @@ fn conn_loop(
             }
             Request::Kill { id } => {
                 let mut state = sessions.lock().unwrap();
-                if let Some(mut s) = state.live.remove(&id) {
-                    if let Some((_, mut w)) = s.attached.take() {
-                        let _ = write_line(&mut w, &json!({"ev": "exit"}));
+                let mut hard = true;
+                if let Some(s) = state.live.get_mut(&id) {
+                    if s.doomed_until.is_none() {
+                        if let Some(grace) = grace_ms() {
+                            // Soft kill: the tab closes, but the process
+                            // keeps running until the grace expires so a
+                            // restore can undo the mistake. Killing a
+                            // doomed session again is a hard kill.
+                            s.doomed_until = Some(now_ms() + grace);
+                            if let Some((_, mut w)) = s.attached.take() {
+                                let _ = write_line(&mut w, &json!({"ev": "exit"}));
+                            }
+                            hard = false;
+                        }
                     }
-                    let _ = s.child.kill();
                 }
-                state.cold.remove(&id);
+                if hard {
+                    if let Some(mut s) = state.live.remove(&id) {
+                        if let Some((_, mut w)) = s.attached.take() {
+                            let _ = write_line(&mut w, &json!({"ev": "exit"}));
+                        }
+                        let _ = s.child.kill();
+                    }
+                    state.cold.remove(&id);
+                }
                 drop(state);
-                delete_persist(id);
+                if hard {
+                    delete_persist(id);
+                }
                 write_line(&mut out, &json!({"ok": true}))?;
                 exit_if_idle(sessions);
             }
@@ -452,6 +564,8 @@ fn conn_loop(
                 let mut state = sessions.lock().unwrap();
                 match state.live.get_mut(&id) {
                     Some(s) => {
+                        // Attaching cancels any pending soft-kill.
+                        s.doomed_until = None;
                         // Send the reply and full scrollback replay while
                         // holding the lock, so the PTY reader thread cannot
                         // interleave live output mid-replay; only then does
@@ -552,6 +666,7 @@ fn start_session(
             cwd,
             dirty: true,
             pending_input: None,
+            doomed_until: None,
         },
     );
 
@@ -590,17 +705,42 @@ fn start_session(
                 }
             }
         }
-        // Shell exited on its own (or was killed): this session is complete,
-        // so its checkpoint is deleted rather than left to resurrect.
+        // Shell exited on its own (or was killed). Within the grace window
+        // the checkpoint sticks around as a restorable "trash" session — an
+        // accidental `exit` can be undone; afterwards it is purged for real.
         let mut state = sessions.lock().unwrap();
         if let Some(mut s) = state.live.remove(&id) {
             if let Some((_, mut w)) = s.attached.take() {
                 let _ = write_line(&mut w, &json!({"ev": "exit"}));
             }
             let _ = s.child.kill();
+            if let Some(grace) = grace_ms() {
+                let meta = Meta {
+                    id,
+                    created_ms: s.created_ms,
+                    cwd: s.cwd.clone(),
+                    running: Vec::new(),
+                };
+                let _ = std::fs::create_dir_all(sessions_dir());
+                let _ = std::fs::write(
+                    meta_path(id),
+                    serde_json::to_string(&meta).expect("serialize"),
+                );
+                let _ = std::fs::write(ring_path(id), &s.ring);
+                state.cold.insert(
+                    id,
+                    ColdSession {
+                        created_ms: s.created_ms,
+                        cwd: s.cwd,
+                        running: Vec::new(),
+                        expires: Some(now_ms() + grace),
+                    },
+                );
+            } else {
+                delete_persist(id);
+            }
         }
         drop(state);
-        delete_persist(id);
         exit_if_idle(&sessions);
     });
 

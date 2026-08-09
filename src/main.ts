@@ -14,6 +14,7 @@ interface Tab {
   pane: HTMLElement;
   button: HTMLElement;
   label: HTMLElement;
+  icon: HTMLElement;
 }
 
 interface SessionInfo {
@@ -21,6 +22,38 @@ interface SessionInfo {
   created_ms: number;
   attached: boolean;
   alive: boolean;
+  expires_ms: number | null;
+  running: string[];
+}
+
+// Icon for whatever is running inside a session, by program name.
+const ICON_RULES: Array<[RegExp, string]> = [
+  [/^claude/i, "✳️"],
+  [/^(vim|nvim|nano|emacs|hx)$/i, "📝"],
+  [/^python/i, "🐍"],
+  [/^(node|bun|deno)$/i, "🟩"],
+  [/^(cargo|rustc)$/i, "🦀"],
+  [/^docker/i, "🐳"],
+  [/^(ssh|curl|wget|ping)$/i, "🌐"],
+  [/^git/i, "🌿"],
+  [/^(npm|pnpm|yarn|vite)$/i, "📦"],
+  [/^(dotnet|msbuild)$/i, "🟪"],
+  [/^(cl|gcc|clang|cmake|make|ninja|link)$/i, "🔨"],
+];
+const SHELLS = /^(pwsh|powershell|cmd|conhost)$/i;
+function iconFor(running: string[]): string {
+  const progs = running.filter((n) => !SHELLS.test(n));
+  for (const [re, icon] of ICON_RULES) {
+    for (const name of progs) if (re.test(name)) return icon;
+  }
+  return progs.length ? "⚙️" : "";
+}
+
+function minutesLeft(expiresMs: number): number {
+  return Math.max(1, Math.ceil((expiresMs - Date.now()) / 60_000));
+}
+function expirySuffix(s: SessionInfo): string {
+  return s.expires_ms ? ` · closes in ${minutesLeft(s.expires_ms)}m` : s.alive ? "" : " (cold)";
 }
 
 const tabs = new Map<number, Tab>();
@@ -319,6 +352,8 @@ async function createTab(attachId?: number) {
   const button = document.createElement("div");
   button.className = "tab";
   button.dataset.id = String(id);
+  const icon = document.createElement("span");
+  icon.className = "tab-icon";
   const label = document.createElement("span");
   label.className = "tab-label";
   label.textContent = customTitles[id] ?? titles[id] ?? "PowerShell";
@@ -330,11 +365,11 @@ async function createTab(attachId?: number) {
   close.className = "tab-close";
   close.textContent = "×";
   close.title = "Detach tab — click twice to confirm (Ctrl+Shift+W ×2)";
-  button.append(label, hide, close);
+  button.append(icon, label, hide, close);
   tabbar.appendChild(button);
   tabOrder.push(id);
 
-  const tab: Tab = { id, term, fit, pane, button, label };
+  const tab: Tab = { id, term, fit, pane, button, label, icon };
   tabs.set(id, tab);
 
   button.addEventListener("mousedown", (e) => {
@@ -808,11 +843,24 @@ function renderHiddenPills() {
   }
 }
 
+/// Poll session state: update tab icons from what's running, and keep the
+/// sidebar countdowns fresh.
+async function updateLiveInfo() {
+  const sessions = await invoke<SessionInfo[]>("list_sessions").catch(() => []);
+  for (const s of sessions) {
+    const tab = tabs.get(s.id);
+    // `?? []` tolerates an older daemon that predates the running field.
+    if (tab) tab.icon.textContent = iconFor(s.running ?? []);
+  }
+  renderSidebar(sessions);
+}
+
 let sidebarVersion = 0;
-async function renderSidebar() {
+async function renderSidebar(prefetched?: SessionInfo[]) {
   if (!app.classList.contains("sidebar-on")) return;
   const version = ++sidebarVersion;
-  const sessions = await invoke<SessionInfo[]>("list_sessions").catch(() => []);
+  const sessions =
+    prefetched ?? (await invoke<SessionInfo[]>("list_sessions").catch(() => []));
   if (version !== sidebarVersion) return;
 
   sidebarList.innerHTML = "";
@@ -877,9 +925,14 @@ async function renderSidebar() {
       ["×", "Kill session — click twice", () => killSession(id), true],
     ]);
   const coldRow = (s: SessionInfo) =>
-    addRow("○", "cold", `${titleOf(s.id)}${s.alive ? "" : " (cold)"}`, false, () => createTab(s.id), [
-      ["×", "Kill session — click twice", () => killSession(s.id), true],
-    ]);
+    addRow(
+      s.expires_ms ? "⌛" : "○",
+      s.expires_ms ? "doomed" : "cold",
+      `${titleOf(s.id)}${expirySuffix(s)}`,
+      false,
+      () => createTab(s.id),
+      [["×", "Kill session — click twice", () => killSession(s.id), true]]
+    );
 
   const inGroup = (id: number, gid: string) => groupState.assign[id] === gid;
   for (const g of groupState.groups) {
@@ -927,7 +980,7 @@ async function renderRestoreMenu() {
   }
   for (const s of detached) {
     restoreMenu.appendChild(
-      menuRow(titleOf(s.id), () => createTab(s.id), async () => {
+      menuRow(`${titleOf(s.id)}${expirySuffix(s)}`, () => createTab(s.id), async () => {
         await killSession(s.id);
         renderRestoreMenu();
       })
@@ -947,11 +1000,14 @@ async function main() {
     }
   });
   await listen<{ id: number }>("pty-exit", (event) => {
-    delete titles[event.payload.id];
-    localStorage.setItem("gterm-titles", JSON.stringify(titles));
+    // Titles are kept: the session may sit in its grace window and come
+    // back. Stale titles get pruned against the daemon list at startup.
     hidden.delete(event.payload.id);
     saveHidden();
     removeTab(event.payload.id);
+    // Let the daemon finish its exit/trash transition, then show the
+    // session's "closes in Xm" row.
+    window.setTimeout(() => refreshChrome(), 500);
   });
 
   document.getElementById("newtab")!.addEventListener("click", () => createTab());
@@ -995,6 +1051,7 @@ async function main() {
     }
   });
   new ResizeObserver(() => refreshChrome()).observe(tabbar);
+  window.setInterval(updateLiveInfo, 5000);
 
   if (localStorage.getItem("gterm-sidebar") === "1") {
     app.classList.add("sidebar-on");

@@ -90,6 +90,10 @@ body,
   color: #4a5160;
 }
 
+.side-dot.doomed {
+  color: #e06c75;
+}
+
 .side-label {
   flex: 1;
   overflow: hidden;
@@ -187,6 +191,15 @@ body,
 .tab.active {
   background: #0f1115;
   color: #d7dae0;
+}
+
+.tab-icon {
+  flex: none;
+  font-size: 12px;
+}
+
+.tab-icon:empty {
+  display: none;
 }
 
 .tab-label {
