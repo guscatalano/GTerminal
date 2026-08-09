@@ -253,6 +253,13 @@ body,
   background: #4a4a52;
 }
 
+/* user-set badge: theme accent, slightly roomier for emoji */
+.shell-badge.custom {
+  background: color-mix(in srgb, var(--accent) 70%, #000);
+  font-size: 10px;
+  padding: 1.5px 3px;
+}
+
 .tab {
   display: flex;
   align-items: center;

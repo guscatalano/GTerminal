@@ -216,6 +216,15 @@ function saveCustomTitles() {
   localStorage.setItem("gterm-names", JSON.stringify(customTitles));
 }
 
+// User-chosen badges: replace the automatic shell badge on a session
+// (short text or an emoji), set from the tab context menu.
+const customBadges: Record<string, string> = JSON.parse(
+  localStorage.getItem("gterm-cust-badges") ?? "{}"
+);
+function saveCustomBadges() {
+  localStorage.setItem("gterm-cust-badges", JSON.stringify(customBadges));
+}
+
 // AI-suggested titles: outrank shell/cwd labels, lose to user renames.
 const aiTitles: Record<string, string> = JSON.parse(
   localStorage.getItem("gterm-ai-titles") ?? "{}"
@@ -300,8 +309,16 @@ function autoLabel(id: number): { text: string; fromCwd: boolean } {
 }
 
 /// Small badge marking the session's shell family: blue "PS" for
-/// PowerShell (any version), dark ">_" for cmd.
-function setShellBadge(el: HTMLElement, shell: string | undefined) {
+/// PowerShell (any version), dark ">_" for cmd. A user-set badge
+/// (customBadges) replaces it entirely.
+function setShellBadge(el: HTMLElement, shell: string | undefined, id?: number) {
+  const custom = id !== undefined ? customBadges[id] : undefined;
+  if (custom) {
+    if (el.className !== "shell-badge custom") el.className = "shell-badge custom";
+    if (el.textContent !== custom) el.textContent = custom;
+    el.title = "Custom badge — right-click the tab to change it";
+    return;
+  }
   const isCmd = (shell ?? "").toLowerCase() === "cmd";
   const cls = isCmd ? "shell-badge cmd" : "shell-badge ps";
   const txt = isCmd ? ">_" : "PS";
@@ -310,10 +327,40 @@ function setShellBadge(el: HTMLElement, shell: string | undefined) {
   el.title = isCmd ? "Command Prompt" : "PowerShell";
 }
 
-function mkShellBadge(shell: string | undefined): HTMLElement {
+function mkShellBadge(shell: string | undefined, id?: number): HTMLElement {
   const b = document.createElement("span");
-  setShellBadge(b, shell);
+  setShellBadge(b, shell, id);
   return b;
+}
+
+/// Edit a session's badge in place, on whichever badge element is
+/// currently visible (sidebar row or tab button).
+function editBadge(id: number) {
+  let el: HTMLElement | null = null;
+  if (app.classList.contains("sidebar-on")) {
+    el = sidebarList.querySelector<HTMLElement>(`.side-row[data-id="${id}"] .shell-badge`);
+  }
+  el ??= tabs.get(id)?.shellB ?? null;
+  if (!el) return;
+  inlineRename(el, customBadges[id] ?? "", (v) => {
+    if (v) {
+      customBadges[id] = v.slice(0, 4);
+      saveCustomBadges();
+    }
+    const tab = tabs.get(id);
+    if (tab) setShellBadge(tab.shellB, lastInfo.get(id)?.shell, id);
+    sidebarSig = "";
+    refreshChrome();
+  });
+}
+
+function clearBadge(id: number) {
+  delete customBadges[id];
+  saveCustomBadges();
+  const tab = tabs.get(id);
+  if (tab) setShellBadge(tab.shellB, lastInfo.get(id)?.shell, id);
+  sidebarSig = "";
+  refreshChrome();
 }
 
 function baseLabel(id: number): { text: string; fromCwd: boolean } {
@@ -1113,7 +1160,7 @@ async function createTab(attachId?: number, shell?: string, cwd?: string, title?
   const button = document.createElement("div");
   button.className = "tab";
   button.dataset.id = String(id);
-  const shellB = mkShellBadge(shell ?? config.default_shell);
+  const shellB = mkShellBadge(shell ?? config.default_shell, id);
   const icon = document.createElement("span");
   icon.className = "tab-icon";
   const label = document.createElement("span");
@@ -1598,6 +1645,10 @@ function showTabContextMenu(x: number, y: number, id: number) {
   const current = groupState.assign[id];
   const items: CtxItem[] = [{ label: "Rename tab", action: () => renameTabAnywhere(id) }];
   items.push({ label: "Suggest title…", action: () => suggestTitles(id) });
+  items.push({ label: "Set badge…", action: () => editBadge(id) });
+  if (customBadges[id]) {
+    items.push({ label: "Reset badge to shell", action: () => clearBadge(id) });
+  }
   items.push("sep");
   for (const g of groupState.groups) {
     if (g.id === current) continue;
@@ -2135,7 +2186,7 @@ async function updateLiveInfo() {
     // Only mutate on change: rewriting things every poll invalidates
     // layout, resizes the pane, and makes the terminal caret stutter.
     if (tab.icon.textContent !== icon) tab.icon.textContent = icon;
-    setShellBadge(tab.shellB, s.shell);
+    setShellBadge(tab.shellB, s.shell, s.id);
     const label = titleOf(s.id);
     if (tab.label.textContent !== label && !renameActive) {
       tab.label.textContent = label;
@@ -2231,7 +2282,7 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
       acts.appendChild(b);
     }
     const info = sessions.find((s) => s.id === id);
-    row.append(d, mkShellBadge(info?.shell), l, acts);
+    row.append(d, mkShellBadge(info?.shell, id), l, acts);
     row.addEventListener("click", onClick);
     sidebarList.appendChild(row);
   };
@@ -2982,6 +3033,10 @@ async function main() {
   }
   pruneGroups();
   saveGroups();
+  for (const k of Object.keys(customBadges)) {
+    if (!known.has(Number(k))) delete customBadges[k];
+  }
+  saveCustomBadges();
   // Restore last session's tab order; unknown sessions go to the end.
   const savedOrder: number[] = JSON.parse(localStorage.getItem("gterm-order") ?? "[]");
   const rank = (id: number) => {
