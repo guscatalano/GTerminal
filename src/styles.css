@@ -882,6 +882,102 @@ input.set-control {
   font-family: var(--ui-font, "Segoe UI", sans-serif);
 }
 
+/* ── clipboard history viewer ────────────────────────────────────────── */
+
+.clip-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.clip-panel {
+  width: min(560px, 86vw);
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border2);
+  border-radius: 10px;
+  padding: 12px 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.clip-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font: 600 13px var(--ui-font, "Segoe UI", sans-serif);
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.clip-x {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0 6px;
+}
+
+.clip-x:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.clip-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.clip-text {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font: 11px Consolas, monospace;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 108px;
+  overflow-y: auto;
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+  border-radius: 5px;
+  padding: 6px 8px;
+}
+
+.clip-acts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.clip-btn {
+  border: 1px solid var(--border2);
+  background: var(--panel2);
+  color: var(--text);
+  font: 11px var(--ui-font, "Segoe UI", sans-serif);
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.clip-btn:hover {
+  border-color: var(--accent);
+}
+
+.clip-empty {
+  color: var(--muted2);
+  font: 12px var(--ui-font, "Segoe UI", sans-serif);
+  padding: 8px 0;
+}
+
 /* Session templates editor: full-width rows under their setting label. */
 .setting:has(.tpl-list) {
   flex-direction: column;

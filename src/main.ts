@@ -955,19 +955,93 @@ function cycleTab(dir: number) {
 // Clipboard history for the paste picker: recent texts seen on the
 // clipboard (in-app copies plus whatever's current when the terminal
 // menu opens). Newest first, deduped, capped.
+const CLIP_MAX = 3;
 const clipHist: string[] = JSON.parse(localStorage.getItem("gterm-cliphist") ?? "[]");
+function saveClipHist() {
+  localStorage.setItem("gterm-cliphist", JSON.stringify(clipHist));
+}
 function pushClip(text: string) {
   if (!text) return;
   const i = clipHist.indexOf(text);
   if (i === 0) return;
   if (i > 0) clipHist.splice(i, 1);
   clipHist.unshift(text);
-  if (clipHist.length > 8) clipHist.length = 8;
-  localStorage.setItem("gterm-cliphist", JSON.stringify(clipHist));
+  if (clipHist.length > CLIP_MAX) clipHist.length = CLIP_MAX;
+  saveClipHist();
 }
 function clipPreview(text: string): string {
   const t = text.replace(/\r?\n/g, " ⏎ ").replace(/\t/g, " ").trim();
   return t.length > 46 ? t.slice(0, 45) + "…" : t;
+}
+
+/// Full clipboard-history viewer (from the terminal context menu):
+/// multi-line previews with paste / copy / remove per entry.
+function closeClipViewer() {
+  document.getElementById("clip-overlay")?.remove();
+}
+function openClipViewer(id: number, term: Terminal) {
+  closeClipViewer();
+  const ov = document.createElement("div");
+  ov.className = "clip-overlay";
+  ov.id = "clip-overlay";
+  const panel = document.createElement("div");
+  panel.className = "clip-panel";
+  const head = document.createElement("div");
+  head.className = "clip-h";
+  const title = document.createElement("span");
+  title.textContent = "Clipboard history";
+  const x = document.createElement("button");
+  x.className = "clip-x";
+  x.textContent = "×";
+  x.addEventListener("click", closeClipViewer);
+  head.append(title, x);
+  panel.appendChild(head);
+  if (!clipHist.length) {
+    const empty = document.createElement("div");
+    empty.className = "clip-empty";
+    empty.textContent = "Nothing here yet — copy something first.";
+    panel.appendChild(empty);
+  }
+  for (const text of [...clipHist]) {
+    const row = document.createElement("div");
+    row.className = "clip-row";
+    const pre = document.createElement("pre");
+    pre.className = "clip-text";
+    pre.textContent = text.length > 2000 ? text.slice(0, 2000) + "…" : text;
+    const acts = document.createElement("div");
+    acts.className = "clip-acts";
+    const mkBtn = (label: string, fn: () => void) => {
+      const b = document.createElement("button");
+      b.className = "clip-btn";
+      b.textContent = label;
+      b.addEventListener("click", fn);
+      return b;
+    };
+    acts.append(
+      mkBtn("Paste", () => {
+        invoke("write_session", { id, data: text }).catch(() => {});
+        closeClipViewer();
+        term.focus();
+      }),
+      mkBtn("Copy", () => {
+        pushClip(text);
+        navigator.clipboard.writeText(text).catch(() => {});
+      }),
+      mkBtn("✕", () => {
+        const i = clipHist.indexOf(text);
+        if (i >= 0) clipHist.splice(i, 1);
+        saveClipHist();
+        openClipViewer(id, term); // rebuild
+      })
+    );
+    row.append(pre, acts);
+    panel.appendChild(row);
+  }
+  ov.appendChild(panel);
+  ov.addEventListener("mousedown", (e) => {
+    if (e.target === ov) closeClipViewer();
+  });
+  document.body.appendChild(ov);
 }
 
 async function createTab(attachId?: number, shell?: string, cwd?: string, title?: string) {
@@ -1135,14 +1209,15 @@ async function createTab(attachId?: number, shell?: string, cwd?: string, title?
         });
       }
       // Older clipboard entries: pick anything recently copied.
-      const rest = clipHist.filter((t) => t !== current).slice(0, 5);
+      const rest = clipHist.filter((t) => t !== current).slice(0, 3);
       if (rest.length) {
         items.push("sep");
         for (const t of rest) {
           items.push({ label: `Paste: ${clipPreview(t)}`, action: () => writePaste(t) });
         }
       }
-      items.push("sep", {
+      items.push("sep", { label: "Clipboard history…", action: () => openClipViewer(id, term) });
+      items.push({
         label: "Select all",
         action: () => {
           term.selectAll();
@@ -2804,6 +2879,11 @@ async function main() {
   document.getElementById("settings-close")!.addEventListener("click", closeSettings);
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
+      if (document.getElementById("clip-overlay")) {
+        e.preventDefault();
+        closeClipViewer();
+        return;
+      }
       if (document.getElementById("history-viewer")!.classList.contains("open")) {
         e.preventDefault();
         closeViewer();
