@@ -586,19 +586,6 @@ THEMES.synthwave = mkTheme(
 THEMES.synthwave.xterm.cursor = "#ff7edb";
 THEMES.synthwave.xterm.selectionBackground = "#ff7edb3d";
 
-THEMES["rose-pine"] = mkTheme(
-  "Rosé Pine",
-  "white",
-  ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"],
-  "radial-gradient(ellipse 60% 45% at 20% 20%, rgba(235,111,146,0.2), transparent 60%), radial-gradient(circle at 70% 30%, rgba(196,167,231,0.13) 0 90px, transparent 140px), radial-gradient(ellipse 70% 45% at 85% 95%, rgba(49,116,143,0.3), transparent 62%), linear-gradient(180deg, #1d1a2c, #131120)",
-  "#191724",
-  "#e0def4",
-  [
-    "#191724", "#eb6f92", "#82c4a0", "#f6c177", "#6aa5c9", "#c4a7e7", "#9ccfd8", "#e0def4",
-    "#6e6a86", "#f08eab", "#9bd8b8", "#f9d193", "#86bbdd", "#d5bff0", "#b5e0e6", "#f5f3ff",
-  ]
-);
-
 THEMES.everforest = mkTheme(
   "Everforest",
   "white",
