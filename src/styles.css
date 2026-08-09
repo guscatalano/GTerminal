@@ -645,7 +645,8 @@ input.set-control {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  background: var(--bg);
+  /* translucent wash: the theme background art on #main shows through */
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
 }
 
 #app.settings-on #settings-page {
@@ -663,7 +664,7 @@ input.set-control {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
 }
 
 #app.history-on #history-page {
@@ -743,7 +744,7 @@ input.set-control {
   position: absolute;
   inset: 0;
   z-index: 40;
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
   flex-direction: column;
 }
 

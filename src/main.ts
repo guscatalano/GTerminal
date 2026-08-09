@@ -134,9 +134,12 @@ function hexToRgba(hex: string, alpha: number): string {
 }
 
 function applyBackground() {
+  // Painted on #main (behind panes, settings, and history alike) so the
+  // art stays visible on every page, not just the terminals.
+  const mainEl = document.getElementById("main")!;
   const image = resolvedBgCss();
   if (!image) {
-    panes.style.background = "";
+    mainEl.style.background = "";
     return;
   }
   // Theme-built-in art is already palette-matched and subtle; presets and
@@ -144,7 +147,7 @@ function applyBackground() {
   const isThemeArt = (config.bg_style ?? "theme") === "theme";
   const dim = Math.min(0.95, Math.max(0, (config.bg_dim ?? 50) / 100));
   const overlay = hexToRgba(currentTheme().xterm.background ?? "#0f1115", dim);
-  panes.style.background = isThemeArt
+  mainEl.style.background = isThemeArt
     ? image
     : `linear-gradient(${overlay}, ${overlay}), ${image}`;
 }
