@@ -15,17 +15,33 @@
       </div>
       <div id="main">
         <div id="tabbar-row" data-tauri-drag-region>
-          <button id="sidebtn" title="Toggle session sidebar (Ctrl+Shift+B)">☰</button>
+          <button id="sidebtn" title="Toggle session sidebar (Ctrl+Shift+B)">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5"/><line x1="6" y1="2.75" x2="6" y2="13.25"/></svg>
+          </button>
           <div id="tabbar" data-tauri-drag-region></div>
           <button id="overflow" class="chip" hidden></button>
           <div id="hiddenbar"></div>
-          <button id="newtab" title="New tab (Ctrl+Shift+T) — right-click for shell choice">+</button>
-          <button id="restore" title="Restore a detached session (Ctrl+Shift+Z)">⟳</button>
-          <button id="historybtn" title="Session history — transcripts of past sessions">◷</button>
-          <button id="settingsbtn" title="Settings">⚙</button>
-          <button id="win-min" class="win-ctl" title="Minimize">–</button>
-          <button id="win-max" class="win-ctl" title="Maximize / restore">▢</button>
-          <button id="win-close" class="win-ctl" title="Close window — sessions keep running">×</button>
+          <button id="newtab" title="New tab (Ctrl+Shift+T) — right-click for templates and shells">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="8" y1="3" x2="8" y2="13"/><line x1="3" y1="8" x2="13" y2="8"/></svg>
+          </button>
+          <button id="restore" title="Restore a detached session (Ctrl+Shift+Z)">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.75 6.5 A 5.6 5.6 0 1 1 2.4 9.6"/><polyline points="2.75 3.2 2.75 6.5 6.05 6.5"/></svg>
+          </button>
+          <button id="historybtn" title="Session history — transcripts of past sessions">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.75"/><polyline points="8 4.75 8 8 10.5 9.5"/></svg>
+          </button>
+          <button id="settingsbtn" title="Settings">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="2.5" y1="4.5" x2="13.5" y2="4.5"/><line x1="2.5" y1="8" x2="13.5" y2="8"/><line x1="2.5" y1="11.5" x2="13.5" y2="11.5"/><circle cx="10.2" cy="4.5" r="1.9" fill="currentColor" stroke="none"/><circle cx="5.6" cy="8" r="1.9" fill="currentColor" stroke="none"/><circle cx="9.2" cy="11.5" r="1.9" fill="currentColor" stroke="none"/></svg>
+          </button>
+          <button id="win-min" class="win-ctl" title="Minimize">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><line x1="3.5" y1="8" x2="12.5" y2="8"/></svg>
+          </button>
+          <button id="win-max" class="win-ctl" title="Maximize / restore">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><rect x="3.75" y="3.75" width="8.5" height="8.5" rx="1"/></svg>
+          </button>
+          <button id="win-close" class="win-ctl" title="Close window — sessions keep running">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/></svg>
+          </button>
           <div id="restore-menu" class="menu"></div>
           <div id="overflow-menu" class="menu"></div>
           <div id="hidden-menu" class="menu"></div>

@@ -233,6 +233,26 @@ body,
   overflow: hidden;
 }
 
+/* Shell-family badge on tabs and sidebar rows: PS vs cmd at a glance. */
+.shell-badge {
+  flex: none;
+  font: 700 8px "Segoe UI", sans-serif;
+  line-height: 1;
+  padding: 2.5px 3px;
+  border-radius: 3px;
+  color: #fff;
+  letter-spacing: 0.3px;
+  user-select: none;
+}
+
+.shell-badge.ps {
+  background: #2671be;
+}
+
+.shell-badge.cmd {
+  background: #4a4a52;
+}
+
 .tab {
   display: flex;
   align-items: center;
@@ -298,26 +318,46 @@ body,
 #sidebtn,
 #newtab,
 #restore,
-#themebtn {
+#historybtn,
+#settingsbtn {
   border: none;
   background: none;
   color: var(--muted);
-  font-size: 14px;
   line-height: 1;
-  padding: 4px 8px;
+  padding: 6px 7px;
   border-radius: 6px;
   cursor: pointer;
   flex: none;
+  display: grid;
+  place-items: center;
 }
 
-#newtab {
-  font-size: 16px;
+#sidebtn svg,
+#newtab svg,
+#restore svg,
+#historybtn svg,
+#settingsbtn svg {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+
+.win-ctl {
+  display: grid;
+  place-items: center;
+}
+
+.win-ctl svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 
 #sidebtn:hover,
 #newtab:hover,
 #restore:hover,
-#themebtn:hover {
+#historybtn:hover,
+#settingsbtn:hover {
   background: var(--panel);
   color: var(--text);
 }

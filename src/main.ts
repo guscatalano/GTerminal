@@ -17,6 +17,7 @@ interface Tab {
   button: HTMLElement;
   label: HTMLElement;
   icon: HTMLElement;
+  shellB: HTMLElement;
   webgl?: WebglAddon;
 }
 
@@ -293,6 +294,23 @@ function autoLabel(id: number): { text: string; fromCwd: boolean } {
       return dirLabel();
     }
   }
+}
+
+/// Small badge marking the session's shell family: blue "PS" for
+/// PowerShell (any version), dark ">_" for cmd.
+function setShellBadge(el: HTMLElement, shell: string | undefined) {
+  const isCmd = (shell ?? "").toLowerCase() === "cmd";
+  const cls = isCmd ? "shell-badge cmd" : "shell-badge ps";
+  const txt = isCmd ? ">_" : "PS";
+  if (el.className !== cls) el.className = cls;
+  if (el.textContent !== txt) el.textContent = txt;
+  el.title = isCmd ? "Command Prompt" : "PowerShell";
+}
+
+function mkShellBadge(shell: string | undefined): HTMLElement {
+  const b = document.createElement("span");
+  setShellBadge(b, shell);
+  return b;
 }
 
 function baseLabel(id: number): { text: string; fromCwd: boolean } {
@@ -990,6 +1008,7 @@ async function createTab(attachId?: number, shell?: string, cwd?: string, title?
   const button = document.createElement("div");
   button.className = "tab";
   button.dataset.id = String(id);
+  const shellB = mkShellBadge(shell ?? config.default_shell);
   const icon = document.createElement("span");
   icon.className = "tab-icon";
   const label = document.createElement("span");
@@ -1003,12 +1022,12 @@ async function createTab(attachId?: number, shell?: string, cwd?: string, title?
   close.className = "tab-close";
   close.textContent = "×";
   close.title = "Close tab — restorable from Closing soon until its timer runs out (Ctrl+Shift+W ×2)";
-  button.append(icon, label, hide, close);
+  button.append(shellB, icon, label, hide, close);
   tabbar.appendChild(button);
   tabOrder.push(id);
   saveOrder();
 
-  const tab: Tab = { id, term, fit, pane, button, label, icon, webgl };
+  const tab: Tab = { id, term, fit, pane, button, label, icon, shellB, webgl };
   tabs.set(id, tab);
 
   button.addEventListener("mousedown", (e) => {
@@ -1866,8 +1885,15 @@ async function fetchAiCandidates(id: number): Promise<string[]> {
 }
 
 function applyPickedTitle(id: number, title: string) {
-  aiTitles[id] = title;
+  // Picking a suggestion is an explicit user choice, so it lands in
+  // customTitles like a rename — otherwise an earlier manual rename
+  // (customTitles outranks aiTitles) would silently swallow the pick.
+  customTitles[id] = title;
+  saveCustomTitles();
+  delete aiTitles[id];
   saveAiTitles();
+  const tab = tabs.get(id);
+  if (tab) tab.label.textContent = titleOf(id);
   sidebarSig = "";
   refreshChrome();
 }
@@ -1964,6 +1990,7 @@ async function updateLiveInfo() {
     // Only mutate on change: rewriting things every poll invalidates
     // layout, resizes the pane, and makes the terminal caret stutter.
     if (tab.icon.textContent !== icon) tab.icon.textContent = icon;
+    setShellBadge(tab.shellB, s.shell);
     const label = titleOf(s.id);
     if (tab.label.textContent !== label && !renameActive) {
       tab.label.textContent = label;
@@ -2058,7 +2085,8 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
       }
       acts.appendChild(b);
     }
-    row.append(d, l, acts);
+    const info = sessions.find((s) => s.id === id);
+    row.append(d, mkShellBadge(info?.shell), l, acts);
     row.addEventListener("click", onClick);
     sidebarList.appendChild(row);
   };
