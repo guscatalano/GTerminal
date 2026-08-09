@@ -147,8 +147,41 @@ function pruneGroups() {
   groupState.groups = groupState.groups.filter((g) => used.has(g.id));
 }
 
-// Insertion order of tabs; grouping reorders members to sit together.
+// Insertion order of tabs; grouping reorders members to sit together and
+// drag-and-drop rearranges. Persisted so ordering survives restarts.
 let tabOrder: number[] = [];
+function saveOrder() {
+  localStorage.setItem("gterm-order", JSON.stringify(tabOrder));
+}
+
+// ── drag-and-drop reordering ────────────────────────────────────────────
+let dragId: number | null = null;
+
+function clearDropMarkers() {
+  for (const el of tabbar.querySelectorAll(".drop-before, .drop-after, .drop-into")) {
+    el.classList.remove("drop-before", "drop-after", "drop-into");
+  }
+}
+
+/// Move `dragged` next to `refId` (or to the end when undefined), joining
+/// group `gid` or leaving its group when undefined.
+function moveTab(dragged: number, refId: number | undefined, before: boolean, gid?: string) {
+  tabOrder = tabOrder.filter((t) => t !== dragged);
+  const insertAt =
+    refId === undefined
+      ? tabOrder.length
+      : tabOrder.indexOf(refId) + (before ? 0 : 1);
+  tabOrder.splice(insertAt, 0, dragged);
+  if (gid) {
+    groupState.assign[dragged] = gid;
+  } else {
+    delete groupState.assign[dragged];
+  }
+  pruneGroups();
+  saveGroups();
+  saveOrder();
+  refreshChrome();
+}
 
 const THEME = {
   background: "#0f1115",
@@ -368,6 +401,7 @@ async function createTab(attachId?: number) {
   button.append(icon, label, hide, close);
   tabbar.appendChild(button);
   tabOrder.push(id);
+  saveOrder();
 
   const tab: Tab = { id, term, fit, pane, button, label, icon };
   tabs.set(id, tab);
@@ -377,6 +411,17 @@ async function createTab(attachId?: number) {
   });
   button.addEventListener("dblclick", (e) => {
     if (e.target === label) renameTab(id);
+  });
+  button.draggable = true;
+  button.addEventListener("dragstart", (e) => {
+    dragId = id;
+    e.dataTransfer!.effectAllowed = "move";
+    button.classList.add("dragging");
+  });
+  button.addEventListener("dragend", () => {
+    dragId = null;
+    button.classList.remove("dragging");
+    clearDropMarkers();
   });
   button.addEventListener("contextmenu", (e) => {
     e.preventDefault();
@@ -436,6 +481,7 @@ function removeTab(id: number, closeWindowIfLast = true) {
   if (!tab) return;
   tabs.delete(id);
   tabOrder = tabOrder.filter((t) => t !== id);
+  saveOrder();
   const ids = orderedIds();
   const i = ids.indexOf(id);
   tab.term.dispose();
@@ -670,6 +716,7 @@ function layoutTabbar() {
 function makeGroupChip(g: TabGroup, count: number): HTMLElement {
   const chip = document.createElement("div");
   chip.className = "group-chip" + (g.collapsed ? " collapsed" : "");
+  chip.dataset.gid = g.id;
   chip.style.setProperty("--gc", g.color);
   const name = document.createElement("span");
   name.textContent = g.collapsed ? `${g.name} (${count})` : g.name;
@@ -856,12 +903,19 @@ async function updateLiveInfo() {
 }
 
 let sidebarVersion = 0;
+let sidebarSig = "";
 async function renderSidebar(prefetched?: SessionInfo[]) {
   if (!app.classList.contains("sidebar-on")) return;
   const version = ++sidebarVersion;
   const sessions =
     prefetched ?? (await invoke<SessionInfo[]>("list_sessions").catch(() => []));
   if (version !== sidebarVersion) return;
+
+  // Skip the DOM rebuild when nothing changed — the 5s poll would
+  // otherwise churn the sidebar (and hitch the renderer) while typing.
+  const sig = JSON.stringify([activeId, orderedIds(), [...hidden], sessions, groupState, titles, customTitles]);
+  if (sig === sidebarSig) return;
+  sidebarSig = sig;
 
   sidebarList.innerHTML = "";
   const addRow = (
@@ -965,6 +1019,7 @@ function refreshChrome() {
 function toggleSidebar() {
   const on = app.classList.toggle("sidebar-on");
   localStorage.setItem("gterm-sidebar", on ? "1" : "0");
+  sidebarSig = ""; // force a fresh render on re-open
   refreshChrome();
 }
 
@@ -1053,6 +1108,54 @@ async function main() {
   new ResizeObserver(() => refreshChrome()).observe(tabbar);
   window.setInterval(updateLiveInfo, 5000);
 
+  // Drag-and-drop reordering, with group awareness: dropping between a
+  // group's members joins it, past its right edge leaves it, onto the
+  // chip adds at the front.
+  tabbar.addEventListener("dragover", (e) => {
+    if (dragId === null) return;
+    e.preventDefault();
+    e.dataTransfer!.dropEffect = "move";
+    clearDropMarkers();
+    const target = (e.target as HTMLElement).closest(".tab, .group-chip") as HTMLElement | null;
+    if (!target || Number(target.dataset.id) === dragId) return;
+    if (target.classList.contains("group-chip")) {
+      target.classList.add("drop-into");
+      return;
+    }
+    const rect = target.getBoundingClientRect();
+    const before = e.clientX < rect.left + rect.width / 2;
+    target.classList.add(before ? "drop-before" : "drop-after");
+  });
+  tabbar.addEventListener("drop", (e) => {
+    if (dragId === null) return;
+    e.preventDefault();
+    clearDropMarkers();
+    const dragged = dragId;
+    dragId = null;
+    const target = (e.target as HTMLElement).closest(".tab, .group-chip") as HTMLElement | null;
+    if (!target) {
+      moveTab(dragged, undefined, false);
+      return;
+    }
+    if (target.classList.contains("group-chip")) {
+      const gid = target.dataset.gid!;
+      const first = tabOrder.find((m) => groupState.assign[m] === gid);
+      moveTab(dragged, first, true, gid);
+      return;
+    }
+    const refId = Number(target.dataset.id);
+    if (refId === dragged) return;
+    const rect = target.getBoundingClientRect();
+    const before = e.clientX < rect.left + rect.width / 2;
+    const gid = groupState.assign[refId];
+    let joinGroup: string | undefined = gid;
+    if (gid) {
+      const members = tabOrder.filter((m) => groupState.assign[m] === gid);
+      if (!before && members[members.length - 1] === refId) joinGroup = undefined;
+    }
+    moveTab(dragged, refId, before, joinGroup);
+  });
+
   if (localStorage.getItem("gterm-sidebar") === "1") {
     app.classList.add("sidebar-on");
   }
@@ -1070,6 +1173,13 @@ async function main() {
   }
   pruneGroups();
   saveGroups();
+  // Restore last session's tab order; unknown sessions go to the end.
+  const savedOrder: number[] = JSON.parse(localStorage.getItem("gterm-order") ?? "[]");
+  const rank = (id: number) => {
+    const i = savedOrder.indexOf(id);
+    return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+  };
+  sessions.sort((a, b) => rank(a.id) - rank(b.id) || a.created_ms - b.created_ms);
   for (const s of sessions) {
     if (!hidden.has(s.id)) await createTab(s.id);
   }

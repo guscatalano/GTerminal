@@ -27,3 +27,11 @@ portable-pty = "0.9"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp"] }
 
+# Keep dev builds responsive: the per-keystroke path (IPC, JSON, TCP, PTY)
+# is far too slow at opt-level 0.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+

@@ -299,6 +299,30 @@ body,
   box-shadow: inset 0 2px 0 var(--gc);
 }
 
+.tab.dragging {
+  opacity: 0.5;
+}
+
+.tab.drop-before {
+  box-shadow: inset 3px 0 0 #61afef;
+}
+
+.tab.drop-after {
+  box-shadow: inset -3px 0 0 #61afef;
+}
+
+.tab.grouped.drop-before {
+  box-shadow: inset 3px 0 0 #61afef, inset 0 2px 0 var(--gc);
+}
+
+.tab.grouped.drop-after {
+  box-shadow: inset -3px 0 0 #61afef, inset 0 2px 0 var(--gc);
+}
+
+.group-chip.drop-into {
+  outline: 2px solid var(--gc);
+}
+
 .rename-input {
   width: 100%;
   border: 1px solid #4a5468;
