@@ -484,7 +484,34 @@ foreach ($bd in $boards) {
 }
 $font.Dispose()
 
-# ── HERO: the holo-ad, with real ad structure ──
+# ── HERO: rooftop-mounted ad screen ──
+# host tower under the sign
+GradRect $g 800 560 300 ($H - 560) (C 255 13 9 25) (C 255 6 4 12)
+GradRect $g 830 528 240 32 (C 255 14 10 27) (C 255 12 8 23)
+for ($wy = 600; $wy -lt $H - 80; $wy += 30) {
+  for ($wx = 818; $wx -lt 1082; $wx += 24) {
+    if ($rng.NextDouble() -gt 0.14) { continue }
+    $b = New-Object System.Drawing.SolidBrush((C $rng.Next(30, 80) 110 225 250))
+    $g.FillRectangle($b, $wx, $wy, 6, 9); $b.Dispose()
+  }
+}
+# mounting rig: posts, cross-braces, catwalk
+$steel = New-Object System.Drawing.SolidBrush((C 255 10 8 18))
+$g.FillRectangle($steel, 768, 372, 14, 160)
+$g.FillRectangle($steel, 1118, 372, 14, 160)
+$g.FillRectangle($steel, 930, 372, 10, 160)
+$steel.Dispose()
+$pen = New-Object System.Drawing.Pen((C 255 10 8 18), 5)
+$g.DrawLine($pen, 775, 400, 1125, 528); $g.DrawLine($pen, 1125, 400, 775, 528)
+$pen.Dispose()
+# faint cyan edge light catching the near side of each post
+$pen = New-Object System.Drawing.Pen((C 60 110 225 250), 1)
+$g.DrawLine($pen, 768, 372, 768, 532); $g.DrawLine($pen, 1118, 372, 1118, 532)
+$pen.Dispose()
+# catwalk with a center service light
+GradRect $g 700 370 500 11 (C 255 12 9 21) (C 255 8 6 15)
+$b = New-Object System.Drawing.SolidBrush((C 220 250 214 90)); $g.FillEllipse($b, 946, 374, 6, 6); $b.Dispose()
+Glow $g 949 377 20 (C 60 250 214 90)
 foreach ($off in @(8, 0)) {
   $al = if ($off -eq 0) { 50 } else { 14 }
   GradRect $g (690 + $off) 160 520 210 (C $al 30 240 255) (C ([int]($al / 4)) 30 240 255)
