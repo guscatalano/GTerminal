@@ -2713,8 +2713,18 @@ function toggleSidebar() {
 
 // Zen full-screen: chrome hidden, OS fullscreen, terminal fills
 // everything. A small draggable pill overlay is the way back out.
+let zenSonarTimer = 0;
 async function toggleZen() {
   const on = app.classList.toggle("zen-on");
+  // sonar ping for 10s so the exit pill announces itself, then settles
+  const pill = document.getElementById("zen-pill")!;
+  window.clearTimeout(zenSonarTimer);
+  if (on) {
+    pill.classList.add("sonar");
+    zenSonarTimer = window.setTimeout(() => pill.classList.remove("sonar"), 10_000);
+  } else {
+    pill.classList.remove("sonar");
+  }
   try {
     await getCurrentWindow().setFullscreen(on);
   } catch {}
@@ -3369,7 +3379,16 @@ async function main() {
   window.addEventListener("contextmenu", (e) => e.preventDefault());
   document.getElementById("settings-close")!.addEventListener("click", closeSettings);
   window.addEventListener("keydown", (e) => {
+    // Keystrokes inside a terminal are handled by that terminal's own
+    // shortcut handler; letting them also reach this global handler
+    // double-fires every shortcut (F11 would toggle zen on and off).
+    if ((e.target as HTMLElement)?.closest?.(".xterm")) return;
     if (e.key === "F11") {
+      e.preventDefault();
+      void toggleZen();
+      return;
+    }
+    if (e.key === "Escape" && app.classList.contains("zen-on")) {
       e.preventDefault();
       void toggleZen();
       return;

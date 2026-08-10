@@ -725,16 +725,17 @@ input.set-control {
   position: fixed;
   right: 18px;
   bottom: 18px;
-  width: 34px;
-  height: 34px;
+  width: 42px;
+  height: 42px;
   z-index: 80;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--panel) 82%, transparent);
-  border: 1px solid var(--border2);
-  color: var(--muted);
+  background: color-mix(in srgb, var(--panel) 92%, var(--accent));
+  border: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.4);
+  color: var(--text);
   cursor: pointer;
-  opacity: 0.35;
-  transition: opacity 120ms ease;
+  opacity: 0.85;
+  transition: opacity 120ms ease, transform 120ms ease;
   align-items: center;
   justify-content: center;
   touch-action: none;
@@ -746,14 +747,48 @@ input.set-control {
 
 #zen-pill:hover {
   opacity: 1;
-  color: var(--text);
+  transform: scale(1.08);
   border-color: var(--accent);
 }
 
 #zen-pill svg {
-  width: 15px;
-  height: 15px;
+  width: 18px;
+  height: 18px;
   pointer-events: none;
+}
+
+/* sonar ping: expanding rings for the first seconds of zen mode */
+#zen-pill.sonar::before,
+#zen-pill.sonar::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  animation: zen-sonar 2s ease-out infinite;
+  pointer-events: none;
+}
+
+#zen-pill.sonar::after {
+  animation-delay: 1s;
+}
+
+@keyframes zen-sonar {
+  0% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(2.8);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #zen-pill.sonar::before,
+  #zen-pill.sonar::after {
+    animation: none;
+  }
 }
 
 #zenbtn {
