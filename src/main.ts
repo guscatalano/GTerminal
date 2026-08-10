@@ -3169,16 +3169,24 @@ async function main() {
     window.setTimeout(() => refreshChrome(), 500);
   });
 
+  // New-session picker: both click and right-click list every way to
+  // start a session — default shell, templates, one-off shells.
+  // (Ctrl+Shift+T stays the instant default-shell path.)
   const newShellMenu = (e: MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const items: CtxItem[] = (config.templates ?? [])
-      .filter((t) => t.name.trim())
-      .map((t) => ({
-        label: t.name,
-        action: () => createTab(undefined, t.shell, t.cwd, t.title),
-      }));
-    if (items.length) items.push("sep");
+    closeMenus();
+    const items: CtxItem[] = [
+      { label: "New tab — default shell", action: () => createTab() },
+    ];
+    const tpls = (config.templates ?? []).filter((t) => t.name.trim());
+    if (tpls.length) {
+      items.push("sep");
+      for (const t of tpls) {
+        items.push({ label: t.name, action: () => createTab(undefined, t.shell, t.cwd, t.title) });
+      }
+    }
+    items.push("sep");
     items.push(
       ...SHELL_CHOICES.filter(([v]) => v !== "auto").map(([v, label]): CtxItem => ({
         label: `New ${label} tab`,
@@ -3188,10 +3196,10 @@ async function main() {
     showContextMenu(e.clientX, e.clientY, items);
   };
   const newTabBtn = document.getElementById("newtab")!;
-  newTabBtn.addEventListener("click", () => createTab());
+  newTabBtn.addEventListener("click", newShellMenu);
   newTabBtn.addEventListener("contextmenu", newShellMenu);
   const sidebarNewBtn = document.getElementById("sidebar-new")!;
-  sidebarNewBtn.addEventListener("click", () => createTab());
+  sidebarNewBtn.addEventListener("click", newShellMenu);
   sidebarNewBtn.addEventListener("contextmenu", newShellMenu);
   document.getElementById("sidebtn")!.addEventListener("click", toggleSidebar);
   overflowBtn.addEventListener("click", (e) => {
