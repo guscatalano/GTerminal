@@ -269,7 +269,13 @@ Save $bmp $g "nous.png"
 # ── Cyberpunk: neon night city, detail pass — four depth layers, holo-ad,
 # katakana boards, antennas, skyways, billboards, searchlights, drones ──
 $rng = New-Object System.Random(2077)
-$bmp, $g = New-Canvas
+# 4K supersampled: same 1920x1080 logical coordinates drawn at 2x scale,
+# so edges, glows, and glyphs render crisp instead of blocky.
+$bmp = New-Object System.Drawing.Bitmap(3840, 2160)
+$g = [System.Drawing.Graphics]::FromImage($bmp)
+$g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+$g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAlias
+$g.ScaleTransform(2.0, 2.0)
 Fill-Vertical $g (C 255 24 10 44) (C 255 8 6 16)
 # stars + a moon dimmed by smog
 for ($i = 0; $i -lt 130; $i++) {
@@ -485,6 +491,10 @@ for ($k = 0; $k -lt 80; $k++) {
   $b = New-Object System.Drawing.SolidBrush($cc)
   $g.FillRectangle($b, $rx, ($H - $rng.Next(50, 160)), $rng.Next(3, 8), 200); $b.Dispose()
 }
+# street light washing up the lower facades
+$rect = New-Object System.Drawing.Rectangle(0, ($H - 260), $W, 260)
+$br = New-Object System.Drawing.Drawing2D.LinearGradientBrush($rect, (C 0 255 60 180), (C 38 255 60 180), 90.0)
+$g.FillRectangle($br, $rect); $br.Dispose()
 # haze grain + corner vignette
 for ($i = 0; $i -lt 2600; $i++) {
   $tone = if ($rng.NextDouble() -lt 0.5) { 255 } else { 0 }
