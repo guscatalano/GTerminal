@@ -363,7 +363,6 @@ foreach ($tr in @(@(300, 520, 560, 20, 235, 255), @(1050, 480, 520, 255, 63, 168
     $b = New-Object System.Drawing.SolidBrush((C $fade $cr $cg $cb))
     $g.FillRectangle($b, ($tx + $seg), ($ty - [int]($seg / 46)), 5, ([int](1 + 2 * $t))); $b.Dispose()
   }
-  Glow $g ($tx + $tl) ($ty - [int]($tl / 46)) 40 (C 60 $cr $cg $cb)
 }
 
 # ── depth C: mid towers — per-building hue bias, quiet texture ──
@@ -400,10 +399,13 @@ while ($x -lt $W) {
   if ($rng.NextDouble() -lt 0.4) {
     $ax = $x + $rng.Next(20, $bw - 20)
     $mastH = $rng.Next(36, 84)
+    # mast readable against the sky: dark core with a lit edge
     $pen = New-Object System.Drawing.Pen((C 255 8 6 16), 3)
     $g.DrawLine($pen, $ax, $top, $ax, ($top - $mastH)); $pen.Dispose()
-    Glow $g $ax ($top - $mastH) 26 (C 55 255 55 70)
-    $b = New-Object System.Drawing.SolidBrush((C 240 255 90 95)); $g.FillEllipse($b, ($ax - 3), ($top - $mastH - 3), 6, 6); $b.Dispose()
+    $pen = New-Object System.Drawing.Pen((C 90 120 200 235), 1)
+    $g.DrawLine($pen, ($ax - 1), $top, ($ax - 1), ($top - $mastH)); $pen.Dispose()
+    Glow $g $ax ($top - $mastH) 16 (C 45 255 55 70)
+    $b = New-Object System.Drawing.SolidBrush((C 235 255 90 95)); $g.FillEllipse($b, ($ax - 2), ($top - $mastH - 3), 5, 5); $b.Dispose()
   }
   if ($rng.NextDouble() -lt 0.22 -and $bw -gt 160) {
     $bbx = $x + $rng.Next(16, $bw - 100); $bby = $top + $rng.Next(70, 230)
@@ -431,7 +433,9 @@ foreach ($k in 0..($midTowers.Count - 2)) {
   }
 }
 # ── the spire: tall thin tower right of center, rings on its crown ──
-GradRect $g 1222 470 34 ($H - 470) (C 255 17 11 31) (C 255 8 6 16)
+GradRect $g 1222 470 34 ($H - 470) (C 255 21 14 38) (C 255 9 7 18)
+$pen = New-Object System.Drawing.Pen((C 80 120 200 235), 1)
+$g.DrawLine($pen, 1222, 470, 1222, 760); $pen.Dispose()
 GradRect $g 1214 610 50 26 (C 255 15 10 28) (C 255 11 8 22)
 $pen = New-Object System.Drawing.Pen((C 255 9 6 17), 3); $g.DrawLine($pen, 1239, 470, 1239, 420); $pen.Dispose()
 $b = New-Object System.Drawing.SolidBrush((C 240 255 90 95)); $g.FillEllipse($b, 1236, 414, 6, 6); $b.Dispose()
@@ -439,13 +443,6 @@ Glow $g 1239 417 24 (C 60 255 55 70)
 NeonOval $g (1239 - 66) (505 - 14) 132 28 20 235 255
 NeonOval $g (1239 - 84) (534 - 17) 168 34 20 235 255
 NeonOval $g (1239 - 102) (565 - 20) 204 40 20 235 255
-# one searchlight, quiet
-$path = New-Object System.Drawing.Drawing2D.GraphicsPath
-$path.AddPolygon((MkPts @(@(560, 470), @(292, 30), @(400, 10))))
-$br = New-Object System.Drawing.Drawing2D.PathGradientBrush($path)
-$br.CenterColor = (C 11 200 230 255)
-$br.SurroundColors = @((C 0 200 230 255))
-$g.FillPath($br, $path); $br.Dispose(); $path.Dispose()
 
 # ── framing megatowers: true black, minimal greebles ──
 GradRect $g -60 0 300 $H (C 255 7 5 14) (C 255 4 3 9)
@@ -512,6 +509,15 @@ $pen.Dispose()
 GradRect $g 700 370 500 11 (C 255 12 9 21) (C 255 8 6 15)
 $b = New-Object System.Drawing.SolidBrush((C 220 250 214 90)); $g.FillEllipse($b, 946, 374, 6, 6); $b.Dispose()
 Glow $g 949 377 20 (C 60 250 214 90)
+# searchlight, anchored: emitter housing on the host tower roof
+$path = New-Object System.Drawing.Drawing2D.GraphicsPath
+$path.AddPolygon((MkPts @(@(852, 552), @(560, 60), @(672, 36))))
+$br = New-Object System.Drawing.Drawing2D.PathGradientBrush($path)
+$br.CenterColor = (C 11 200 230 255)
+$br.SurroundColors = @((C 0 200 230 255))
+$g.FillPath($br, $path); $br.Dispose(); $path.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 255 11 8 20)); $g.FillRectangle($b, 840, 546, 24, 14); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 200 200 235 255)); $g.FillEllipse($b, 848, 549, 8, 8); $b.Dispose()
 foreach ($off in @(8, 0)) {
   $al = if ($off -eq 0) { 50 } else { 14 }
   GradRect $g (690 + $off) 160 520 210 (C $al 30 240 255) (C ([int]($al / 4)) 30 240 255)
@@ -543,12 +549,6 @@ $b = New-Object System.Drawing.SolidBrush((C 235 255 55 75)); $g.FillEllipse($b,
 Glow $g 1183 179 24 (C 80 255 55 75)
 Glow $g 950 260 300 (C 26 20 235 255)
 
-# drones: three, quiet
-foreach ($dr in @(@(640, 120), @(1340, 400), @(830, 470))) {
-  $b = New-Object System.Drawing.SolidBrush((C 230 10 8 20)); $g.FillRectangle($b, $dr[0], $dr[1], 9, 4); $b.Dispose()
-  $b = New-Object System.Drawing.SolidBrush((C 210 255 60 75)); $g.FillEllipse($b, ($dr[0] - 3), ($dr[1] - 1), 4, 4); $b.Dispose()
-  $b = New-Object System.Drawing.SolidBrush((C 190 70 255 130)); $g.FillEllipse($b, ($dr[0] + 9), ($dr[1] - 1), 4, 4); $b.Dispose()
-}
 # ── street: teal-dominant sheen, grouped reflections ──
 Glow $g 760 1130 520 (C 66 20 235 255)
 Glow $g 1250 1150 520 (C 52 255 63 168)
