@@ -8,7 +8,11 @@
   <body>
     <div id="app">
       <div id="sidebar">
-        <div id="sidebar-title" data-tauri-drag-region>Sessions</div>
+        <div id="sidebar-title" data-tauri-drag-region>
+          <span>Sessions</span>
+          <button id="sidebar-collapse" title="Collapse sidebar (Ctrl+Shift+B)">⟨</button>
+        </div>
+        <div id="sidebar-resize" title="Drag to resize — double-click to collapse"></div>
         <div id="sidebar-list"></div>
         <div id="sidebar-legend">● open&ensp;◌ hidden&ensp;○ detached&ensp;⌛ closing</div>
         <button id="sidebar-new">+ new session</button>

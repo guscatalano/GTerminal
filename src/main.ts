@@ -2703,6 +2703,48 @@ function toggleSidebar() {
   localStorage.setItem("gterm-sidebar", on ? "1" : "0");
   sidebarSig = ""; // force a fresh render on re-open
   refreshChrome();
+  const tab = activeId !== null ? tabs.get(activeId) : undefined;
+  if (tab) fitTab(tab);
+}
+
+// Sidebar width: draggable via the edge handle, persisted, terminal
+// refit live so the pane always fills the remaining space.
+function initSidebarResize() {
+  const saved = Number(localStorage.getItem("gterm-sidebar-w"));
+  if (saved >= 150 && saved <= 520) {
+    document.documentElement.style.setProperty("--sidebar-w", `${saved}px`);
+  }
+  const handle = document.getElementById("sidebar-resize")!;
+  handle.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    handle.classList.add("dragging");
+    handle.setPointerCapture(e.pointerId);
+    let raf = 0;
+    const onMove = (ev: PointerEvent) => {
+      const wpx = Math.min(520, Math.max(150, Math.round(ev.clientX)));
+      document.documentElement.style.setProperty("--sidebar-w", `${wpx}px`);
+      if (!raf) {
+        raf = requestAnimationFrame(() => {
+          raf = 0;
+          const tab = activeId !== null ? tabs.get(activeId) : undefined;
+          if (tab) fitTab(tab);
+        });
+      }
+    };
+    const onUp = (ev: PointerEvent) => {
+      handle.removeEventListener("pointermove", onMove);
+      handle.classList.remove("dragging");
+      const wpx = Math.min(520, Math.max(150, Math.round(ev.clientX)));
+      localStorage.setItem("gterm-sidebar-w", String(wpx));
+      const tab = activeId !== null ? tabs.get(activeId) : undefined;
+      if (tab) fitTab(tab);
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp, { once: true });
+  });
+  handle.addEventListener("dblclick", toggleSidebar);
+  document.getElementById("sidebar-collapse")!.addEventListener("click", toggleSidebar);
 }
 
 async function renderRestoreMenu() {
@@ -3202,6 +3244,7 @@ async function main() {
   sidebarNewBtn.addEventListener("click", newShellMenu);
   sidebarNewBtn.addEventListener("contextmenu", newShellMenu);
   document.getElementById("sidebtn")!.addEventListener("click", toggleSidebar);
+  initSidebarResize();
   overflowBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     closeMenus(overflowMenu);

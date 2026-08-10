@@ -42,12 +42,53 @@ body,
 
 #sidebar {
   display: none;
-  width: 220px;
+  width: var(--sidebar-w, 220px);
+  min-width: 150px;
+  max-width: 520px;
   flex: none;
   flex-direction: column;
   background: var(--sidebar);
   border-right: 1px solid var(--border);
   user-select: none;
+  position: relative;
+}
+
+/* drag handle on the sidebar's right edge; double-click collapses */
+#sidebar-resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 7px;
+  height: 100%;
+  cursor: ew-resize;
+  z-index: 10;
+}
+
+#sidebar-resize:hover,
+#sidebar-resize.dragging {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+#sidebar-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#sidebar-collapse {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#sidebar-collapse:hover {
+  background: var(--panel);
+  color: var(--text);
 }
 
 #app.sidebar-on #sidebar {
