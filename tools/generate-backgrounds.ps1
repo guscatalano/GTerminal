@@ -476,23 +476,44 @@ $boards = @(
 )
 foreach ($bd in $boards) {
   $bx = $bd[0]; $by = $bd[1]; $bh = $bd[2]; $cr = $bd[3]; $cg = $bd[4]; $cb = $bd[5]
-  GradRect $g $bx $by 48 $bh (C 54 $cr $cg $cb) (C 20 $cr $cg $cb)
-  NeonFrame $g $bx $by 48 $bh $cr $cg $cb
-  Glow $g ($bx + 24) ($by + [int]($bh / 2)) 150 (C 34 $cr $cg $cb)
-  $gy = $by + 12
-  while ($gy -lt $by + $bh - 40) {
+  # drop shadow grounds the sign against the facade
+  $b = New-Object System.Drawing.SolidBrush((C 120 0 0 4))
+  $g.FillRectangle($b, ($bx + 8), ($by + 10), 56, $bh); $b.Dispose()
+  # dark sign box with a faint inner wash of its neon color
+  GradRect $g $bx $by 56 $bh (C 242 11 9 18) (C 242 7 6 12)
+  GradRect $g ($bx + 4) ($by + 4) 48 ($bh - 8) (C 28 $cr $cg $cb) (C 10 $cr $cg $cb)
+  NeonFrame $g $bx $by 56 $bh $cr $cg $cb
+  Glow $g ($bx + 28) ($by + [int]($bh / 2)) 170 (C 26 $cr $cg $cb)
+  # glyphs: centered, evenly spaced, crisp core over a soft halo;
+  # one tube per board has burnt out
+  $slots = [int](($bh - 40) / 46)
+  $dead = $rng.Next(0, $slots)
+  for ($si2 = 0; $si2 -lt $slots; $si2++) {
+    $gy = $by + 16 + $si2 * 46
     $ch = [string][char](0x30A0 + $rng.Next(0, 96))
-    BloomText $g $ch $font ($bx + 7) $gy $cr $cg $cb 225
-    $gy += 44
+    if ($si2 -eq $dead) {
+      $b = New-Object System.Drawing.SolidBrush((C 55 $cr $cg $cb))
+      $g.DrawString($ch, $font, $b, ($bx + 12), $gy); $b.Dispose()
+      continue
+    }
+    Glow $g ($bx + 28) ($gy + 20) 30 (C 55 $cr $cg $cb)
+    $b = New-Object System.Drawing.SolidBrush((C 248 $cr $cg $cb))
+    $g.DrawString($ch, $font, $b, ($bx + 12), $gy); $b.Dispose()
   }
 }
 $font.Dispose()
 
 # ── holograms ──
-GradRect $g 452 250 120 250 (C 34 255 70 190) (C 10 255 70 190)
+GradRect $g 452 250 120 250 (C 26 255 70 190) (C 8 255 70 190)
 NeonFrame $g 452 250 120 250 255 70 190
-$font = New-Object System.Drawing.Font("MS Gothic", 34, [System.Drawing.FontStyle]::Bold)
-BloomText $g ([string][char](0x30CD) + "$([char]10)" + [string][char](0x30AA) + "$([char]10)" + [string][char](0x30F3)) $font 486 268 255 150 225 150
+$font = New-Object System.Drawing.Font("MS Gothic", 36, [System.Drawing.FontStyle]::Bold)
+$neonChars = @([char]0x30CD, [char]0x30AA, [char]0x30F3)
+for ($ni = 0; $ni -lt 3; $ni++) {
+  $gy = 272 + $ni * 74
+  Glow $g 512 ($gy + 24) 34 (C 46 255 130 215)
+  $b = New-Object System.Drawing.SolidBrush((C 205 255 150 225))
+  $g.DrawString([string]$neonChars[$ni], $font, $b, 490, $gy); $b.Dispose()
+}
 $font.Dispose()
 # main holo-ad: gradient glass, ghost offset, neon frame, corner ticks
 foreach ($off in @(9, 0)) {
@@ -508,7 +529,10 @@ for ($gy = 176; $gy -lt 356; $gy += 6) {
   $g.DrawLine($pen, 692, $gy, 1208, $gy); $pen.Dispose()
 }
 $font = New-Object System.Drawing.Font("MS Gothic", 60, [System.Drawing.FontStyle]::Bold)
-BloomText $g ([string][char](0x30B5) + [string][char](0x30A4) + [string][char](0x30D0) + [string][char](0x30FC)) $font 760 220 140 248 255 170
+Glow $g 950 262 170 (C 36 60 240 255)
+$b = New-Object System.Drawing.SolidBrush((C 220 150 250 255))
+$g.DrawString(([string][char](0x30B5) + [string][char](0x30A4) + [string][char](0x30D0) + [string][char](0x30FC)), $font, $b, 760, 220)
+$b.Dispose()
 $font.Dispose()
 $b = New-Object System.Drawing.SolidBrush((C 235 255 55 75)); $g.FillEllipse($b, 1176, 184, 12, 12); $b.Dispose()
 Glow $g 1182 190 26 (C 90 255 55 75)
