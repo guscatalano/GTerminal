@@ -1038,6 +1038,21 @@ THEMES.umbrella = mkTheme(
 THEMES.umbrella.xterm.cursor = "#e02b2b";
 THEMES.umbrella.xterm.selectionBackground = "#e02b2b40";
 
+THEMES.space = mkTheme(
+  "Deep Space",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"],
+  'linear-gradient(rgba(7,11,22,0.38), rgba(7,11,22,0.52)), url("/backgrounds/space.png") center / cover no-repeat, linear-gradient(180deg, #060913, #0a0e1c)',
+  "#070b16",
+  "#d2e4f5",
+  [
+    "#101a2c", "#ff6b7a", "#55e6b0", "#ffd479", "#6aa6ff", "#c48aff", "#59dfff", "#d2e4f5",
+    "#5d6e8c", "#ff94a0", "#8af0cb", "#ffe3a1", "#96c2ff", "#d9b3ff", "#8fe9ff", "#f0f6fc",
+  ]
+);
+THEMES.space.xterm.cursor = "#59dfff";
+THEMES.space.xterm.selectionBackground = "#59dfff33";
+
 let themeKey = "one-dark";
 function currentTheme(): ThemeDef {
   return THEMES[themeKey] ?? THEMES["one-dark"];

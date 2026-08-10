@@ -22,6 +22,7 @@ Seeded GDI+ renders — re-running the script reproduces them exactly.
 - `everforest.png` — misty pine layers
 - `gameboy.png` — DMG dot-matrix with 8-bit sprites
 - `ambercrt.png` — CRT test pattern, scanlines, phosphor afterglow
+- `space.png` — planet limb with sunrise sliver, ringed gas giant, nebulae, station
 
 ## NASA imagery (public domain)
 

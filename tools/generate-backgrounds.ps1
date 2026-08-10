@@ -432,17 +432,18 @@ foreach ($k in 0..($midTowers.Count - 2)) {
     $g.FillRectangle($b, $wx, ($byy + 4), 4, 4); $b.Dispose()
   }
 }
-# ── the spire: tall thin tower right of center, rings on its crown ──
-GradRect $g 1222 470 34 ($H - 470) (C 255 21 14 38) (C 255 9 7 18)
+# ── the spire: rises clear above the skyline, rings on its crown ──
+GradRect $g 1222 330 34 ($H - 330) (C 255 22 15 40) (C 255 9 7 18)
 $pen = New-Object System.Drawing.Pen((C 80 120 200 235), 1)
-$g.DrawLine($pen, 1222, 470, 1222, 760); $pen.Dispose()
+$g.DrawLine($pen, 1222, 330, 1222, 700); $pen.Dispose()
+GradRect $g 1214 470 50 22 (C 255 16 11 30) (C 255 12 9 24)
 GradRect $g 1214 610 50 26 (C 255 15 10 28) (C 255 11 8 22)
-$pen = New-Object System.Drawing.Pen((C 255 9 6 17), 3); $g.DrawLine($pen, 1239, 470, 1239, 420); $pen.Dispose()
-$b = New-Object System.Drawing.SolidBrush((C 240 255 90 95)); $g.FillEllipse($b, 1236, 414, 6, 6); $b.Dispose()
-Glow $g 1239 417 24 (C 60 255 55 70)
-NeonOval $g (1239 - 66) (505 - 14) 132 28 20 235 255
-NeonOval $g (1239 - 84) (534 - 17) 168 34 20 235 255
-NeonOval $g (1239 - 102) (565 - 20) 204 40 20 235 255
+$pen = New-Object System.Drawing.Pen((C 255 9 6 17), 3); $g.DrawLine($pen, 1239, 330, 1239, 286); $pen.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 240 255 90 95)); $g.FillEllipse($b, 1236, 280, 6, 6); $b.Dispose()
+Glow $g 1239 283 22 (C 60 255 55 70)
+NeonOval $g (1239 - 66) (365 - 14) 132 28 20 235 255
+NeonOval $g (1239 - 84) (394 - 17) 168 34 20 235 255
+NeonOval $g (1239 - 102) (425 - 20) 204 40 20 235 255
 
 # ── framing megatowers: true black, minimal greebles ──
 GradRect $g -60 0 300 $H (C 255 7 5 14) (C 255 4 3 9)
@@ -1298,5 +1299,145 @@ for ($i = 0; $i -lt 4000; $i++) {
   $g.FillRectangle($b, $rng.Next(0, $W), $rng.Next(0, $H), 1, 1); $b.Dispose()
 }
 Save $bmp $g "solarizedlight.png"
+
+# ── Deep Space: planet limb with sunrise, ringed giant, nebulae, station ──
+$rng = New-Object System.Random(1969)
+$bmp = New-Object System.Drawing.Bitmap(3840, 2160)
+$g = [System.Drawing.Graphics]::FromImage($bmp)
+$g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+$g.ScaleTransform(2.0, 2.0)
+Fill-Vertical $g (C 255 6 9 19) (C 255 10 14 28)
+# nebulae: overlapping soft fields, violet and teal
+Glow $g 420 260 460 (C 30 120 80 220)
+Glow $g 560 380 300 (C 24 160 70 190)
+Glow $g 1500 180 400 (C 26 40 160 200)
+Glow $g 1350 300 240 (C 20 70 190 210)
+Glow $g 1000 500 500 (C 14 90 60 180)
+for ($i = 0; $i -lt 900; $i++) {
+  $nx = $rng.Next(0, $W); $ny = $rng.Next(0, 700)
+  $near = [math]::Exp(-([math]::Pow($nx - 480, 2) + [math]::Pow($ny - 300, 2)) / 180000) + [math]::Exp(-([math]::Pow($nx - 1450, 2) + [math]::Pow($ny - 240, 2)) / 140000)
+  if ($rng.NextDouble() -gt $near) { continue }
+  $cc = if ($rng.NextDouble() -lt 0.5) { C $rng.Next(8, 26) 150 100 230 } else { C $rng.Next(8, 26) 70 180 220 }
+  $b = New-Object System.Drawing.SolidBrush($cc)
+  $g.FillEllipse($b, $nx, $ny, $rng.Next(2, 7), $rng.Next(2, 7)); $b.Dispose()
+}
+# starfield: sizes, tints, sparkles on the brightest
+for ($i = 0; $i -lt 620; $i++) {
+  $mag = $rng.NextDouble()
+  $sal = [int](20 + 200 * $mag * $mag)
+  $tint = $rng.NextDouble()
+  $cc = if ($tint -lt 0.12) { C $sal 170 200 255 } elseif ($tint -lt 0.2) { C $sal 255 220 170 } else { C $sal 235 240 250 }
+  $sx = $rng.Next(0, $W); $sy2 = $rng.Next(0, $H)
+  $sz = if ($mag -gt 0.97) { 3 } elseif ($mag -gt 0.86) { 2 } else { 1 }
+  $b = New-Object System.Drawing.SolidBrush($cc); $g.FillEllipse($b, $sx, $sy2, $sz, $sz); $b.Dispose()
+  if ($mag -gt 0.985) {
+    $pen = New-Object System.Drawing.Pen((C 90 235 240 250), 1)
+    $g.DrawLine($pen, ($sx - 7), ($sy2 + 1), ($sx + 8), ($sy2 + 1))
+    $g.DrawLine($pen, ($sx + 1), ($sy2 - 7), ($sx + 1), ($sy2 + 8)); $pen.Dispose()
+    Glow $g $sx $sy2 12 (C 80 235 240 250)
+  }
+}
+# comet: tapered tail toward upper left
+for ($seg = 0; $seg -lt 260; $seg += 3) {
+  $t = $seg / 260.0
+  $al = [int](130 * $t * $t)
+  if ($al -le 2) { continue }
+  $b = New-Object System.Drawing.SolidBrush((C $al 200 230 255))
+  $g.FillEllipse($b, (300 + $seg), (120 + [int]($seg * 0.22)), (1 + [int](2 * $t)), (1 + [int](2 * $t))); $b.Dispose()
+}
+Glow $g 560 177 26 (C 130 220 240 255)
+$b = New-Object System.Drawing.SolidBrush((C 240 240 250 255)); $g.FillEllipse($b, 557, 174, 5, 5); $b.Dispose()
+# ── ringed gas giant, upper right ──
+$gcx = 1430.0; $gcy = 300.0; $gr2 = 150.0
+# back half of the ring system
+foreach ($ring in @(@(300, 74, 95), @(258, 62, 65), @(348, 88, 48))) {
+  $pen = New-Object System.Drawing.Pen((C $ring[2] 190 200 225), 4)
+  $g.DrawArc($pen, ($gcx - $ring[0] / 2), ($gcy - $ring[1] / 2), $ring[0], $ring[1], 180.0, 180.0); $pen.Dispose()
+}
+# body: soft-shaded sphere with bands
+$path = New-Object System.Drawing.Drawing2D.GraphicsPath
+$path.AddEllipse(($gcx - $gr2), ($gcy - $gr2), (2 * $gr2), (2 * $gr2))
+$br = New-Object System.Drawing.Drawing2D.PathGradientBrush($path)
+$br.CenterPoint = New-Object System.Drawing.PointF(($gcx - 50), ($gcy - 60))
+$br.CenterColor = (C 255 150 160 205)
+$br.SurroundColors = @((C 255 40 48 86))
+$g.FillPath($br, $path); $br.Dispose(); $path.Dispose()
+$clip = New-Object System.Drawing.Drawing2D.GraphicsPath
+$clip.AddEllipse(($gcx - $gr2), ($gcy - $gr2), (2 * $gr2), (2 * $gr2))
+$g.SetClip($clip)
+foreach ($band in @(@(-96, 16, 40), @(-52, 22, 30), @(6, 18, 44), @(58, 14, 34), @(96, 10, 26))) {
+  $b = New-Object System.Drawing.SolidBrush((C $band[2] 90 100 150))
+  $g.FillRectangle($b, ($gcx - $gr2), ($gcy + $band[0]), (2 * $gr2), $band[1]); $b.Dispose()
+}
+$g.ResetClip(); $clip.Dispose()
+# front half of the rings, crossing the disc
+foreach ($ring in @(@(300, 74, 160), @(258, 62, 105), @(348, 88, 75))) {
+  $pen = New-Object System.Drawing.Pen((C $ring[2] 205 215 235), 4)
+  $g.DrawArc($pen, ($gcx - $ring[0] / 2), ($gcy - $ring[1] / 2), $ring[0], $ring[1], 0.0, 180.0); $pen.Dispose()
+}
+Glow $g $gcx $gcy 260 (C 22 150 160 210)
+# ── space station silhouette, small, left-center ──
+$st = New-Object System.Drawing.SolidBrush((C 255 16 22 38))
+$g.FillRectangle($st, 690, 415, 92, 12)
+$g.FillRectangle($st, 722, 401, 28, 40)
+$g.FillRectangle($st, 662, 418, 30, 6)
+$g.FillRectangle($st, 780, 418, 30, 6)
+$st.Dispose()
+foreach ($pan in @(@(636, 408), @(806, 408))) {
+  GradRect $g $pan[0] $pan[1] 28 26 (C 220 40 70 140) (C 220 20 40 90)
+  $pen = New-Object System.Drawing.Pen((C 120 90 130 200), 1)
+  $g.DrawRectangle($pen, $pan[0], $pan[1], 28, 26)
+  $g.DrawLine($pen, ($pan[0] + 14), $pan[1], ($pan[0] + 14), ($pan[1] + 26)); $pen.Dispose()
+}
+foreach ($wl in @(@(700, 419), @(712, 419), @(740, 419), @(758, 419))) {
+  $b = New-Object System.Drawing.SolidBrush((C 190 250 235 180)); $g.FillRectangle($b, $wl[0], $wl[1], 3, 3); $b.Dispose()
+}
+$b = New-Object System.Drawing.SolidBrush((C 230 255 80 90)); $g.FillEllipse($b, 686, 412, 4, 4); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 210 90 255 140)); $g.FillEllipse($b, 810, 412, 4, 4); $b.Dispose()
+Glow $g 736 420 40 (C 20 200 220 255)
+# ── planet limb: huge arc across the bottom with atmosphere + sunrise ──
+$pcx = 700.0; $pcy = 2050.0; $pr = 1150.0
+# atmosphere halo first, behind the limb
+foreach ($atm in @(@(46, 26, 70, 190, 230), @(30, 60, 70, 190, 230), @(16, 110, 90, 200, 235))) {
+  $pen = New-Object System.Drawing.Pen((C $atm[0] $atm[2] $atm[3] $atm[4]), $atm[1])
+  $g.DrawEllipse($pen, ($pcx - $pr), ($pcy - $pr), (2 * $pr), (2 * $pr)); $pen.Dispose()
+}
+# the dark body
+$path = New-Object System.Drawing.Drawing2D.GraphicsPath
+$path.AddEllipse(($pcx - $pr), ($pcy - $pr), (2 * $pr), (2 * $pr))
+$br = New-Object System.Drawing.Drawing2D.PathGradientBrush($path)
+$br.CenterPoint = New-Object System.Drawing.PointF($pcx, ($pcy + 300))
+$br.CenterColor = (C 255 8 12 24)
+$br.SurroundColors = @((C 255 13 20 38))
+$g.FillPath($br, $path); $br.Dispose(); $path.Dispose()
+# rim light along the limb
+$pen = New-Object System.Drawing.Pen((C 160 120 210 240), 2)
+$g.DrawEllipse($pen, ($pcx - $pr), ($pcy - $pr), (2 * $pr), (2 * $pr)); $pen.Dispose()
+# sunrise sliver: warm arc segment on the limb's right shoulder,
+# on-screen at roughly (1112, 977) for this circle
+foreach ($sun in @(@(30, 18, 255, 180, 90), @(70, 8, 255, 210, 120), @(150, 3, 255, 240, 200))) {
+  $pen = New-Object System.Drawing.Pen((C $sun[0] $sun[2] $sun[3] $sun[4]), $sun[1])
+  $g.DrawArc($pen, ($pcx - $pr), ($pcy - $pr), (2 * $pr), (2 * $pr), -76.0, 13.0); $pen.Dispose()
+}
+Glow $g 1112 977 150 (C 60 255 200 110)
+Glow $g 1112 977 60 (C 110 255 230 170)
+# city lights sprinkled on the night side
+$clip = New-Object System.Drawing.Drawing2D.GraphicsPath
+$clip.AddEllipse(($pcx - $pr), ($pcy - $pr), (2 * $pr), (2 * $pr))
+$g.SetClip($clip)
+for ($i = 0; $i -lt 260; $i++) {
+  $ang = ([math]::PI / 180) * $rng.Next(200, 340)
+  $rr = $pr * (0.955 - 0.1 * $rng.NextDouble() * $rng.NextDouble())
+  $lx = $pcx + $rr * [math]::Cos($ang); $ly = $pcy + $rr * [math]::Sin($ang)
+  if ($ly -gt $H -or $ly -lt 660) { continue }
+  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(30, 110) 255 205 130))
+  $g.FillEllipse($b, $lx, $ly, $rng.Next(1, 4), $rng.Next(1, 3)); $b.Dispose()
+}
+$g.ResetClip(); $clip.Dispose()
+# vignette
+foreach ($corner in @(@(0, 0), @($W, 0))) {
+  Glow $g $corner[0] $corner[1] 480 (C 50 0 2 8)
+}
+Save $bmp $g "space.png"
 
 "done -> $out"
