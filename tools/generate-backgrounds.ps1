@@ -482,11 +482,11 @@ foreach ($bd in $boards) {
 $font.Dispose()
 
 # ── HERO: rooftop-mounted ad screen ──
-# host tower under the sign
-GradRect $g 800 560 300 ($H - 560) (C 255 13 9 25) (C 255 6 4 12)
-GradRect $g 830 528 240 32 (C 255 14 10 27) (C 255 12 8 23)
+# host tower under the sign: wide enough to carry the whole span
+GradRect $g 730 560 440 ($H - 560) (C 255 13 9 25) (C 255 6 4 12)
+GradRect $g 764 528 372 32 (C 255 14 10 27) (C 255 12 8 23)
 for ($wy = 600; $wy -lt $H - 80; $wy += 30) {
-  for ($wx = 818; $wx -lt 1082; $wx += 24) {
+  for ($wx = 748; $wx -lt 1152; $wx += 24) {
     if ($rng.NextDouble() -gt 0.14) { continue }
     $b = New-Object System.Drawing.SolidBrush((C $rng.Next(30, 80) 110 225 250))
     $g.FillRectangle($b, $wx, $wy, 6, 9); $b.Dispose()
