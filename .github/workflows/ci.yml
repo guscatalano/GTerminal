@@ -1,0 +1,86 @@
+# CI: every push/PR runs the full test suite (frontend typecheck, theme
+# contrast audit, daemon lifecycle + typing E2E against an isolated
+# daemon). Tags matching v* additionally build the MSI, NSIS, and signed
+# MSIX installers and publish them as a GitHub release — gated on tests.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Typecheck frontend
+        run: npx tsc --noEmit
+
+      - name: Theme contrast audit
+        run: node tests/contrast.mjs
+
+      - name: Build daemon (debug, used by E2E suites)
+        run: cargo build --manifest-path src-tauri/Cargo.toml
+
+      - name: Lifecycle E2E suite
+        run: pwsh -NoProfile -File tests/lifecycle.ps1
+
+      - name: Typing correctness + latency suite
+        run: pwsh -NoProfile -File tests/typing.ps1
+
+  release:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build MSI + NSIS bundles
+        run: npx tauri build --bundles msi,nsis
+
+      - name: Package signed MSIX
+        run: pwsh -NoProfile -File tools/make-msix.ps1
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          generate_release_notes: true
+          files: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/msix/*.msix
+            src-tauri/target/release/bundle/msix/GTerminal-signing.cer
