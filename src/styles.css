@@ -713,6 +713,73 @@ input.set-control {
   display: none;
 }
 
+/* ── zen full-screen: terminal only, floating exit pill ──────────────── */
+
+#app.zen-on #tabbar-row,
+#app.zen-on #sidebar {
+  display: none !important;
+}
+
+#zen-pill {
+  display: none;
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  width: 34px;
+  height: 34px;
+  z-index: 80;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  border: 1px solid var(--border2);
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0.35;
+  transition: opacity 120ms ease;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+}
+
+#app.zen-on #zen-pill {
+  display: flex;
+}
+
+#zen-pill:hover {
+  opacity: 1;
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+#zen-pill svg {
+  width: 15px;
+  height: 15px;
+  pointer-events: none;
+}
+
+#zenbtn {
+  border: none;
+  background: none;
+  color: var(--muted);
+  line-height: 1;
+  padding: 6px 7px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+
+#zenbtn svg {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+
+#zenbtn:hover {
+  background: var(--panel);
+  color: var(--text);
+}
+
 /* ── history page (transcripts of past sessions) ─────────────────────── */
 
 #history-page {

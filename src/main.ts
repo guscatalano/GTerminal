@@ -1183,6 +1183,10 @@ async function restoreLast() {
 function makeShortcutHandler(getId: () => number) {
   return (e: KeyboardEvent): boolean => {
     if (e.type !== "keydown") return true;
+    if (e.key === "F11") {
+      void toggleZen();
+      return false;
+    }
     if (e.ctrlKey && e.shiftKey && !e.altKey) {
       const key = e.key.toUpperCase();
       if (key === "T") {
@@ -2707,6 +2711,70 @@ function toggleSidebar() {
   if (tab) fitTab(tab);
 }
 
+// Zen full-screen: chrome hidden, OS fullscreen, terminal fills
+// everything. A small draggable pill overlay is the way back out.
+async function toggleZen() {
+  const on = app.classList.toggle("zen-on");
+  try {
+    await getCurrentWindow().setFullscreen(on);
+  } catch {}
+  // refit after the window transition settles (fires twice: fast + safe)
+  const refit = () => {
+    const tab = activeId !== null ? tabs.get(activeId) : undefined;
+    if (tab) {
+      fitTab(tab);
+      tab.term.focus();
+    }
+  };
+  window.setTimeout(refit, 120);
+  window.setTimeout(refit, 450);
+}
+
+function initZenPill() {
+  const pill = document.getElementById("zen-pill")!;
+  // restore saved position (clamped into the viewport)
+  const saved = localStorage.getItem("gterm-zen-pos");
+  if (saved) {
+    try {
+      const [px, py] = JSON.parse(saved) as [number, number];
+      pill.style.left = `${Math.min(Math.max(px, 4), window.innerWidth - 40)}px`;
+      pill.style.top = `${Math.min(Math.max(py, 4), window.innerHeight - 40)}px`;
+      pill.style.right = "auto";
+      pill.style.bottom = "auto";
+    } catch {}
+  }
+  pill.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const rect = pill.getBoundingClientRect();
+    let dragging = false;
+    pill.setPointerCapture(e.pointerId);
+    const onMove = (ev: PointerEvent) => {
+      if (!dragging && Math.abs(ev.clientX - startX) < 5 && Math.abs(ev.clientY - startY) < 5) return;
+      dragging = true;
+      const nx = Math.min(Math.max(rect.left + (ev.clientX - startX), 4), window.innerWidth - 40);
+      const ny = Math.min(Math.max(rect.top + (ev.clientY - startY), 4), window.innerHeight - 40);
+      pill.style.left = `${nx}px`;
+      pill.style.top = `${ny}px`;
+      pill.style.right = "auto";
+      pill.style.bottom = "auto";
+    };
+    const onUp = () => {
+      pill.removeEventListener("pointermove", onMove);
+      if (dragging) {
+        const r = pill.getBoundingClientRect();
+        localStorage.setItem("gterm-zen-pos", JSON.stringify([Math.round(r.left), Math.round(r.top)]));
+      } else {
+        void toggleZen(); // plain click exits
+      }
+    };
+    pill.addEventListener("pointermove", onMove);
+    pill.addEventListener("pointerup", onUp, { once: true });
+  });
+}
+
 // Sidebar width: draggable via the edge handle, persisted, terminal
 // refit live so the pane always fills the remaining space.
 function initSidebarResize() {
@@ -3245,6 +3313,8 @@ async function main() {
   sidebarNewBtn.addEventListener("contextmenu", newShellMenu);
   document.getElementById("sidebtn")!.addEventListener("click", toggleSidebar);
   initSidebarResize();
+  document.getElementById("zenbtn")!.addEventListener("click", () => void toggleZen());
+  initZenPill();
   overflowBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     closeMenus(overflowMenu);
@@ -3299,6 +3369,11 @@ async function main() {
   window.addEventListener("contextmenu", (e) => e.preventDefault());
   document.getElementById("settings-close")!.addEventListener("click", closeSettings);
   window.addEventListener("keydown", (e) => {
+    if (e.key === "F11") {
+      e.preventDefault();
+      void toggleZen();
+      return;
+    }
     if (e.key === "Escape") {
       const badgeOv = document.getElementById("badge-overlay");
       if (badgeOv) {
