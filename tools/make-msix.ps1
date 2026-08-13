@@ -1,8 +1,13 @@
-# Packages the release build as a signed MSIX.
+# Packages the release build as an MSIX.
 # Requires: a prior `tauri build` (release exe) and the Windows 10/11 SDK
-# (makeappx + signtool). Signs with a self-signed cert (created if absent)
-# and exports the .cer next to the package so users can trust-install it.
-# Run: pwsh tools/make-msix.ps1
+# (makeappx + signtool).
+# Default: signs with a self-signed cert (created if absent) and exports the
+# .cer next to the package so users can trust-install it.
+# -ForStore: stamps the Partner Center publisher identity and skips signing
+# (the Store signs on ingestion) - this is the package the publish pipeline
+# submits for product 9PBXQ1K155G7.
+# Run: pwsh tools/make-msix.ps1 [-ForStore]
+param([switch] $ForStore)
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Drawing
 $repo = Split-Path $PSScriptRoot -Parent
@@ -42,12 +47,17 @@ foreach ($spec in @(@("Square44x44Logo.png", 44), @("Square150x150Logo.png", 150
 }
 $src.Dispose()
 
+# Sideload builds sign with the self-signed cert, so the Publisher must match its
+# subject. Store builds must instead carry the Partner Center publisher identity
+# (Partner Center > Product identity) - the Store rejects any other value.
+$publisher = if ($ForStore) { "CN=119E0257-3B74-437C-A728-AC7C50256853" } else { "CN=Gus Catalano" }
+
 $manifest = @"
 <?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
          xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
          xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
-  <Identity Name="GusCatalano.GTerminal" Publisher="CN=Gus Catalano" Version="$msixVersion" ProcessorArchitecture="x64"/>
+  <Identity Name="GusCatalano.GTerminal" Publisher="$publisher" Version="$msixVersion" ProcessorArchitecture="x64"/>
   <Properties>
     <DisplayName>GTerminal</DisplayName>
     <PublisherDisplayName>Gus Catalano</PublisherDisplayName>
@@ -73,19 +83,26 @@ Set-Content (Join-Path $stage "AppxManifest.xml") $manifest -Encoding UTF8
 
 $outDir = Join-Path $repo "src-tauri\target\release\bundle\msix"
 New-Item -ItemType Directory -Force $outDir | Out-Null
-$msix = Join-Path $outDir "GTerminal_${version}_x64.msix"
+$suffix = if ($ForStore) { "_store" } else { "" }
+$msix = Join-Path $outDir "GTerminal_${version}_x64$suffix.msix"
 Remove-Item $msix -ErrorAction SilentlyContinue
 & $makeappx pack /d $stage /p $msix /o | Select-Object -Last 1
 
-$cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -eq "CN=Gus Catalano" -and $_.FriendlyName -eq "GTerminal MSIX signing" } | Select-Object -First 1
-if (-not $cert) {
-  $cert = New-SelfSignedCertificate -Type Custom -Subject "CN=Gus Catalano" `
-    -KeyUsage DigitalSignature -FriendlyName "GTerminal MSIX signing" `
-    -CertStoreLocation "Cert:\CurrentUser\My" `
-    -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}")
+if ($ForStore) {
+  # Unsigned on purpose: the Store signs the package on ingestion.
+  Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+  "msix (store, unsigned): $msix"
+} else {
+  $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -eq "CN=Gus Catalano" -and $_.FriendlyName -eq "GTerminal MSIX signing" } | Select-Object -First 1
+  if (-not $cert) {
+    $cert = New-SelfSignedCertificate -Type Custom -Subject "CN=Gus Catalano" `
+      -KeyUsage DigitalSignature -FriendlyName "GTerminal MSIX signing" `
+      -CertStoreLocation "Cert:\CurrentUser\My" `
+      -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}")
+  }
+  & $signtool sign /fd SHA256 /sha1 $cert.Thumbprint $msix | Select-Object -Last 1
+  Export-Certificate -Cert $cert -FilePath (Join-Path $outDir "GTerminal-signing.cer") | Out-Null
+  Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+  "msix: $msix"
+  "cert: $(Join-Path $outDir 'GTerminal-signing.cer')"
 }
-& $signtool sign /fd SHA256 /sha1 $cert.Thumbprint $msix | Select-Object -Last 1
-Export-Certificate -Cert $cert -FilePath (Join-Path $outDir "GTerminal-signing.cer") | Out-Null
-Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
-"msix: $msix"
-"cert: $(Join-Path $outDir 'GTerminal-signing.cer')"

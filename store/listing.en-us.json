@@ -1,0 +1,32 @@
+{
+  "_comment": "Listing-as-code for the Microsoft Store (product 9PBXQ1K155G7, language en-us). NOTE: this app has NOT had its first Store submission yet - complete it once in Partner Center (age rating, pricing, privacy URL, screenshots >=1366x768) before the automated pipeline can publish. These are the BaseListing fields the release job manages; CI overwrites exactly these keys on every v* tag, so edit the listing HERE, not in Partner Center. Store limits: Title<=256, ShortDescription<=1000, Description<=10000, each Feature<=200 (<=20 items), ReleaseNotes<=1500, Keywords<=7 (<=30 each). Title MUST match the reserved app name. Screenshots: drop PNGs in store/screenshots/ and CI manages those too.",
+  "Title": "GTerminal",
+  "ShortTitle": null,
+  "ShortDescription": "A lightweight terminal for Windows with tmux-style session persistence: closing a tab, closing the window, or even rebooting doesn't lose your terminals.",
+  "Description": "GTerminal is a lightweight terminal for Windows with one defining feature: your sessions don't die. Close a tab, close the window, or reboot the machine — your terminals come back, scrollback and working directory intact.\n\nSESSIONS THAT SURVIVE\nA background daemon owns every shell, and the window is just a thin client. Close the window and everything keeps running; reopen and you're back where you were. Sessions are checkpointed every few seconds, so even after a reboot they're restored cold: a fresh shell in the saved directory with the old scrollback replayed behind a divider. If Claude Code was running in a session, resuming the conversation is a single Enter away.\n\nTHE \"OOPS\" GRACE WINDOW\nKilling a session doesn't actually kill it — the tab closes but the process keeps running for five minutes, with a live countdown in the sidebar. One click restores it and cancels the kill entirely. An accidental \"exit\" is just as recoverable. Kill something twice to skip the grace.\n\nTABS THAT WORK LIKE YOU DO\nBrowser-style tabs that shrink as they multiply, colored collapsible tab groups, custom names that stick, and park-a-tab-as-a-pill for things you want out of the way. Tab icons show what's running inside (Claude Code, python, cargo, docker, and more). Groups, names, and layout persist across restarts and reboots.\n\nEIGHT COMPLETE THEMES\nOne Dark, Dracula, Nord, Gruvbox Dark, Tokyo Night, Catppuccin Mocha, Solarized Dark, Solarized Light. Each theme is a whole look — its own font, line spacing, and cursor personality, individually overridable — and the entire chrome recolors with the terminal.\n\nSMART TITLES, YOUR RULES\nRight-click a tab for title suggestions computed locally from what's on screen — running program, last command, directory. Optionally point it at your own AI endpoint (Anthropic- or OpenAI-compatible, including local gateways like Ollama) for AI-suggested titles; this is off by default and nothing is ever called unless you configure it.\n\nYOUR SHELLS\nPowerShell 7, Windows PowerShell, and Command Prompt. Set a default, open one-off tabs in any shell, and each session remembers its shell across restarts — with working-directory tracking in all of them.\n\nFAST AND LIGHT\nBuilt on Tauri (WebView2) and xterm.js with the WebGL renderer — far lighter than an Electron equivalent, with typing latency regression-tested on every build. Source available at github.com/guscatalano/GTerminal.",
+  "Keywords": [
+    "terminal",
+    "tmux",
+    "console",
+    "persistent sessions",
+    "command line",
+    "ConPTY",
+    "terminal emulator"
+  ],
+  "Features": [
+    "Sessions survive closed tabs, closed windows, and reboots — scrollback and working directory restored",
+    "Background daemon keeps shells alive; the window is just a thin client you can close anytime",
+    "\"Oops\" grace window: killed sessions stay restorable for five minutes with a live countdown",
+    "Colored, collapsible tab groups and custom tab names that persist across reboots",
+    "Tab icons show what's running inside (Claude Code, python, cargo, docker, ...)",
+    "Eight complete themes, each with its own font, spacing, and cursor personality",
+    "Local tab-title suggestions, plus optional AI titles via your own endpoint (off by default)",
+    "PowerShell 7, Windows PowerShell, and Command Prompt with per-session shell memory",
+    "Lightweight Tauri + xterm.js WebGL stack — far lighter than Electron",
+    "Typing latency regression-tested: p50 echo latency around 1-2 ms"
+  ],
+  "ReleaseNotes": "Initial Store release.",
+  "CopyrightAndTrademarkInfo": "© 2026 Gus Catalano",
+  "LicenseTerms": "",
+  "DevStudio": "Gus Catalano"
+}

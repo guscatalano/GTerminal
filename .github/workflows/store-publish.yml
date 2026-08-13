@@ -1,0 +1,72 @@
+name: Store publish
+
+# Publishes the app + store/listing.*.json to the Microsoft Store (product
+# 9PBXQ1K155G7) on every v* tag, via the shared guscatalano/store-publish
+# pipeline. The package is built with make-msix.ps1 -ForStore: Partner Center
+# publisher identity, UNSIGNED (the Store signs on ingestion).
+#
+# The MSIX version comes from tauri.conf.json, so a tag must ship a matching
+# version bump (guarded below). A manual "Run workflow" re-submits the current
+# tauri.conf.json version and is rejected by the Store if already used.
+#
+# NOTE: the FIRST submission for this product must be completed once in
+# Partner Center (age rating, pricing, privacy URL, screenshots) before this
+# pipeline can publish updates.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Verify tag matches tauri.conf.json version
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          $conf = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $tag = '${{ github.ref_name }}'.TrimStart('v')
+          if ($conf -ne $tag) {
+            throw "Tag v$tag != tauri.conf.json version $conf - bump the conf version before tagging (the Store rejects reused versions)."
+          }
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build release exe (no installer bundles)
+        run: npx tauri build --no-bundle
+
+      - name: Package Store MSIX (unsigned)
+        run: pwsh -NoProfile -File tools/make-msix.ps1 -ForStore
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: store-package
+          path: src-tauri/target/release/bundle/msix/*_store.msix
+          if-no-files-found: error
+
+  publish:
+    needs: package
+    uses: guscatalano/store-publish/.github/workflows/publish.yml@main
+    with:
+      product-id: 9PBXQ1K155G7
+      package-artifact: store-package
+    secrets: inherit
