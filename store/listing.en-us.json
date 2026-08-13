@@ -28,5 +28,8 @@
   "ReleaseNotes": "Initial Store release.",
   "CopyrightAndTrademarkInfo": "© 2026 Gus Catalano",
   "LicenseTerms": "",
-  "DevStudio": "Gus Catalano"
+  "DevStudio": "Gus Catalano",
+  "PrivacyPolicy": "https://github.com/guscatalano/GTerminal/blob/main/PRIVACY.md",
+  "SupportContact": "gus@guscatalano.com",
+  "WebsiteUrl": "https://github.com/guscatalano/GTerminal"
 }
