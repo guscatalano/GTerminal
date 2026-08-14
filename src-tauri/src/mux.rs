@@ -1016,6 +1016,10 @@ fn start_session(
         cmd.args(["-NoLogo", "-NoExit", "-Command", &ps_init]);
         cmd.cwd(&cwd);
         cmd.env("TERM", "xterm-256color");
+        // A terminal emulator must not inherit color suppression from
+        // whatever launched it: NO_COLOR flips PowerShell 7.2+ into
+        // PlainText output rendering, which strips ANSI from everything.
+        cmd.env_remove("NO_COLOR");
         cmd
     };
     let build_cmd_exe = || {
@@ -1025,6 +1029,7 @@ fn start_session(
         cmd.args(["/K", "prompt $E]9;9;$P$E\\$P$G"]);
         cmd.cwd(&cwd);
         cmd.env("TERM", "xterm-256color");
+        cmd.env_remove("NO_COLOR");
         cmd
     };
     let child = match shell {
