@@ -25,7 +25,7 @@
     "Lightweight Tauri + xterm.js WebGL stack — far lighter than Electron",
     "Typing latency regression-tested: p50 echo latency around 1-2 ms"
   ],
-  "ReleaseNotes": "Initial Store release.",
+  "ReleaseNotes": "Maintenance update.",
   "CopyrightAndTrademarkInfo": "© 2026 Gus Catalano",
   "LicenseTerms": "",
   "DevStudio": "Gus Catalano",
