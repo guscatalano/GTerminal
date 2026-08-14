@@ -313,9 +313,9 @@ body,
   display: flex;
   align-items: center;
   gap: 4px;
-  flex: 1 1 160px;
-  min-width: 100px;
-  max-width: 220px;
+  flex: 1 1 calc(var(--tab-w, 220px) * 0.75);
+  min-width: 90px;
+  max-width: var(--tab-w, 220px);
   height: 28px; /* fixed: emoji icons must not wobble the bar height */
   padding: 0 6px 0 12px;
   border-radius: 8px 8px 0 0;

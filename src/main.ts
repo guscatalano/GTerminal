@@ -89,6 +89,7 @@ interface AppConfig {
   templates?: SessionTemplate[];
   history_days?: number;
   prediction?: string;
+  tab_width?: number;
   title_mode?: string;
   title_template?: string;
   bg_style?: string;
@@ -1099,6 +1100,7 @@ function applyAppearance() {
   // Keep the chrome font in sync with the effective terminal font (theme
   // font, or the user's font-family override).
   document.documentElement.style.setProperty("--ui-font", effFont());
+  document.documentElement.style.setProperty("--tab-w", `${config.tab_width ?? 220}px`);
   const t = { xterm: effXtermTheme() };
   const bg = bgActive();
   for (const tab of tabs.values()) {
@@ -2958,6 +2960,14 @@ function buildSettingsPage() {
     })
   );
   settingRow(
+    "Tab width (px)",
+    "Maximum width of tabs in the tab bar. Ctrl+scroll over the tab bar also resizes.",
+    mkNumber(config.tab_width ?? 220, 110, 400, (v) => {
+      config.tab_width = v;
+      changed();
+    })
+  );
+  settingRow(
     "Line height",
     "Vertical spacing between terminal lines.",
     mkSelect(
@@ -3434,6 +3444,19 @@ async function main() {
       toggleSidebar();
     }
   });
+  // Ctrl+scroll over the tab bar resizes tabs live.
+  document.getElementById("tabbar-row")!.addEventListener(
+    "wheel",
+    (e) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      const cur = config.tab_width ?? 220;
+      config.tab_width = Math.min(400, Math.max(110, cur + (e.deltaY < 0 ? 12 : -12)));
+      document.documentElement.style.setProperty("--tab-w", `${config.tab_width}px`);
+      saveConfig();
+    },
+    { passive: false }
+  );
   new ResizeObserver(() => refreshChrome()).observe(tabbar);
   window.setInterval(updateLiveInfo, 5000);
   window.setInterval(aiAutoTitleTick, 120_000);
