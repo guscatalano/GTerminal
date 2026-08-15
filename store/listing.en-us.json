@@ -31,7 +31,7 @@
     "Lightweight Tauri + xterm.js WebGL stack — far lighter than Electron",
     "Typing latency regression-tested: p50 echo latency around 1-2 ms"
   ],
-  "ReleaseNotes": "0.2.5 — New About section at the bottom of Settings with the app version and links to guscatalano.dev and the project's GitHub repository. Also carries the refreshed listing description and reordered screenshot gallery. Recent releases added resizable tabs (global width on Ctrl+scroll, or drag a single tab's edge), an always-available window grip, and a fix for inherited NO_COLOR stripping terminal colors.",
+  "ReleaseNotes": "0.2.6 — Workspaces: define named sets of session templates in Settings and launch them all from one desktop shortcut (gterminal --workspace \"name\"). Each workspace can copy the shortcut command line or save a ready-made .lnk wherever you choose. Also fixed the white flash when the window opens — it now appears already themed. Recent releases added a settings search box, an About section, resizable tabs, and an always-available window grip.",
   "CopyrightAndTrademarkInfo": "© 2026 Gus Catalano",
   "LicenseTerms": "",
   "DevStudio": "Gus Catalano",
