@@ -7,7 +7,7 @@ use std::io::BufRead;
 use std::io::BufReader;
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 #[derive(Clone, serde::Serialize)]
 struct PtyOutput {
@@ -229,6 +229,24 @@ fn history_read(stem: String) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+#[derive(serde::Serialize)]
+struct LaunchInfo {
+    args: Vec<String>,
+    exe: String,
+}
+
+/// CLI args + exe path, so the frontend can honor launch flags like
+/// `--workspace <name>` and build shortcut command lines.
+#[tauri::command]
+fn launch_info() -> LaunchInfo {
+    LaunchInfo {
+        args: std::env::args().skip(1).collect(),
+        exe: std::env::current_exe()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if std::env::args().any(|a| a == "--daemon") {
@@ -237,6 +255,21 @@ pub fn run() {
     }
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            // The window is created hidden (visible:false) so the webview's
+            // white pre-paint never flashes; the frontend shows it once the
+            // theme is applied. Backstop: if the frontend never boots (dead
+            // dev server, JS error), reveal the window after 5s anyway.
+            if let Some(win) = app.get_webview_window("main") {
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                    if !win.is_visible().unwrap_or(true) {
+                        let _ = win.show();
+                    }
+                });
+            }
+            Ok(())
+        })
         .manage(PtyManager::default())
         .invoke_handler(tauri::generate_handler![
             list_sessions,
@@ -249,7 +282,8 @@ pub fn run() {
             get_config,
             set_config,
             history_list,
-            history_read
+            history_read,
+            launch_info
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

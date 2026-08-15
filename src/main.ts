@@ -73,6 +73,19 @@ interface SessionTemplate {
   title?: string;
 }
 
+// A workspace is a named list of template names, launched together via
+// `gterminal --workspace <name>` (e.g. from a desktop shortcut).
+interface Workspace {
+  name: string;
+  templates: string[];
+}
+
+interface LaunchInfo {
+  args: string[];
+  exe: string;
+}
+let launchInfo: LaunchInfo | null = null;
+
 interface AppConfig {
   cursor_style?: CursorStyle;
   cursor_blink?: boolean;
@@ -89,6 +102,7 @@ interface AppConfig {
   default_shell?: string;
   default_cwd?: string;
   templates?: SessionTemplate[];
+  workspaces?: Workspace[];
   history_days?: number;
   prediction?: string;
   tab_width?: number;
@@ -3264,6 +3278,69 @@ function buildSettingsPage() {
     "Named presets for new tabs — shell, start folder, and tab title. Right-click the + button to open one.",
     tplBlock
   );
+
+  // Workspaces: launch a preset group of templates from one shortcut.
+  const wsBlock = document.createElement("div");
+  wsBlock.className = "tpl-list";
+  const renderWorkspaces = () => {
+    wsBlock.innerHTML = "";
+    (config.workspaces ?? []).forEach((w, i) => {
+      const row = document.createElement("div");
+      row.className = "tpl-row";
+      const name = mkTplInput("Workspace name", w.name, (v) => {
+        w.name = v;
+        saveConfig();
+      });
+      const tpls = mkTplInput(
+        "Templates, comma-separated",
+        w.templates.join(", "),
+        (v) => {
+          w.templates = v.split(",").map((s) => s.trim()).filter(Boolean);
+          saveConfig();
+        }
+      );
+      const copy = document.createElement("button");
+      copy.className = "set-btn";
+      copy.textContent = "Copy shortcut";
+      copy.title = "Copies a command line for a desktop shortcut that opens this workspace";
+      copy.addEventListener("click", () => {
+        const exe = launchInfo?.exe || "gterminal.exe";
+        void navigator.clipboard.writeText(`"${exe}" --workspace "${w.name}"`);
+        copy.textContent = "Copied!";
+        window.setTimeout(() => (copy.textContent = "Copy shortcut"), 1200);
+      });
+      const del = document.createElement("button");
+      del.className = "tpl-del";
+      del.textContent = "✕";
+      del.title = "Remove workspace";
+      del.addEventListener("click", () => {
+        config.workspaces!.splice(i, 1);
+        if (!config.workspaces!.length) config.workspaces = undefined;
+        saveConfig();
+        renderWorkspaces();
+      });
+      row.append(name, tpls, copy, del);
+      wsBlock.appendChild(row);
+    });
+    const add = document.createElement("button");
+    add.className = "set-btn";
+    add.textContent = "+ Add workspace";
+    add.addEventListener("click", () => {
+      config.workspaces = [
+        ...(config.workspaces ?? []),
+        { name: `Workspace ${(config.workspaces?.length ?? 0) + 1}`, templates: [] },
+      ];
+      saveConfig();
+      renderWorkspaces();
+    });
+    wsBlock.appendChild(add);
+  };
+  renderWorkspaces();
+  settingRow(
+    "Workspaces",
+    "A named set of templates opened together with `--workspace \"name\"` — Copy shortcut gives you the command line to paste into a desktop shortcut's Target.",
+    wsBlock
+  );
   settingRow(
     "Keep history (days)",
     "Every session's output is recorded and browsable from the ◷ button, even after the session dies. 0 disables recording.",
@@ -3407,6 +3484,10 @@ async function main() {
   config = await invoke<AppConfig>("get_config").catch(() => ({}));
   applyTheme(config.theme ?? localStorage.getItem("gterm-theme") ?? "one-dark");
   applyBackground();
+  // The window starts hidden (tauri.conf visible:false) so users never
+  // see the webview's white pre-paint flash; show once themed.
+  void getCurrentWindow().show();
+  launchInfo = await invoke<LaunchInfo>("launch_info").catch(() => null);
   await listen<{ id: number; data: string }>("pty-output", (event) => {
     const tab = tabs.get(event.payload.id);
     if (tab) {
@@ -3625,6 +3706,22 @@ async function main() {
     // its grace window. They stay under "Closing soon" instead.
     if (s.expires_ms) continue;
     if (!hidden.has(s.id)) await createTab(s.id);
+  }
+  // `--workspace <name>` (e.g. from a shortcut) opens every template the
+  // named workspace lists, on top of whatever sessions were adopted.
+  const wsArgs = launchInfo?.args ?? [];
+  const wsAt = wsArgs.indexOf("--workspace");
+  const wsName = wsAt >= 0 ? wsArgs[wsAt + 1]?.trim() : undefined;
+  if (wsName) {
+    const ws = (config.workspaces ?? []).find(
+      (w) => w.name.trim().toLowerCase() === wsName.toLowerCase()
+    );
+    for (const tplName of ws?.templates ?? []) {
+      const t = (config.templates ?? []).find(
+        (x) => x.name.trim().toLowerCase() === tplName.trim().toLowerCase()
+      );
+      if (t) await createTab(undefined, t.shell, t.cwd, t.title);
+    }
   }
   if (tabs.size === 0) await createTab();
   refreshChrome();
