@@ -2,6 +2,21 @@
 
 A lightweight terminal for Windows with tmux-style session persistence: closing a tab, closing the window, or even rebooting doesn't lose your terminals.
 
+![GTerminal running the Amber CRT theme](store/screenshots/01-amber-crt.png)
+
+<table>
+  <tr>
+    <td><img src="store/screenshots/02-deus-ex.png" alt="Deus Ex theme" /></td>
+    <td><img src="store/screenshots/07-matrix-tabs.png" alt="Matrix theme with the tab strip" /></td>
+  </tr>
+  <tr>
+    <td><img src="store/screenshots/10-deep-space-repo.png" alt="Deep Space theme (real NASA imagery) with a git session" /></td>
+    <td><img src="store/screenshots/05-gruvbox.png" alt="Gruvbox theme" /></td>
+  </tr>
+</table>
+
+Every theme is a complete look — 25 of them, from clean classics to full scene art. Browse the whole set in the [theme gallery](store-assets/theme-pool).
+
 ## How it works
 
 - **UI**: [Tauri](https://tauri.app) (WebView2) + [xterm.js](https://xtermjs.org) with the WebGL renderer — far lighter than an Electron equivalent.
@@ -42,7 +57,7 @@ Tabs shrink browser-style as they multiply; overflow collapses into a `+N` menu.
 
 `cursor_style` is `bar` (default, Windows Terminal-like), `block`, or `underline`; `cursor_blink` defaults to true. Cursor settings apply to new windows/tabs.
 
-**Settings** (⚙ button): theme, font family/size, line height, cursor style/blink, and the undo window — applied live and saved to `config.json`. Themes are a whole look, not just colors — each carries its own font, line spacing, and cursor personality, individually overridable: One Dark, Dracula, Nord, Gruvbox Dark, Tokyo Night, Catppuccin Mocha, Solarized Dark, Solarized Light. The whole chrome (tab bar, sidebar, menus) recolors along with the terminal.
+**Settings** (⚙ button): theme, font family/size, line height, cursor style/blink, and the undo window — applied live and saved to `config.json`. Themes are a whole look, not just colors — 25 of them, each carrying its own font, line spacing, cursor personality, and backdrop art, individually overridable. The whole chrome (tab bar, sidebar, menus) recolors along with the terminal, and every theme is contrast-audited.
 
 Sessions in their grace window get a dedicated **Closing soon** sidebar section with a live m:ss countdown; click to restore, × (twice) to kill immediately.
 
