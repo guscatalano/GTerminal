@@ -3287,7 +3287,7 @@ function buildSettingsPage() {
     wsBlock.innerHTML = "";
     (config.workspaces ?? []).forEach((w, i) => {
       const row = document.createElement("div");
-      row.className = "tpl-row";
+      row.className = "tpl-row ws-row";
       const name = mkTplInput("Workspace name", w.name, (v) => {
         w.name = v;
         saveConfig();

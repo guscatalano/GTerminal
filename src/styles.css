@@ -1359,6 +1359,18 @@ input.set-control {
   width: auto;
 }
 
+/* workspace rows: name, template list, two equal buttons, delete */
+.ws-row {
+  grid-template-columns: 1fr 1.4fr 108px 108px 26px;
+}
+
+.ws-row .set-btn {
+  width: 100%;
+  padding: 4px 0;
+  text-align: center;
+  white-space: nowrap;
+}
+
 .tpl-del {
   background: none;
   border: none;
