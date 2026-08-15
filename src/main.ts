@@ -236,6 +236,28 @@ function saveCustomBadges() {
   localStorage.setItem("gterm-cust-badges", JSON.stringify(customBadges));
 }
 
+// Per-tab widths from dragging a tab's right edge. A stored width
+// overrides the global tab-width setting for that session only; keys
+// are daemon session ids, so widths survive restarts and reboots.
+const tabWidths: Record<string, number> = JSON.parse(
+  localStorage.getItem("gterm-tab-widths") ?? "{}"
+);
+function saveTabWidths() {
+  localStorage.setItem("gterm-tab-widths", JSON.stringify(tabWidths));
+}
+const TAB_W_MIN = 90;
+const TAB_W_MAX = 400;
+function applyTabWidth(button: HTMLElement, id: number) {
+  const w = tabWidths[id];
+  if (w) {
+    button.style.flex = `0 1 ${w}px`;
+    button.style.maxWidth = `${w}px`;
+  } else {
+    button.style.flex = "";
+    button.style.maxWidth = "";
+  }
+}
+
 // AI-suggested titles: outrank shell/cwd labels, lose to user renames.
 const aiTitles: Record<string, string> = JSON.parse(
   localStorage.getItem("gterm-ai-titles") ?? "{}"
@@ -1464,7 +1486,11 @@ async function createTab(attachId?: number, shell?: string, cwd?: string, title?
   close.className = "tab-close";
   close.textContent = "×";
   close.title = "Close tab — restorable from Closing soon until its timer runs out (Ctrl+Shift+W ×2)";
-  button.append(shellB, icon, label, hide, close);
+  const resize = document.createElement("span");
+  resize.className = "tab-resize";
+  resize.title = "Drag to resize this tab — double-click to reset";
+  button.append(shellB, icon, label, hide, close, resize);
+  applyTabWidth(button, id);
   tabbar.appendChild(button);
   tabOrder.push(id);
   saveOrder();
@@ -1473,7 +1499,35 @@ async function createTab(attachId?: number, shell?: string, cwd?: string, title?
   tabs.set(id, tab);
 
   button.addEventListener("mousedown", (e) => {
-    if (e.target !== close && e.target !== hide) setActive(id);
+    if (e.target !== close && e.target !== hide && e.target !== resize) setActive(id);
+  });
+  // Dragging the right-edge handle resizes just this tab; the handle
+  // stops propagation so the reorder drag below never starts from it.
+  resize.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = button.getBoundingClientRect().width;
+    let resized = false;
+    const onMove = (ev: PointerEvent) => {
+      if (!resized && Math.abs(ev.clientX - startX) < 3) return;
+      resized = true;
+      tabWidths[id] = Math.min(TAB_W_MAX, Math.max(TAB_W_MIN, Math.round(startW + ev.clientX - startX)));
+      applyTabWidth(button, id);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      if (resized) saveTabWidths();
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp, { once: true });
+  });
+  resize.addEventListener("dblclick", (e) => {
+    e.stopPropagation();
+    delete tabWidths[id];
+    applyTabWidth(button, id);
+    saveTabWidths();
   });
   button.addEventListener("dblclick", (e) => {
     if (e.target === label) renameTab(id);

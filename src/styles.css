@@ -329,6 +329,19 @@ body,
   background: var(--panel);
 }
 
+/* thin grab strip on a tab's right edge for per-tab resizing */
+.tab-resize {
+  flex: none;
+  align-self: stretch;
+  width: 7px;
+  margin: 0 -6px 0 -2px; /* sit over the tab's right padding */
+  cursor: col-resize;
+}
+.tab-resize:hover,
+.tab-resize:active {
+  background: linear-gradient(to right, transparent 2px, var(--accent) 2px, var(--accent) 4px, transparent 4px);
+}
+
 .tab.active {
   background: var(--bg);
   color: var(--text);
