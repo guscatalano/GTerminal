@@ -255,10 +255,26 @@ body,
   color: var(--text);
 }
 
-/* Pin controls to the right even when the sidebar hides the tab strip
-   (nothing else stretches then). */
-#win-min {
-  margin-left: auto;
+/* Always-available window grab handle next to the window controls: a
+   dotted grip tabs can never crowd out. Its auto margin also pins the
+   control cluster to the right when nothing else stretches. Dots are
+   a background image, not children — Tauri only starts a drag from
+   the exact element carrying data-tauri-drag-region. */
+#win-grip {
+  flex: none;
+  align-self: stretch;
+  width: 22px;
+  margin: -6px 0 0 auto; /* reach the very top edge like the controls */
+  cursor: grab;
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--muted) 55%, transparent) 1.2px, transparent 1.4px);
+  background-size: 5px 5px;
+  background-position: center;
+}
+#win-grip:hover {
+  background-image: radial-gradient(circle, var(--muted) 1.2px, transparent 1.4px);
+}
+#win-grip:active {
+  cursor: grabbing;
 }
 
 #win-close:hover {
