@@ -31,7 +31,7 @@
     "Lightweight Tauri + xterm.js WebGL stack — far lighter than Electron",
     "Typing latency regression-tested: p50 echo latency around 1-2 ms"
   ],
-  "ReleaseNotes": "0.2.3 — Resizable tabs: Ctrl+scroll over the tab bar sets the global tab width, and dragging any tab's right edge gives that one tab its own width (double-click the edge to reset). A dotted grip next to the window controls means there's always a spot to drag the window by, even with a full tab strip. Fixed: shells no longer inherit color suppression (NO_COLOR) from the environment that launched GTerminal. Refreshed Store screenshots.",
+  "ReleaseNotes": "0.2.4 — Store listing refresh: the description now covers the full feature set (searchable session transcripts, per-directory autocomplete, session templates, zen mode, clipboard tools, per-tab resizing) and the screenshot gallery was reordered. No app changes since 0.2.3, which added resizable tabs, the always-available window grip, and the NO_COLOR fix.",
   "CopyrightAndTrademarkInfo": "© 2026 Gus Catalano",
   "LicenseTerms": "",
   "DevStudio": "Gus Catalano",
