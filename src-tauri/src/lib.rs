@@ -247,6 +247,44 @@ fn launch_info() -> LaunchInfo {
     }
 }
 
+/// Write a Windows .lnk at `path` that launches this exe with
+/// `--workspace "<workspace>"`. Uses the WScript.Shell COM object via
+/// PowerShell — no extra crate, and it produces a real shell link.
+#[tauri::command]
+fn create_shortcut(path: String, workspace: String) -> Result<(), String> {
+    let exe = std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .to_string_lossy()
+        .into_owned();
+    // Values land inside PowerShell single-quoted strings, where the only
+    // metacharacter is the single quote itself (escaped by doubling).
+    let esc = |s: &str| s.replace('\'', "''");
+    let script = format!(
+        "$ws = New-Object -ComObject WScript.Shell; \
+         $s = $ws.CreateShortcut('{}'); \
+         $s.TargetPath = '{}'; \
+         $s.Arguments = '--workspace \"{}\"'; \
+         $s.IconLocation = '{},0'; \
+         $s.Save()",
+        esc(&path),
+        esc(&exe),
+        esc(&workspace).replace('"', ""),
+        esc(&exe)
+    );
+    let out = {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .output()
+            .map_err(|e| e.to_string())?
+    };
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).into_owned());
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if std::env::args().any(|a| a == "--daemon") {
@@ -255,6 +293,7 @@ pub fn run() {
     }
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // The window is created hidden (visible:false) so the webview's
             // white pre-paint never flashes; the frontend shows it once the
@@ -283,7 +322,8 @@ pub fn run() {
             set_config,
             history_list,
             history_read,
-            launch_info
+            launch_info,
+            create_shortcut
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

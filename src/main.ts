@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { Terminal } from "@xterm/xterm";
 import type { ITheme } from "@xterm/xterm";
 import Anthropic from "@anthropic-ai/sdk";
@@ -3301,13 +3302,31 @@ function buildSettingsPage() {
       );
       const copy = document.createElement("button");
       copy.className = "set-btn";
-      copy.textContent = "Copy shortcut";
-      copy.title = "Copies a command line for a desktop shortcut that opens this workspace";
+      copy.textContent = "Copy cmd";
+      copy.title = "Copies a command line for a shortcut that opens this workspace";
       copy.addEventListener("click", () => {
         const exe = launchInfo?.exe || "gterminal.exe";
         void navigator.clipboard.writeText(`"${exe}" --workspace "${w.name}"`);
         copy.textContent = "Copied!";
-        window.setTimeout(() => (copy.textContent = "Copy shortcut"), 1200);
+        window.setTimeout(() => (copy.textContent = "Copy cmd"), 1200);
+      });
+      const saveBtn = document.createElement("button");
+      saveBtn.className = "set-btn";
+      saveBtn.textContent = "Save shortcut…";
+      saveBtn.title = "Saves a ready-made shortcut (.lnk) that opens this workspace";
+      saveBtn.addEventListener("click", async () => {
+        const file = await saveDialog({
+          defaultPath: `${w.name || "workspace"}.lnk`,
+          filters: [{ name: "Shortcut", extensions: ["lnk"] }],
+        }).catch(() => null);
+        if (!file) return;
+        try {
+          await invoke("create_shortcut", { path: file, workspace: w.name });
+          saveBtn.textContent = "Saved!";
+        } catch {
+          saveBtn.textContent = "Failed";
+        }
+        window.setTimeout(() => (saveBtn.textContent = "Save shortcut…"), 1500);
       });
       const del = document.createElement("button");
       del.className = "tpl-del";
@@ -3319,7 +3338,7 @@ function buildSettingsPage() {
         saveConfig();
         renderWorkspaces();
       });
-      row.append(name, tpls, copy, del);
+      row.append(name, tpls, copy, saveBtn, del);
       wsBlock.appendChild(row);
     });
     const add = document.createElement("button");
