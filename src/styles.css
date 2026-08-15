@@ -904,6 +904,18 @@ input.set-control {
   display: none;
 }
 
+#settings-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 14px 0 0;
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--border2);
+  border-radius: 5px;
+  font: 13px "Segoe UI", sans-serif;
+  padding: 6px 10px;
+}
+
 #history-search {
   width: 100%;
   box-sizing: border-box;
@@ -1094,6 +1106,7 @@ input.set-control {
 /* The settings/history pages take on the theme's font, so each theme's
    personality carries beyond the terminal. --ui-font is set from JS. */
 #settings-page .settings-h1,
+#settings-page #settings-search,
 #settings-page .settings-section-title,
 #settings-page .setting-title,
 #settings-page .setting-desc,

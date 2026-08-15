@@ -1755,9 +1755,52 @@ function settingsOpen(): boolean {
   return app.classList.contains("settings-on");
 }
 
+const settingsSearch = document.getElementById("settings-search") as HTMLInputElement;
+
+// Live filter: a row stays visible when the query matches its title,
+// description, or section heading; headings hide when every row under
+// them is hidden. The About block only matches on its own text.
+function filterSettings() {
+  const q = settingsSearch.value.trim().toLowerCase();
+  const kids = Array.from(settingsList.children) as HTMLElement[];
+  let section = "";
+  let sectionEl: HTMLElement | null = null;
+  let sectionHasHit = false;
+  const closeSection = () => {
+    if (sectionEl) sectionEl.hidden = !sectionHasHit;
+  };
+  for (const el of kids) {
+    if (el.classList.contains("settings-section-title")) {
+      closeSection();
+      section = (el.textContent ?? "").toLowerCase();
+      sectionEl = el;
+      sectionHasHit = false;
+      continue;
+    }
+    const text = ((el.textContent ?? "") + " " + section).toLowerCase();
+    const hit = !q || text.includes(q);
+    el.hidden = !hit;
+    if (hit) sectionHasHit = true;
+  }
+  closeSection();
+}
+
+settingsSearch.addEventListener("input", filterSettings);
+settingsSearch.addEventListener("keydown", (e) => {
+  // Esc clears the query first; only an empty box lets the global
+  // handler close the settings page.
+  if (e.key === "Escape" && settingsSearch.value) {
+    e.stopPropagation();
+    settingsSearch.value = "";
+    filterSettings();
+  }
+});
+
 function openSettings() {
   buildSettingsPage();
   app.classList.add("settings-on");
+  settingsSearch.focus();
+  settingsSearch.select();
 }
 
 function closeSettings() {
@@ -3357,6 +3400,7 @@ function buildSettingsPage() {
   mkLink("Source on GitHub", "https://github.com/guscatalano/GTerminal");
   about.append(aboutApp, aboutBy, aboutLinks);
   settingsList.appendChild(about);
+  filterSettings(); // rebuilds (e.g. theme change) keep the active query
 }
 
 async function main() {
