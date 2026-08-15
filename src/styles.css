@@ -345,6 +345,33 @@ body,
   background: var(--panel);
 }
 
+/* about block at the bottom of settings */
+.about-block {
+  padding: 10px 0 28px;
+  color: var(--muted);
+  font: 13px var(--ui-font, "Segoe UI"), sans-serif;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.about-app {
+  color: var(--text);
+  font-weight: 600;
+}
+.about-links {
+  display: flex;
+  gap: 16px;
+  margin-top: 6px;
+}
+.about-links a {
+  color: var(--accent);
+  text-decoration: none;
+  cursor: pointer;
+}
+.about-links a:hover {
+  text-decoration: underline;
+}
+
 /* thin grab strip on a tab's right edge for per-tab resizing */
 .tab-resize {
   flex: none;

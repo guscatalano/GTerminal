@@ -31,7 +31,7 @@
     "Lightweight Tauri + xterm.js WebGL stack — far lighter than Electron",
     "Typing latency regression-tested: p50 echo latency around 1-2 ms"
   ],
-  "ReleaseNotes": "0.2.4 — Store listing refresh: the description now covers the full feature set (searchable session transcripts, per-directory autocomplete, session templates, zen mode, clipboard tools, per-tab resizing) and the screenshot gallery was reordered. No app changes since 0.2.3, which added resizable tabs, the always-available window grip, and the NO_COLOR fix.",
+  "ReleaseNotes": "0.2.5 — New About section at the bottom of Settings with the app version and links to guscatalano.dev and the project's GitHub repository. Also carries the refreshed listing description and reordered screenshot gallery. Recent releases added resizable tabs (global width on Ctrl+scroll, or drag a single tab's edge), an always-available window grip, and a fix for inherited NO_COLOR stripping terminal colors.",
   "CopyrightAndTrademarkInfo": "© 2026 Gus Catalano",
   "LicenseTerms": "",
   "DevStudio": "Gus Catalano",

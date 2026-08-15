@@ -1,6 +1,8 @@
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getVersion } from "@tauri-apps/api/app";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { Terminal } from "@xterm/xterm";
 import type { ITheme } from "@xterm/xterm";
 import Anthropic from "@anthropic-ai/sdk";
@@ -3325,6 +3327,36 @@ function buildSettingsPage() {
       }
     )
   );
+
+  settingsSection("About");
+  const about = document.createElement("div");
+  about.className = "about-block";
+  const aboutApp = document.createElement("div");
+  aboutApp.className = "about-app";
+  aboutApp.textContent = "GTerminal";
+  getVersion()
+    .then((v) => (aboutApp.textContent = `GTerminal ${v}`))
+    .catch(() => {});
+  const aboutBy = document.createElement("div");
+  aboutBy.textContent = "Made by Gus Catalano";
+  const aboutLinks = document.createElement("div");
+  aboutLinks.className = "about-links";
+  // Links must open in the system browser — a plain anchor would
+  // navigate the webview itself.
+  const mkLink = (label: string, url: string) => {
+    const a = document.createElement("a");
+    a.textContent = label;
+    a.href = url;
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      openUrl(url).catch(() => {});
+    });
+    aboutLinks.appendChild(a);
+  };
+  mkLink("guscatalano.dev", "https://guscatalano.dev");
+  mkLink("Source on GitHub", "https://github.com/guscatalano/GTerminal");
+  about.append(aboutApp, aboutBy, aboutLinks);
+  settingsList.appendChild(about);
 }
 
 async function main() {
