@@ -164,26 +164,35 @@ function hexToRgba(hex: string, alpha: number): string {
 }
 
 function applyBackground() {
-  // Painted on #main (behind panes, settings, and history alike) so the
-  // art stays visible on every page, not just the terminals.
+  // Painted on #app — the whole window — so the art runs edge to edge
+  // behind the sidebar and tab bar too, not just the main column.
+  const appEl = document.getElementById("app")!;
   const mainEl = document.getElementById("main")!;
-  // The settings/history wash follows the transparency setting too:
-  // fully see-through terminals keep the light 55% wash, a solid
-  // terminal makes those pages solid as well.
+  mainEl.style.background = ""; // art used to live here
+  // The settings/history wash and the chrome wash both follow the
+  // transparency setting: fully see-through terminals keep the light
+  // washes, a solid terminal makes those surfaces solid as well.
   const transp = effTransparency();
   const washPct = Math.round(55 + (100 - transp) * 0.45);
   document.documentElement.style.setProperty("--wash-pct", `${washPct}%`);
   const image = resolvedBgCss();
   if (!image) {
-    mainEl.style.background = "";
+    appEl.style.background = "";
+    document.documentElement.style.setProperty("--chrome-wash", "100%");
     return;
   }
+  // Sidebar and tab bar stay more opaque than the terminal: they carry
+  // small text that has to stay legible over any art.
+  document.documentElement.style.setProperty(
+    "--chrome-wash",
+    `${Math.round(80 + (100 - transp) * 0.2)}%`
+  );
   // Theme-built-in art is already palette-matched and subtle; presets and
   // images get the dim overlay for readability.
   const isThemeArt = (config.bg_style ?? "theme") === "theme";
   const dim = Math.min(0.95, Math.max(0, (config.bg_dim ?? 50) / 100));
   const overlay = hexToRgba(currentTheme().xterm.background ?? "#0f1115", dim);
-  mainEl.style.background = isThemeArt
+  appEl.style.background = isThemeArt
     ? image
     : `linear-gradient(${overlay}, ${overlay}), ${image}`;
 }
@@ -1717,6 +1726,190 @@ THEMES.dos = mkTheme(
 );
 THEMES.dos.xterm.cursor = "#aaaaaa";
 
+THEMES.coral = mkTheme(
+  "Coral",
+  "black",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"],
+  'linear-gradient(rgba(242,240,233,0.3), rgba(242,240,233,0.42)), url("/backgrounds/coral.png") center / cover no-repeat, linear-gradient(180deg, #f2f0e9, #e8e4da)',
+  "#f2f0e9",
+  "#3d3929",
+  [
+    "#3d3929", "#b04a2a", "#4a6b34", "#7a5a14", "#39618f", "#7a447a", "#2a6a66", "#ddd8cb",
+    "#5f5a48", "#94381c", "#3b5626", "#61470b", "#2c4e75", "#623562", "#1f5450", "#fdfbf6",
+  ]
+);
+THEMES.coral.xterm.cursor = "#c25f3d";
+
+THEMES.monochrome = mkTheme(
+  "Monochrome",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"],
+  'linear-gradient(rgba(10,10,10,0.34), rgba(10,10,10,0.5)), url("/backgrounds/monochrome.png") center / cover no-repeat, linear-gradient(180deg, #0a0a0a, #050505)',
+  "#0a0a0a",
+  "#e8e8e8",
+  [
+    "#0a0a0a", "#c99a9a", "#9ec49e", "#c9c19a", "#9aaec9", "#c09ac0", "#9ac6c6", "#d2d2d2",
+    "#606060", "#e0b4b4", "#bce0bc", "#e6dcb4", "#b8c8e6", "#dcb8dc", "#b4e0e0", "#fafafa",
+  ]
+);
+THEMES.monochrome.xterm.cursor = "#f2f2f2";
+
+THEMES.git = mkTheme(
+  "Git",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.15, "bar"],
+  'linear-gradient(rgba(20,23,28,0.36), rgba(20,23,28,0.52)), url("/backgrounds/git.png") center / cover no-repeat, linear-gradient(180deg, #14171c, #0c0e12)',
+  "#14171c",
+  "#d6dbe1",
+  [
+    "#14171c", "#f05033", "#3fb950", "#d29922", "#58a6ff", "#bc8cff", "#56cfd8", "#ccd3da",
+    "#59626d", "#ff7a5c", "#68d97c", "#f0be4c", "#82c0ff", "#d4b0ff", "#82e4ec", "#eef3f8",
+  ]
+);
+THEMES.git.xterm.cursor = "#f05033";
+
+THEMES.circuit = mkTheme(
+  "Circuit",
+  "white",
+  ["Consolas, monospace", 1.15, "block"],
+  'linear-gradient(rgba(10,32,20,0.36), rgba(10,32,20,0.52)), url("/backgrounds/circuit.png") center / cover no-repeat, linear-gradient(180deg, #0a2014, #06150d)',
+  "#0a2014",
+  "#d4e6cc",
+  [
+    "#0a2014", "#e07a5f", "#6fc46f", "#c69c3e", "#5fae9c", "#b08ac4", "#5fc0b4", "#c8dcc0",
+    "#4a6b52", "#f09a80", "#92dc92", "#f2d888", "#84ccbc", "#ccaadc", "#84dcd0", "#e8f4e0",
+  ]
+);
+THEMES.circuit.xterm.cursor = "#c69c3e";
+
+THEMES.whiteboard = mkTheme(
+  "Whiteboard",
+  "black",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"],
+  'linear-gradient(rgba(250,250,248,0.3), rgba(250,250,248,0.42)), url("/backgrounds/whiteboard.png") center / cover no-repeat, linear-gradient(180deg, #fafaf8, #f0f0ee)',
+  "#fafaf8",
+  "#2a2a2c",
+  [
+    "#2a2a2c", "#c03636", "#2f7a46", "#7a5a10", "#2f6fd0", "#7a3f96", "#1f6f7a", "#dcdcda",
+    "#5c5c5e", "#a52828", "#256237", "#61470a", "#2456a4", "#61307a", "#175961", "#ffffff",
+  ]
+);
+THEMES.whiteboard.xterm.cursor = "#2f6fd0";
+
+THEMES.panic = mkTheme(
+  "Kernel Panic",
+  "white",
+  ['"Lucida Console", Consolas, monospace', 1.15, "block"],
+  'linear-gradient(rgba(14,3,3,0.36), rgba(14,3,3,0.52)), url("/backgrounds/panic.png") center / cover no-repeat, linear-gradient(180deg, #0e0303, #070101)',
+  "#0e0303",
+  "#e8d0d0",
+  [
+    "#0e0303", "#ff4646", "#8fc48f", "#e0a860", "#8fa8d8", "#d08ac0", "#7fc4c4", "#dcc8c8",
+    "#6b4a4a", "#ff7070", "#b0e0b0", "#f5c684", "#b0c8f0", "#e8aad8", "#a4e0e0", "#fdeeee",
+  ]
+);
+THEMES.panic.xterm.cursor = "#ff4646";
+THEMES.panic.xterm.selectionBackground = "#ff464640";
+
+// E-Ink: near-grayscale on purpose. The hues are only strong enough to
+// tell the ANSI slots apart — 16 identical grays would be unusable.
+THEMES.eink = mkTheme(
+  "E-Ink",
+  "black",
+  ['"Cascadia Mono", Consolas, monospace', 1.25, "block"],
+  'linear-gradient(rgba(237,236,232,0.3), rgba(237,236,232,0.42)), url("/backgrounds/eink.png") center / cover no-repeat, linear-gradient(180deg, #edece8, #e2e1dc)',
+  "#edece8",
+  "#2b2b2b",
+  [
+    "#2b2b2b", "#6b4a4a", "#44543f", "#5c5330", "#3f4a5c", "#544458", "#3d5252", "#cfcecb",
+    "#5e5e5e", "#523636", "#33422f", "#463f22", "#2e374a", "#403244", "#2c3f3f", "#ffffff",
+  ]
+);
+
+THEMES.punchcard = mkTheme(
+  "Punch Card",
+  "black",
+  ['"Lucida Console", Consolas, monospace', 1.15, "block"],
+  'linear-gradient(rgba(232,223,198,0.3), rgba(232,223,198,0.42)), url("/backgrounds/punchcard.png") center / cover no-repeat, linear-gradient(180deg, #e8dfc6, #ded4b8)',
+  "#e8dfc6",
+  "#3c3628",
+  [
+    "#3c3628", "#a03a24", "#46602c", "#71570e", "#35577f", "#6f3f6b", "#2a635c", "#d2c8ac",
+    "#5e5744", "#853018", "#374d21", "#5b4508", "#284467", "#583154", "#1f4e48", "#fbf6e8",
+  ]
+);
+
+THEMES.mainframe = mkTheme(
+  "Mainframe",
+  "white",
+  ['"Lucida Console", Consolas, monospace', 1.15, "block"],
+  'linear-gradient(rgba(0,20,0,0.34), rgba(0,20,0,0.5)), url("/backgrounds/mainframe.png") center / cover no-repeat, linear-gradient(180deg, #001400, #000a00)',
+  "#001400",
+  "#33ff33",
+  [
+    "#001400", "#ff6b6b", "#33ff33", "#e0e04a", "#5ad8d8", "#d88ad8", "#5affd8", "#c8e8c8",
+    "#2a7a2a", "#ff9090", "#7cff7c", "#f0f080", "#8ae8e8", "#e8aae8", "#90ffe4", "#eaffea",
+  ]
+);
+THEMES.mainframe.xterm.cursor = "#33ff33";
+
+THEMES.duck = mkTheme(
+  "Rubber Duck",
+  "black",
+  ['"Cascadia Code", "Cascadia Mono", monospace', 1.2, "block"],
+  'linear-gradient(rgba(253,244,214,0.3), rgba(253,244,214,0.42)), url("/backgrounds/duck.png") center / cover no-repeat, linear-gradient(180deg, #fdf4d6, #f4e9c2)',
+  "#fdf4d6",
+  "#453c1c",
+  [
+    "#453c1c", "#b0431f", "#4a6624", "#7d5a06", "#2f5f8f", "#77406f", "#256863", "#e0d5b0",
+    "#66593a", "#953313", "#3a521a", "#634603", "#245176", "#5f3159", "#1b524e", "#fffdf4",
+  ]
+);
+THEMES.duck.xterm.cursor = "#d99a10";
+
+// Zenburn: the classic low-contrast palette, unchanged.
+THEMES.zenburn = mkTheme(
+  "Zenburn",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"],
+  'linear-gradient(rgba(63,63,63,0.3), rgba(63,63,63,0.44)), url("/backgrounds/zenburn.png") center / cover no-repeat, linear-gradient(180deg, #3f3f3f, #363636)',
+  "#3f3f3f",
+  "#dcdccc",
+  [
+    "#3f3f3f", "#cc9393", "#7f9f7f", "#d0bf8f", "#6ca0a3", "#dc8cc3", "#93e0e3", "#dcdccc",
+    "#709080", "#dca3a3", "#bfebbf", "#f0dfaf", "#8cd0d3", "#ec93d3", "#93e0e3", "#ffffff",
+  ]
+);
+THEMES.zenburn.xterm.cursor = "#8cd0d3";
+
+THEMES.containers = mkTheme(
+  "Containers",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.15, "bar"],
+  'linear-gradient(rgba(10,40,64,0.34), rgba(10,40,64,0.5)), url("/backgrounds/containers.png") center / cover no-repeat, linear-gradient(180deg, #0a2840, #061a2a)',
+  "#0a2840",
+  "#cfe4f2",
+  [
+    "#0a2840", "#ff7f72", "#4fd08a", "#e8b45a", "#2496ed", "#a88ae8", "#5fc8dc", "#c4d8e8",
+    "#58809e", "#ff9d92", "#7ce8ac", "#f5cc80", "#5fb4ff", "#c4aaf5", "#88e0f0", "#eaf4fc",
+  ]
+);
+THEMES.containers.xterm.cursor = "#2496ed";
+
+THEMES.helm = mkTheme(
+  "Helm",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.15, "bar"],
+  'linear-gradient(rgba(12,26,62,0.34), rgba(12,26,62,0.5)), url("/backgrounds/helm.png") center / cover no-repeat, linear-gradient(180deg, #0c1a3e, #071026)',
+  "#0c1a3e",
+  "#d4dcf0",
+  [
+    "#0c1a3e", "#ff8080", "#5ad8a0", "#e8c46a", "#5a8cf5", "#ac8af0", "#5fc8e0", "#c8d4ec",
+    "#4a5c88", "#ff9e9e", "#82e8bc", "#f5d894", "#88b0ff", "#c8aaf8", "#8ae0f0", "#eef2fc",
+  ]
+);
+THEMES.helm.xterm.cursor = "#5a8cf5";
+
 // Per-theme see-through defaults. Busy or bright backdrops (dense text,
 // white UI panels, lit floors) veil themselves more so the terminal
 // stays legible; sparse dark art keeps the full 100.
@@ -1729,6 +1922,9 @@ for (const [k, v] of Object.entries({
   skicabin: 80, gameboy: 80, pipboy: 82, csgo: 85, wargames: 85,
   galactica: 85, polygon: 85, bebop: 85, akira: 88, scouter: 88,
   aperture: 88, c64: 88,
+  eink: 55, whiteboard: 58, punchcard: 60, circuit: 66, mainframe: 68,
+  panic: 70, git: 72, duck: 80, coral: 82, containers: 82, helm: 85,
+  monochrome: 88, zenburn: 95,
 })) {
   if (THEMES[k]) THEMES[k].transparency = v;
 }
@@ -3650,7 +3846,8 @@ async function renderRestoreMenu() {
 // Theme picker categories: keys not listed here (and custom themes)
 // land in their own groups, so nothing can silently vanish.
 const THEME_GROUPS: Array<[string, string[]]> = [
-  ["Classics", ["one-dark", "dracula", "nord", "gruvbox", "tokyo-night", "catppuccin", "solarized-dark", "solarized-light", "monokai", "everforest"]],
+  ["Classics", ["one-dark", "dracula", "nord", "gruvbox", "tokyo-night", "catppuccin", "solarized-dark", "solarized-light", "monokai", "everforest", "zenburn"]],
+  ["Dev & tooling", ["coral", "monochrome", "git", "circuit", "containers", "helm", "mainframe", "punchcard", "panic", "whiteboard", "eink", "duck"]],
   ["Retro hardware", ["amber-crt", "gameboy", "c64"]],
   ["Operating systems", ["dos", "penguin", "cupertino", "material", "macintosh", "chicago", "aero", "fluent"]],
   ["Film & TV", ["matrix", "bladerunner", "tron", "lcars", "dune", "umbrella", "nostromo", "wargames", "lumon", "swordfish", "hackers", "galactica"]],

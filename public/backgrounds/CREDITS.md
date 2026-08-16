@@ -64,6 +64,19 @@ Seeded GDI+ renders — re-running the script reproduces them exactly.
 - `chicago.png` — teal desktop, beveled gray window, taskbar
 - `aero.png` — blue gradient wallpaper, glass window, glass taskbar
 - `fluent.png` — flat dark, accent blue, tile grid, thin taskbar
+- `coral.png` — cream paper, clay arc ribbons, spark motif
+- `monochrome.png` — thin white lattice knot on near-black, one accent dot
+- `git.png` — commit graph: branch lanes, merges, tags, HEAD marker
+- `circuit.png` — PCB solder mask, routed gold traces, vias, ICs
+- `whiteboard.png` — marker boxes and arrows, sticky notes, eraser smudge
+- `panic.png` — red banner, stack trace, hex dump, register table
+- `eink.png` — grayscale reader page, margins, page number, progress bar
+- `punchcard.png` — card stock with punched holes and column numbering
+- `mainframe.png` — 3270 green screen: field grid, block cursor, PF legend
+- `duck.png` — rubber duck on water with ripples and bubbles
+- `zenburn.png` — soft muted bands, deliberately almost nothing
+- `containers.png` — whale carrying a stack of shipping containers
+- `helm.png` — heptagon wheel with spokes, node hexes, pod dots
 
 ## NASA imagery (public domain)
 

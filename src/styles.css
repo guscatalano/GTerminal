@@ -47,7 +47,9 @@ body,
   max-width: 520px;
   flex: none;
   flex-direction: column;
-  background: var(--sidebar);
+  /* --chrome-wash lets the window-wide background art show through the
+     chrome; JS sets it from the transparency setting (100% = solid). */
+  background: color-mix(in srgb, var(--sidebar) var(--chrome-wash, 100%), transparent);
   border-right: 1px solid var(--border);
   user-select: none;
   position: relative;
@@ -229,7 +231,7 @@ body,
   align-items: center;
   gap: 4px;
   padding: 6px 0 0 8px; /* window controls sit flush against the right edge */
-  background: var(--bar);
+  background: color-mix(in srgb, var(--bar) var(--chrome-wash, 100%), transparent);
   user-select: none;
   flex: none;
   position: relative;
