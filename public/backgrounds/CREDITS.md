@@ -23,6 +23,19 @@ Seeded GDI+ renders — re-running the script reproduces them exactly.
 - `gameboy.png` — DMG dot-matrix with 8-bit sprites
 - `ambercrt.png` — CRT test pattern, scanlines, phosphor afterglow
 - `space.png` — planet limb with sunrise sliver, ringed gas giant, nebulae, station
+- `pipboy.png` — phosphor-green console screen: mascot, gauges, radio graph
+- `nier.png` — beige menu UI: header block, chip inventory, ring gauge
+- `nostromo.png` — cold-green shipboard readout walls and semiotic icons
+- `c64.png` — blue screen in a periwinkle border, boot banner, PETSCII
+- `wargames.png` — map board with great-circle arcs and a DEFCON stack
+- `macintosh.png` — 1-bit desktop: menu bar, striped title bar, dither
+- `lumon.png` — drifting number grid, selection box, refinement bins
+- `nerv.png` — hex field, MAGI tri-link, warning band, katakana columns
+- `aperture.png` — chamber tiles, pictogram row, portal rings, hazard band
+- `sheikah.png` — glowing rune circle with triangle fringe, constellation
+- `blueprint.png` — cyanotype drafting sheet: part, dimensions, title block
+- `redacted.png` — typewritten dossier with redaction bars and stamps
+- `persona.png` — jagged star collage with halftone wedge
 
 ## NASA imagery (public domain)
 
@@ -34,3 +47,5 @@ is generally not copyrighted and may be used freely; processed here via
   NASA/ESA Hubble Space Telescope. NASA ID: `GSFC_20171208_Archive_e000256`
 - `dune.jpg` — Namib Desert sand sea near the Atlantic coast, photographed
   from the International Space Station. NASA ID: `iss073e0511487`
+- `missionctl.jpg` — Apollo 8 Mission Operations Control Room, Houston,
+  trajectory plot on the big board. NASA ID: `S69-59525`

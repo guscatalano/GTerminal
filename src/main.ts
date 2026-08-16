@@ -1143,6 +1143,171 @@ THEMES.nier = mkTheme(
   ]
 );
 
+THEMES.nostromo = mkTheme(
+  "Nostromo",
+  "white",
+  ['"Lucida Console", Consolas, monospace', 1.15, "block"],
+  'linear-gradient(rgba(4,16,10,0.4), rgba(4,16,10,0.56)), url("/backgrounds/nostromo.png") center / cover no-repeat, linear-gradient(180deg, #04100a, #020a06)',
+  "#04100a",
+  "#b8e0c4",
+  [
+    "#04100a", "#ff8272", "#4fd087", "#a8d87a", "#4fd0a0", "#7fd8b8", "#9de8cc", "#c2e8d0",
+    "#2a7a52", "#ffa090", "#72e8a8", "#c8f0a0", "#7fe0b8", "#a8f0d0", "#c8f8e0", "#e8fff2",
+  ]
+);
+THEMES.nostromo.xterm.cursor = "#4fd087";
+
+THEMES.c64 = mkTheme(
+  "Commodore 64",
+  "white",
+  ['"Lucida Console", Consolas, monospace', 1.1, "block"],
+  'linear-gradient(rgba(58,46,134,0.3), rgba(58,46,134,0.42)), url("/backgrounds/c64.png") center / cover no-repeat, linear-gradient(180deg, #3a2e86, #322874)',
+  "#3a2e86",
+  "#b8b3f0",
+  [
+    "#2a2066", "#e08a80", "#8fd076", "#d8e08a", "#8f86e0", "#c88ad0", "#8fd0d8", "#c4c0f0",
+    "#8a80d8", "#f0a89e", "#a8e890", "#e8f0a0", "#a8a0f0", "#e0a8e8", "#a8e8f0", "#eeeaff",
+  ]
+);
+
+THEMES.wargames = mkTheme(
+  "WOPR",
+  "white",
+  ["Consolas, monospace", 1.15, "block"],
+  'linear-gradient(rgba(4,7,13,0.4), rgba(4,7,13,0.56)), url("/backgrounds/wargames.png") center / cover no-repeat, linear-gradient(180deg, #04070d, #020409)',
+  "#04070d",
+  "#cfe2f8",
+  [
+    "#04070d", "#ff7f7f", "#6fe0a8", "#ffd47f", "#6ab4ff", "#b08fff", "#7fd4ff", "#c8ddf2",
+    "#3a5578", "#ff9d9d", "#95f0c0", "#ffe4a8", "#8fc8ff", "#c8aaff", "#a8e4ff", "#eaf4ff",
+  ]
+);
+THEMES.wargames.xterm.cursor = "#6ab4ff";
+
+THEMES.macintosh = mkTheme(
+  "Macintosh",
+  "black",
+  ["Consolas, monospace", 1.1, "block"],
+  'linear-gradient(rgba(244,244,238,0.3), rgba(244,244,238,0.42)), url("/backgrounds/macintosh.png") center / cover no-repeat, linear-gradient(180deg, #f4f4ee, #ecece6)',
+  "#f4f4ee",
+  "#1a1a1a",
+  [
+    "#1a1a1a", "#a03328", "#2f6b2f", "#7a5a00", "#2f4f8f", "#6f3f8f", "#22656f", "#d8d8d0",
+    "#5a5a55", "#8a2a20", "#265a26", "#665200", "#274578", "#5c3378", "#1e5560", "#ffffff",
+  ]
+);
+
+THEMES.lumon = mkTheme(
+  "Lumon",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.25, "block"],
+  'linear-gradient(rgba(6,20,35,0.38), rgba(6,20,35,0.54)), url("/backgrounds/lumon.png") center / cover no-repeat, linear-gradient(180deg, #061423, #040d18)',
+  "#061423",
+  "#a8e8e8",
+  [
+    "#061423", "#ff8291", "#5fe0b8", "#b8e8a0", "#45d8d8", "#7fc8f0", "#8ff0f0", "#c2e8ea",
+    "#2a6070", "#ffa2ae", "#85f0cc", "#d0f8b8", "#6fe8e8", "#a0d8ff", "#b8f8f8", "#eafcfc",
+  ]
+);
+THEMES.lumon.xterm.cursor = "#45d8d8";
+
+THEMES.nerv = mkTheme(
+  "NERV",
+  "white",
+  ["Consolas, monospace", 1.1, "block"],
+  'linear-gradient(rgba(12,6,4,0.4), rgba(12,6,4,0.56)), url("/backgrounds/nerv.png") center / cover no-repeat, linear-gradient(180deg, #0c0604, #070302)',
+  "#0c0604",
+  "#ffb454",
+  [
+    "#0c0604", "#ff5252", "#58e05a", "#ffd23f", "#ff8c1a", "#e08aa0", "#7fd0c0", "#f0cfa0",
+    "#7a4a20", "#ff7a7a", "#7ff080", "#ffe070", "#ffa64d", "#f0a8bc", "#a0e8d8", "#fff2dc",
+  ]
+);
+THEMES.nerv.xterm.cursor = "#ff8c1a";
+THEMES.nerv.xterm.selectionBackground = "#ff8c1a40";
+
+THEMES.aperture = mkTheme(
+  "Aperture",
+  "black",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"],
+  'linear-gradient(rgba(240,240,236,0.3), rgba(240,240,236,0.42)), url("/backgrounds/aperture.png") center / cover no-repeat, linear-gradient(180deg, #f0f0ec, #e6e6e0)',
+  "#f0f0ec",
+  "#26282a",
+  [
+    "#26282a", "#b03a2a", "#3f6b28", "#8a6000", "#2f6fc4", "#7a4098", "#25707a", "#d8d8d4",
+    "#5c5e60", "#993322", "#33591f", "#6b4b00", "#265a9e", "#623380", "#1e5a62", "#ffffff",
+  ]
+);
+
+THEMES.sheikah = mkTheme(
+  "Sheikah",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"],
+  'linear-gradient(rgba(15,22,32,0.36), rgba(15,22,32,0.52)), url("/backgrounds/sheikah.png") center / cover no-repeat, linear-gradient(180deg, #0f1620, #0a0f16)',
+  "#0f1620",
+  "#8fe8d8",
+  [
+    "#0f1620", "#ff8a7a", "#69e8c0", "#e8c87a", "#58d8c8", "#b09af0", "#7fe0f0", "#c8e8e4",
+    "#4a7276", "#ffa89a", "#8ff8d4", "#f8dc9a", "#7fe8d8", "#c8b4f8", "#a8ecf8", "#eafcf8",
+  ]
+);
+THEMES.sheikah.xterm.cursor = "#58d8c8";
+
+THEMES.blueprint = mkTheme(
+  "Blueprint",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.15, "bar"],
+  'linear-gradient(rgba(21,63,102,0.3), rgba(21,63,102,0.42)), url("/backgrounds/blueprint.png") center / cover no-repeat, linear-gradient(180deg, #153f66, #10314f)',
+  "#153f66",
+  "#eaf2fb",
+  [
+    "#0e2c48", "#ff9d8a", "#8fe0b0", "#ffd98f", "#7fb8e8", "#c0a8f0", "#8fd8e8", "#d8e8f6",
+    "#6a90b6", "#ffb8a8", "#aef0c8", "#ffe8b0", "#a0ccf0", "#d4c0f8", "#b0e8f4", "#f4f9ff",
+  ]
+);
+
+THEMES.missionctl = mkTheme(
+  "Mission Control",
+  "white",
+  ["Consolas, monospace", 1.15, "bar"],
+  'linear-gradient(rgba(10,15,26,0.35), rgba(10,15,26,0.55)), url("/backgrounds/missionctl.jpg") center / cover no-repeat, linear-gradient(180deg, #0a0f1a, #0a0f1a)',
+  "#0a0f1a",
+  "#d2e0f0",
+  [
+    "#0a0f1a", "#ff7f72", "#55e0a0", "#ffce6b", "#6ab8ff", "#c493f0", "#66d8e8", "#c8d8ea",
+    "#455a75", "#ff9d94", "#7ff0be", "#ffe094", "#90ccff", "#d8b0f8", "#90e8f4", "#ecf4fc",
+  ]
+);
+THEMES.missionctl.xterm.cursor = "#6ab8ff";
+
+THEMES.redacted = mkTheme(
+  "Redacted",
+  "black",
+  ['"Courier New", monospace', 1.25, "underline"],
+  'linear-gradient(rgba(239,236,226,0.32), rgba(239,236,226,0.44)), url("/backgrounds/redacted.png") center / cover no-repeat, linear-gradient(180deg, #efece2, #e5e1d4)',
+  "#efece2",
+  "#2c2822",
+  [
+    "#2c2822", "#a8342a", "#4a6431", "#7d5c1e", "#50617c", "#7a4a68", "#3f6b66", "#d8d4c6",
+    "#5c574c", "#8f2a22", "#3d5528", "#615015", "#3f4f68", "#663d58", "#33574f", "#fbf8f0",
+  ]
+);
+
+THEMES.persona = mkTheme(
+  "Phantom",
+  "white",
+  ['"Cascadia Code", "Cascadia Mono", monospace', 1.1, "block"],
+  'linear-gradient(rgba(13,5,8,0.4), rgba(13,5,8,0.55)), url("/backgrounds/persona.png") center / cover no-repeat, linear-gradient(180deg, #0d0508, #070204)',
+  "#0d0508",
+  "#f2e8ea",
+  [
+    "#0d0508", "#f03050", "#7fd070", "#f0c060", "#e8283c", "#e070a0", "#70c8d8", "#e0d4d8",
+    "#6a4a52", "#ff5c74", "#a0e890", "#ffd880", "#ff5064", "#f0a0c0", "#a0e0ec", "#fdf6f8",
+  ]
+);
+THEMES.persona.xterm.cursor = "#e8283c";
+THEMES.persona.xterm.selectionBackground = "#e8283c40";
+
 let themeKey = "one-dark";
 function currentTheme(): ThemeDef {
   return THEMES[themeKey] ?? THEMES["one-dark"];

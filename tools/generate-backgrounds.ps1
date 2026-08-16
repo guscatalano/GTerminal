@@ -1869,4 +1869,650 @@ foreach ($i in 0..2) {
 EdgeFade $g "top" 90 24; EdgeFade $g "bottom" 90 26; EdgeFade $g "left" 110 20; EdgeFade $g "right" 110 20
 Save $bmp $g "nier.png"
 
+function Scanlines {
+  param($g, $alphaA, $alphaB)
+  $row = 0
+  for ($y = 0; $y -lt $H; $y += 3) {
+    $pen = New-Object System.Drawing.Pen((C $(if ($row % 2 -eq 0) { $alphaA } else { $alphaB }) 0 0 0), 1)
+    $g.DrawLine($pen, 0, $y, $W, $y); $pen.Dispose()
+    $row++
+  }
+}
+function DashRow {
+  # a row of text-like dashes: x start, y, total width, color, dash height
+  param($g, $x, $y, $total, $color, $dh)
+  $cx2 = $x
+  while ($cx2 -lt $x + $total) {
+    $dw = Get-Random -Minimum 14 -Maximum 70
+    if ($cx2 + $dw -gt $x + $total) { $dw = $x + $total - $cx2 }
+    $b = New-Object System.Drawing.SolidBrush($color)
+    $g.FillRectangle($b, $cx2, $y, $dw, $dh); $b.Dispose()
+    $cx2 += $dw + (Get-Random -Minimum 8 -Maximum 22)
+  }
+}
+
+# ── Nostromo: cold green shipboard computer, dense readout walls ──
+$rng = New-Object System.Random(1979)
+Get-Random -SetSeed 1979 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 4 12 8) (C 255 2 7 4)
+Glow $g 960 500 900 (C 18 80 255 160)
+$ln = C 200 79 208 135
+$lnDim = C 95 60 170 110
+# dense readout wall, lower half, two columns
+foreach ($col in @(@(150, 620), @(1030, 740))) {
+  $rowY = 560
+  while ($rowY -lt 940) {
+    DashRow $g $col[0] $rowY $col[1] $(if ($rng.NextDouble() -lt 0.14) { $ln } else { $lnDim }) 7
+    $rowY += 22
+  }
+}
+# header band: thick rule, title dash, frame corners
+$pen = New-Object System.Drawing.Pen($ln, 4); $g.DrawLine($pen, 130, 490, 1790, 490); $pen.Dispose()
+$b = New-Object System.Drawing.SolidBrush($ln); $g.FillRectangle($b, 130, 462, 300, 14); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush($lnDim); $g.FillRectangle($b, 460, 462, 120, 14); $g.FillRectangle($b, 1560, 462, 230, 14); $b.Dispose()
+# interface frames right top: nested rectangles with tick edges
+foreach ($fr in @(@(1120, 90, 640, 300), @(1150, 120, 380, 180))) {
+  $pen = New-Object System.Drawing.Pen($(if ($fr[2] -gt 500) { $ln } else { $lnDim }), 2)
+  $g.DrawRectangle($pen, $fr[0], $fr[1], $fr[2], $fr[3]); $pen.Dispose()
+}
+for ($i = 0; $i -lt 12; $i++) {
+  $pen = New-Object System.Drawing.Pen($lnDim, 2)
+  $g.DrawLine($pen, (1120 + $i * 54), 390, (1120 + $i * 54), 400); $pen.Dispose()
+}
+DashRow $g 1170 150 320 $ln 9
+DashRow $g 1170 185 300 $lnDim 7
+DashRow $g 1170 215 330 $lnDim 7
+DashRow $g 1170 250 260 $lnDim 7
+# semiotic icon strip: triangle / circle / halved circle / bars
+$icoY = 330
+$pen = New-Object System.Drawing.Pen($ln, 3)
+$tri = New-Object 'System.Drawing.Point[]' 3
+$tri[0] = New-Object System.Drawing.Point(1600, ($icoY + 34)); $tri[1] = New-Object System.Drawing.Point(1634, ($icoY + 34)); $tri[2] = New-Object System.Drawing.Point(1617, $icoY)
+$g.DrawPolygon($pen, $tri)
+$g.DrawEllipse($pen, 1652, $icoY, 34, 34)
+$g.DrawEllipse($pen, 1704, $icoY, 34, 34); $g.FillPie((New-Object System.Drawing.SolidBrush($ln)), 1704, $icoY, 34, 34, 90, 180)
+$g.DrawRectangle($pen, 1756, $icoY, 34, 34)
+$pen.Dispose()
+Scanlines $g 30 14
+$b = New-Object System.Drawing.SolidBrush((C 9 90 255 160)); $g.FillRectangle($b, 0, 180, $W, 110); $b.Dispose()
+EdgeFade $g "top" 110 120; EdgeFade $g "bottom" 120 130; EdgeFade $g "left" 140 110; EdgeFade $g "right" 140 110
+Save $bmp $g "nostromo.png"
+
+# ── Commodore 64: blue screen, lighter border, BASIC boot, PETSCII ──
+$rng = New-Object System.Random(1982)
+Get-Random -SetSeed 1982 | Out-Null
+$bmp, $g = New-Canvas
+# border in light periwinkle, screen inset in the classic blue
+$b = New-Object System.Drawing.SolidBrush((C 255 120 105 196)); $g.FillRectangle($b, 0, 0, $W, $H); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 255 58 46 134)); $g.FillRectangle($b, 96, 78, ($W - 192), ($H - 156)); $b.Dispose()
+$lite = C 235 158 146 224
+$liteDim = C 130 158 146 224
+# boot header: centered starred banner dashes
+DashRow $g 560 130 800 $lite 12
+$b = New-Object System.Drawing.SolidBrush($liteDim); $g.FillRectangle($b, 660, 168, 600, 10); $b.Dispose()
+# READY. and block cursor
+$b = New-Object System.Drawing.SolidBrush($lite); $g.FillRectangle($b, 150, 300, 130, 13); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush($lite); $g.FillRectangle($b, 150, 336, 26, 30); $b.Dispose()
+# PETSCII pattern band along the bottom of the screen area
+$petY = 830
+for ($x = 150; $x -lt 1740; $x += 38) {
+  $kind = $rng.Next(0, 4)
+  switch ($kind) {
+    0 { $pen = New-Object System.Drawing.Pen($liteDim, 3); $g.DrawLine($pen, $x, ($petY + 28), ($x + 28), $petY); $pen.Dispose() }
+    1 { $pen = New-Object System.Drawing.Pen($liteDim, 3); $g.DrawLine($pen, $x, $petY, ($x + 28), ($petY + 28)); $pen.Dispose() }
+    2 { $b = New-Object System.Drawing.SolidBrush($liteDim); $g.FillRectangle($b, $x, $petY, 14, 14); $g.FillRectangle($b, ($x + 14), ($petY + 14), 14, 14); $b.Dispose() }
+    3 { $pen = New-Object System.Drawing.Pen($liteDim, 3); $g.DrawEllipse($pen, $x, $petY, 26, 26); $pen.Dispose() }
+  }
+}
+# faint raster shimmer on the border
+for ($y = 0; $y -lt $H; $y += 4) {
+  $pen = New-Object System.Drawing.Pen((C 14 0 0 0), 1); $g.DrawLine($pen, 0, $y, $W, $y); $pen.Dispose()
+}
+Save $bmp $g "c64.png"
+
+# ── WarGames: WOPR map board, great-circle arcs, DEFCON stack ──
+$rng = New-Object System.Random(1983)
+Get-Random -SetSeed 1983 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 4 8 14) (C 255 2 4 8)
+Glow $g 1150 520 760 (C 20 90 170 255)
+$blue = C 210 130 190 255
+$blueDim = C 80 90 150 220
+# graticule: world board grid, right two-thirds
+$gx = 620; $gy = 160; $gw = 1180; $gh = 640
+for ($i = 0; $i -le 12; $i++) {
+  $pen = New-Object System.Drawing.Pen($blueDim, 1)
+  $g.DrawLine($pen, ($gx + [int]($gw * $i / 12)), $gy, ($gx + [int]($gw * $i / 12)), ($gy + $gh)); $pen.Dispose()
+}
+for ($i = 0; $i -le 6; $i++) {
+  $pen = New-Object System.Drawing.Pen($blueDim, 1)
+  $g.DrawLine($pen, $gx, ($gy + [int]($gh * $i / 6)), ($gx + $gw), ($gy + [int]($gh * $i / 6))); $pen.Dispose()
+}
+$pen = New-Object System.Drawing.Pen($blue, 2); $g.DrawRectangle($pen, $gx, $gy, $gw, $gh); $pen.Dispose()
+# landmass hints: dot clusters
+for ($i = 0; $i -lt 900; $i++) {
+  $px = $gx + $rng.Next(30, $gw - 30); $py = $gy + $rng.Next(30, $gh - 30)
+  $inCluster = ($px -lt $gx + 420 -and $py -lt $gy + 330) -or ($px -gt $gx + 480 -and $px -lt $gx + 760 -and $py -gt $gy + 60 -and $py -lt $gy + 480) -or ($px -gt $gx + 820 -and $py -lt $gy + 400)
+  if ($inCluster -and $rng.NextDouble() -lt 0.75) {
+    $b = New-Object System.Drawing.SolidBrush((C $rng.Next(50, 120) 120 180 255))
+    $g.FillRectangle($b, $px, $py, 2, 2); $b.Dispose()
+  }
+}
+# great-circle arcs: bezier-ish parabolas between site pairs
+foreach ($arc in @(@(720, 640, 1520, 300), @(830, 300, 1620, 560), @(700, 420, 1250, 240), @(980, 700, 1680, 380))) {
+  $mx = [int](($arc[0] + $arc[2]) / 2); $my = [math]::Min($arc[1], $arc[3]) - 130
+  $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $path.AddBezier($arc[0], $arc[1], $mx, $my, $mx, $my, $arc[2], $arc[3])
+  $pen = New-Object System.Drawing.Pen((C 170 150 210 255), 2); $g.DrawPath($pen, $path); $pen.Dispose(); $path.Dispose()
+  foreach ($endp in @(@($arc[0], $arc[1]), @($arc[2], $arc[3]))) {
+    $pen = New-Object System.Drawing.Pen($blue, 2); $g.DrawEllipse($pen, ($endp[0] - 7), ($endp[1] - 7), 14, 14); $pen.Dispose()
+  }
+}
+# DEFCON stack, left
+for ($i = 0; $i -lt 5; $i++) {
+  $dy = 210 + $i * 78
+  $active = ($i -eq 2)
+  if ($active) {
+    $b = New-Object System.Drawing.SolidBrush((C 70 130 190 255)); $g.FillRectangle($b, 170, $dy, 300, 58); $b.Dispose()
+  }
+  $pen = New-Object System.Drawing.Pen($(if ($active) { $blue } else { $blueDim }), 2)
+  $g.DrawRectangle($pen, 170, $dy, 300, 58); $pen.Dispose()
+  $b = New-Object System.Drawing.SolidBrush($(if ($active) { $blue } else { $blueDim }))
+  $g.FillRectangle($b, 196, ($dy + 24), 170, 10); $b.Dispose()
+}
+# readout rows bottom
+$rowY = 880
+while ($rowY -lt 1000) {
+  DashRow $g 170 $rowY 1400 $blueDim 6
+  $rowY += 24
+}
+Scanlines $g 26 12
+EdgeFade $g "top" 110 120; EdgeFade $g "bottom" 120 130; EdgeFade $g "left" 130 110; EdgeFade $g "right" 130 110
+Save $bmp $g "wargames.png"
+
+# ── Macintosh: 1-bit desktop, dithered gray, striped title bar ──
+$rng = New-Object System.Random(1984)
+Get-Random -SetSeed 1984 | Out-Null
+$bmp, $g = New-Canvas
+$b = New-Object System.Drawing.SolidBrush((C 255 244 244 238)); $g.FillRectangle($b, 0, 0, $W, $H); $b.Dispose()
+# 50% dither desktop pattern
+for ($y = 0; $y -lt $H; $y += 2) {
+  for ($x = ($y % 4) / 2 * 2; $x -lt $W; $x += 4) {
+    $b = New-Object System.Drawing.SolidBrush((C 26 40 40 40))
+    $g.FillRectangle($b, $x, $y, 1, 1); $b.Dispose()
+  }
+}
+$ink = C 255 26 26 26
+# menu bar
+$b = New-Object System.Drawing.SolidBrush((C 255 250 250 246)); $g.FillRectangle($b, 0, 0, $W, 40); $b.Dispose()
+$pen = New-Object System.Drawing.Pen($ink, 2); $g.DrawLine($pen, 0, 40, $W, 40); $pen.Dispose()
+$mx = 40
+foreach ($mw in @(30, 64, 52, 70, 58, 90)) {
+  $b = New-Object System.Drawing.SolidBrush((C 210 26 26 26)); $g.FillRectangle($b, $mx, 15, $mw, 11); $b.Dispose()
+  $mx += $mw + 42
+}
+# window, right side: shadow, frame, striped title bar, close box
+$wx2 = 1050; $wy2 = 300; $ww2 = 680; $wh2 = 520
+$b = New-Object System.Drawing.SolidBrush((C 70 30 30 30)); $g.FillRectangle($b, ($wx2 + 8), ($wy2 + 8), $ww2, $wh2); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 255 250 250 246)); $g.FillRectangle($b, $wx2, $wy2, $ww2, $wh2); $b.Dispose()
+$pen = New-Object System.Drawing.Pen($ink, 3); $g.DrawRectangle($pen, $wx2, $wy2, $ww2, $wh2); $pen.Dispose()
+for ($ly = $wy2 + 8; $ly -lt $wy2 + 34; $ly += 5) {
+  $pen = New-Object System.Drawing.Pen((C 220 26 26 26), 2); $g.DrawLine($pen, ($wx2 + 10), $ly, ($wx2 + $ww2 - 10), $ly); $pen.Dispose()
+}
+$b = New-Object System.Drawing.SolidBrush((C 255 250 250 246)); $g.FillRectangle($b, ($wx2 + 26), ($wy2 + 6), 30, 30); $g.FillRectangle($b, ($wx2 + 250), ($wy2 + 4), 180, 34); $b.Dispose()
+$pen = New-Object System.Drawing.Pen($ink, 2); $g.DrawRectangle($pen, ($wx2 + 30), ($wy2 + 10), 22, 22); $pen.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 220 26 26 26)); $g.FillRectangle($b, ($wx2 + 268), ($wy2 + 15), 144, 12); $b.Dispose()
+# window content: doc lines
+$pen = New-Object System.Drawing.Pen($ink, 2); $g.DrawLine($pen, $wx2, ($wy2 + 42), ($wx2 + $ww2), ($wy2 + 42)); $pen.Dispose()
+$rowY = $wy2 + 80
+while ($rowY -lt $wy2 + $wh2 - 60) {
+  DashRow $g ($wx2 + 44) $rowY ($ww2 - 120) (C 190 26 26 26) 8
+  $rowY += 34
+}
+# scrollbar with dither
+for ($y = $wy2 + 44; $y -lt $wy2 + $wh2 - 2; $y += 2) {
+  for ($x = $wx2 + $ww2 - 30 + (($y % 4) / 2 * 2); $x -lt $wx2 + $ww2 - 2; $x += 4) {
+    $b = New-Object System.Drawing.SolidBrush((C 90 26 26 26)); $g.FillRectangle($b, $x, $y, 1, 1); $b.Dispose()
+  }
+}
+$pen = New-Object System.Drawing.Pen($ink, 2)
+$g.DrawLine($pen, ($wx2 + $ww2 - 32), ($wy2 + 42), ($wx2 + $ww2 - 32), ($wy2 + $wh2))
+$g.DrawRectangle($pen, ($wx2 + $ww2 - 30), ($wy2 + 150), 26, 60); $pen.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 255 250 250 246)); $g.FillRectangle($b, ($wx2 + $ww2 - 29), ($wy2 + 151), 25, 58); $b.Dispose()
+$pen = New-Object System.Drawing.Pen($ink, 2); $g.DrawRectangle($pen, ($wx2 + $ww2 - 30), ($wy2 + 150), 26, 60); $pen.Dispose()
+Save $bmp $g "macintosh.png"
+
+# ── Lumon: severed-floor terminal, drifting numbers, refinement bins ──
+$rng = New-Object System.Random(1955)
+Get-Random -SetSeed 1955 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 5 18 30) (C 255 2 9 16)
+Glow $g 960 470 900 (C 26 60 200 220)
+$cyan = C 220 130 235 235
+$cyanDim = C 90 90 190 200
+$font = New-Object System.Drawing.Font("Consolas", 17, [System.Drawing.FontStyle]::Bold)
+$fontSm = New-Object System.Drawing.Font("Consolas", 13)
+# drifting number field with per-digit jitter
+for ($row = 0; $row -lt 11; $row++) {
+  for ($col = 0; $col -lt 26; $col++) {
+    $nx = 200 + $col * 62 + $rng.Next(-8, 9)
+    $ny = 210 + $row * 58 + $rng.Next(-10, 11)
+    $alpha = $rng.Next(35, 130)
+    $b = New-Object System.Drawing.SolidBrush((C $alpha 130 235 235))
+    $g.DrawString([string]$rng.Next(0, 10), $(if ($rng.NextDouble() -lt 0.2) { $font } else { $fontSm }), $b, $nx, $ny); $b.Dispose()
+  }
+}
+# one scary cluster: brighter digits inside a selection box
+$selX = 1210; $selY = 430
+for ($r2 = 0; $r2 -lt 3; $r2++) {
+  for ($c2 = 0; $c2 -lt 4; $c2++) {
+    $b = New-Object System.Drawing.SolidBrush($cyan)
+    $g.DrawString([string]$rng.Next(0, 10), $font, $b, ($selX + $c2 * 46), ($selY + $r2 * 44)); $b.Dispose()
+  }
+}
+$pen = New-Object System.Drawing.Pen($cyan, 2); $g.DrawRectangle($pen, ($selX - 16), ($selY - 12), 210, 156); $pen.Dispose()
+Glow $g ($selX + 90) ($selY + 66) 130 (C 60 130 235 235)
+# header rule with oval badge
+$pen = New-Object System.Drawing.Pen($cyanDim, 2); $g.DrawLine($pen, 160, 150, 1760, 150); $pen.Dispose()
+$pen = New-Object System.Drawing.Pen($cyan, 2); $g.DrawEllipse($pen, 1600, 100, 130, 40); $pen.Dispose()
+$b = New-Object System.Drawing.SolidBrush($cyanDim); $g.FillRectangle($b, 1626, 116, 78, 8); $b.Dispose()
+DashRow $g 160 110 320 $cyanDim 9
+# refinement bins along the bottom: five boxes with fill bars
+for ($i = 0; $i -lt 5; $i++) {
+  $bx = 340 + $i * 260
+  $pen = New-Object System.Drawing.Pen($cyan, 2); $g.DrawRectangle($pen, $bx, 900, 180, 64); $pen.Dispose()
+  $b = New-Object System.Drawing.SolidBrush($cyanDim); $g.FillRectangle($b, ($bx + 14), 914, 60, 9); $b.Dispose()
+  $pen = New-Object System.Drawing.Pen($cyanDim, 1); $g.DrawRectangle($pen, ($bx + 14), 934, 152, 16); $pen.Dispose()
+  $b = New-Object System.Drawing.SolidBrush($cyan); $g.FillRectangle($b, ($bx + 16), 936, ([int](148 * $rng.NextDouble())), 13); $b.Dispose()
+}
+$font.Dispose(); $fontSm.Dispose()
+Scanlines $g 28 12
+$b = New-Object System.Drawing.SolidBrush((C 8 90 220 235)); $g.FillRectangle($b, 0, 300, $W, 100); $b.Dispose()
+EdgeFade $g "top" 110 130; EdgeFade $g "bottom" 110 130; EdgeFade $g "left" 140 120; EdgeFade $g "right" 140 120
+Save $bmp $g "lumon.png"
+
+# ── NERV: hex field, MAGI tri-link, warning band, katakana column ──
+$rng = New-Object System.Random(1997)
+Get-Random -SetSeed 1997 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 12 6 4) (C 255 5 2 2)
+Glow $g 1250 520 700 (C 26 255 120 20)
+$org = C 225 255 150 40
+$orgDim = C 95 220 120 30
+$grn = C 200 90 230 95
+# hex grid patch, right-center
+$hexR = 46
+for ($row = 0; $row -lt 8; $row++) {
+  for ($col = 0; $col -lt 9; $col++) {
+    $cx3 = 1030 + $col * ($hexR * 1.74) + $(if ($row % 2 -eq 1) { $hexR * 0.87 } else { 0 })
+    $cy3 = 240 + $row * ($hexR * 1.5)
+    if ($rng.NextDouble() -lt 0.72) {
+      $pts = New-Object 'System.Drawing.Point[]' 6
+      for ($k = 0; $k -lt 6; $k++) {
+        $ang = ($k * 60 + 30) * [math]::PI / 180
+        $pts[$k] = New-Object System.Drawing.Point([int]($cx3 + $hexR * 0.92 * [math]::Cos($ang)), [int]($cy3 + $hexR * 0.92 * [math]::Sin($ang)))
+      }
+      $pen = New-Object System.Drawing.Pen((C $rng.Next(28, 90) 235 130 30), 2)
+      $g.DrawPolygon($pen, $pts); $pen.Dispose()
+      if ($rng.NextDouble() -lt 0.12) {
+        $b = New-Object System.Drawing.SolidBrush((C 55 255 150 40)); $g.FillPolygon($b, $pts); $b.Dispose()
+      }
+    }
+  }
+}
+# MAGI tri-panel: three boxes linked to a center node
+$nodes = @(@(430, 620), @(700, 760), @(430, 900))
+$center = @(620, 760)
+foreach ($nd in $nodes) {
+  $pen = New-Object System.Drawing.Pen($grn, 2)
+  $g.DrawLine($pen, ($nd[0] + 70), ($nd[1] + 5), $center[0], $center[1]); $pen.Dispose()
+}
+foreach ($nd in $nodes) {
+  $b = New-Object System.Drawing.SolidBrush((C 235 8 4 3)); $g.FillRectangle($b, ($nd[0] - 80), ($nd[1] - 28), 220, 62); $b.Dispose()
+  $pen = New-Object System.Drawing.Pen($grn, 2); $g.DrawRectangle($pen, ($nd[0] - 80), ($nd[1] - 28), 220, 62); $pen.Dispose()
+  $b = New-Object System.Drawing.SolidBrush((C 170 90 230 95)); $g.FillRectangle($b, ($nd[0] - 56), ($nd[1] - 6), 130, 10); $b.Dispose()
+}
+$b = New-Object System.Drawing.SolidBrush($grn); $g.FillEllipse($b, ($center[0] - 10), ($center[1] - 10), 20, 20); $b.Dispose()
+# warning band top: diagonal stripes in a framed strip
+$bandY = 84
+$pen = New-Object System.Drawing.Pen($org, 3)
+$g.DrawRectangle($pen, 1060, $bandY, 700, 54); $pen.Dispose()
+$clip = New-Object System.Drawing.Rectangle(1062, ($bandY + 2), 697, 51)
+$g.SetClip($clip)
+for ($x = 1020; $x -lt 1800; $x += 44) {
+  $b = New-Object System.Drawing.SolidBrush((C 200 255 150 40))
+  $pts2 = New-Object 'System.Drawing.Point[]' 4
+  $pts2[0] = New-Object System.Drawing.Point($x, ($bandY + 56))
+  $pts2[1] = New-Object System.Drawing.Point(($x + 22), ($bandY + 56))
+  $pts2[2] = New-Object System.Drawing.Point(($x + 50), $bandY)
+  $pts2[3] = New-Object System.Drawing.Point(($x + 28), $bandY)
+  $g.FillPolygon($b, $pts2); $b.Dispose()
+}
+$g.ResetClip()
+# katakana columns, far right, static matrix-like but orange
+$font = New-Object System.Drawing.Font("Consolas", 15, [System.Drawing.FontStyle]::Bold)
+foreach ($colX in @(1830, 1868)) {
+  $colY = 180
+  while ($colY -lt 950) {
+    $ch = [char](0x30A0 + $rng.Next(0, 96))
+    $b = New-Object System.Drawing.SolidBrush((C $rng.Next(50, 140) 255 150 40))
+    $g.DrawString($ch, $font, $b, $colX, $colY); $b.Dispose()
+    $colY += 34
+  }
+}
+$font.Dispose()
+# readout dashes bottom right
+$rowY = 950
+DashRow $g 1060 $rowY 700 $orgDim 7
+DashRow $g 1060 ($rowY + 26) 640 $orgDim 7
+EdgeFade $g "top" 100 130; EdgeFade $g "bottom" 110 140; EdgeFade $g "left" 130 120; EdgeFade $g "right" 90 90
+Save $bmp $g "nerv.png"
+
+# ── Aperture: clinical white chamber, pictogram tiles, portal dots ──
+$rng = New-Object System.Random(2007)
+Get-Random -SetSeed 2007 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 242 242 238) (C 255 228 228 222)
+$ink = C 255 48 50 52
+$inkMid = C 120 48 50 52
+# chamber wall: big rounded panel tiles, faint
+for ($row = 0; $row -lt 4; $row++) {
+  for ($col = 0; $col -lt 7; $col++) {
+    $tx = 60 + $col * 268; $ty = 60 + $row * 252
+    $pen = New-Object System.Drawing.Pen((C 26 48 50 52), 2)
+    $g.DrawRectangle($pen, $tx, $ty, 248, 232); $pen.Dispose()
+  }
+}
+# pictogram tile row, right-center: outlined squares with crude glyphs
+$py2 = 430
+foreach ($i in 0..3) {
+  $px2 = 1180 + $i * 170
+  $pen = New-Object System.Drawing.Pen($ink, 3); $g.DrawRectangle($pen, $px2, $py2, 130, 130); $pen.Dispose()
+  switch ($i) {
+    0 { # falling figure: dot head + slash body
+      $b = New-Object System.Drawing.SolidBrush($ink); $g.FillEllipse($b, ($px2 + 44), ($py2 + 26), 20, 20); $b.Dispose()
+      $pen = New-Object System.Drawing.Pen($ink, 8); $g.DrawLine($pen, ($px2 + 56), ($py2 + 50), ($px2 + 78), ($py2 + 100)); $pen.Dispose()
+    }
+    1 { # cube on hatched shelf
+      $pen = New-Object System.Drawing.Pen($ink, 5); $g.DrawRectangle($pen, ($px2 + 38), ($py2 + 36), 54, 54); $pen.Dispose()
+      $pen = New-Object System.Drawing.Pen($inkMid, 3); $g.DrawLine($pen, ($px2 + 20), ($py2 + 104), ($px2 + 110), ($py2 + 104)); $pen.Dispose()
+    }
+    2 { # liquid: three arcs
+      $pen = New-Object System.Drawing.Pen($ink, 4)
+      foreach ($ay in @(46, 66, 86)) { $g.DrawArc($pen, ($px2 + 30), ($py2 + $ay), 70, 24, 0, 180) }
+      $pen.Dispose()
+    }
+    3 { # hazard triangle
+      $pen = New-Object System.Drawing.Pen($ink, 5)
+      $tri = New-Object 'System.Drawing.Point[]' 3
+      $tri[0] = New-Object System.Drawing.Point(($px2 + 65), ($py2 + 26))
+      $tri[1] = New-Object System.Drawing.Point(($px2 + 104), ($py2 + 100))
+      $tri[2] = New-Object System.Drawing.Point(($px2 + 26), ($py2 + 100))
+      $g.DrawPolygon($pen, $tri); $pen.Dispose()
+      $b = New-Object System.Drawing.SolidBrush($ink); $g.FillRectangle($b, ($px2 + 61), ($py2 + 52), 8, 26); $g.FillRectangle($b, ($px2 + 61), ($py2 + 86), 8, 8); $b.Dispose()
+    }
+  }
+}
+# portal dot pair: blue and orange ellipse outlines with glows
+Glow $g 1320 800 120 (C 70 61 140 232)
+Glow $g 1620 800 120 (C 70 255 127 39)
+$pen = New-Object System.Drawing.Pen((C 235 45 120 220), 7); $g.DrawEllipse($pen, 1270, 730, 100, 150); $pen.Dispose()
+$pen = New-Object System.Drawing.Pen((C 235 240 110 30), 7); $g.DrawEllipse($pen, 1570, 730, 100, 150); $pen.Dispose()
+# hazard stripe band along the bottom
+$clip = New-Object System.Drawing.Rectangle(0, 1006, $W, 40)
+$g.SetClip($clip)
+for ($x = -60; $x -lt $W + 60; $x += 56) {
+  $b = New-Object System.Drawing.SolidBrush((C 150 48 50 52))
+  $pts = New-Object 'System.Drawing.Point[]' 4
+  $pts[0] = New-Object System.Drawing.Point($x, 1046); $pts[1] = New-Object System.Drawing.Point(($x + 26), 1046)
+  $pts[2] = New-Object System.Drawing.Point(($x + 56), 1006); $pts[3] = New-Object System.Drawing.Point(($x + 30), 1006)
+  $g.FillPolygon($b, $pts); $b.Dispose()
+}
+$g.ResetClip()
+Save $bmp $g "aperture.png"
+
+# ── Sheikah: slate stone, glowing rune circle, constellation ──
+$rng = New-Object System.Random(2017)
+Get-Random -SetSeed 20170 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 17 25 35) (C 255 9 14 21)
+# stone noise
+for ($i = 0; $i -lt 2600; $i++) {
+  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(6, 16) 140 170 190))
+  $g.FillRectangle($b, $rng.Next(0, $W), $rng.Next(0, $H), 1, 1); $b.Dispose()
+}
+$teal = C 225 105 232 214
+$tealDim = C 90 70 180 165
+$cx = 1360; $cy = 620
+Glow $g $cx $cy 420 (C 40 60 220 200)
+# concentric circles
+foreach ($rr in @(280, 236, 150, 96)) {
+  $pen = New-Object System.Drawing.Pen($(if ($rr -eq 280 -or $rr -eq 96) { $teal } else { $tealDim }), $(if ($rr -eq 280) { 4 } else { 2 }))
+  $g.DrawEllipse($pen, ($cx - $rr), ($cy - $rr), (2 * $rr), (2 * $rr)); $pen.Dispose()
+}
+# triangle fringe pointing outward around the outer ring
+for ($i = 0; $i -lt 18; $i++) {
+  $ang = ($i / 18.0) * 2 * [math]::PI
+  $x1 = $cx + 292 * [math]::Cos($ang); $y1 = $cy + 292 * [math]::Sin($ang)
+  $x2 = $cx + 330 * [math]::Cos($ang + 0.06); $y2 = $cy + 330 * [math]::Sin($ang + 0.06)
+  $x3 = $cx + 292 * [math]::Cos($ang + 0.12); $y3 = $cy + 292 * [math]::Sin($ang + 0.12)
+  $pts = New-Object 'System.Drawing.Point[]' 3
+  $pts[0] = New-Object System.Drawing.Point([int]$x1, [int]$y1)
+  $pts[1] = New-Object System.Drawing.Point([int]$x2, [int]$y2)
+  $pts[2] = New-Object System.Drawing.Point([int]$x3, [int]$y3)
+  $b = New-Object System.Drawing.SolidBrush($(if ($i % 3 -eq 0) { $teal } else { $tealDim }))
+  $g.FillPolygon($b, $pts); $b.Dispose()
+}
+# radial ticks between rings
+for ($i = 0; $i -lt 36; $i++) {
+  $ang = ($i / 36.0) * 2 * [math]::PI
+  $x1 = $cx + 160 * [math]::Cos($ang); $y1 = $cy + 160 * [math]::Sin($ang)
+  $x2 = $cx + 176 * [math]::Cos($ang); $y2 = $cy + 176 * [math]::Sin($ang)
+  $pen = New-Object System.Drawing.Pen($tealDim, 2)
+  $g.DrawLine($pen, [int]$x1, [int]$y1, [int]$x2, [int]$y2); $pen.Dispose()
+}
+# teardrop core: circle + triangle tail, glowing
+Glow $g $cx $cy 90 (C 90 105 232 214)
+$b = New-Object System.Drawing.SolidBrush($teal); $g.FillEllipse($b, ($cx - 34), ($cy - 20), 68, 68); $b.Dispose()
+$tri2 = New-Object 'System.Drawing.Point[]' 3
+$tri2[0] = New-Object System.Drawing.Point(($cx - 30), ($cy + 6))
+$tri2[1] = New-Object System.Drawing.Point(($cx + 30), ($cy + 6))
+$tri2[2] = New-Object System.Drawing.Point($cx, ($cy - 66))
+$b = New-Object System.Drawing.SolidBrush($teal); $g.FillPolygon($b, $tri2); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 255 10 16 24)); $g.FillEllipse($b, ($cx - 14), ($cy + 2), 28, 28); $b.Dispose()
+# constellation, upper left of terminal-safe zone edge
+$stars = @(@(330, 700), @(430, 640), @(560, 690), @(640, 610), @(760, 660), @(700, 780))
+foreach ($s in $stars) {
+  $b = New-Object System.Drawing.SolidBrush($teal); $g.FillEllipse($b, ($s[0] - 4), ($s[1] - 4), 8, 8); $b.Dispose()
+  Glow $g $s[0] $s[1] 26 (C 70 105 232 214)
+}
+for ($i = 0; $i -lt $stars.Count - 1; $i++) {
+  $pen = New-Object System.Drawing.Pen($tealDim, 1)
+  $g.DrawLine($pen, $stars[$i][0], $stars[$i][1], $stars[$i + 1][0], $stars[$i + 1][1]); $pen.Dispose()
+}
+EdgeFade $g "top" 120 110; EdgeFade $g "bottom" 130 130; EdgeFade $g "left" 150 110; EdgeFade $g "right" 120 100
+Save $bmp $g "sheikah.png"
+
+# ── Blueprint: cyanotype drafting sheet ──
+$rng = New-Object System.Random(1918)
+Get-Random -SetSeed 1918 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 21 63 102) (C 255 14 47 79)
+$wt = C 225 235 244 252
+$wtMid = C 110 210 228 246
+$wtDim = C 45 190 214 240
+# drafting grid: minor + major
+for ($x = 0; $x -lt $W; $x += 32) {
+  $pen = New-Object System.Drawing.Pen((C 18 220 235 250), 1); $g.DrawLine($pen, $x, 0, $x, $H); $pen.Dispose()
+}
+for ($y = 0; $y -lt $H; $y += 32) {
+  $pen = New-Object System.Drawing.Pen((C 18 220 235 250), 1); $g.DrawLine($pen, 0, $y, $W, $y); $pen.Dispose()
+}
+for ($x = 0; $x -lt $W; $x += 160) {
+  $pen = New-Object System.Drawing.Pen((C 34 220 235 250), 1); $g.DrawLine($pen, $x, 0, $x, $H); $pen.Dispose()
+}
+for ($y = 0; $y -lt $H; $y += 160) {
+  $pen = New-Object System.Drawing.Pen((C 34 220 235 250), 1); $g.DrawLine($pen, 0, $y, $W, $y); $pen.Dispose()
+}
+# part drawing: bracket plate with bolt holes + centerlines
+$px3 = 1080; $py3 = 420; $pw3 = 560; $ph3 = 320
+$pen = New-Object System.Drawing.Pen($wt, 3); $g.DrawRectangle($pen, $px3, $py3, $pw3, $ph3); $pen.Dispose()
+foreach ($hole in @(@(($px3 + 110), ($py3 + 90)), @(($px3 + $pw3 - 110), ($py3 + 90)), @(($px3 + 110), ($py3 + $ph3 - 90)), @(($px3 + $pw3 - 110), ($py3 + $ph3 - 90)))) {
+  $pen = New-Object System.Drawing.Pen($wt, 2)
+  $g.DrawEllipse($pen, ($hole[0] - 30), ($hole[1] - 30), 60, 60)
+  $g.DrawEllipse($pen, ($hole[0] - 12), ($hole[1] - 12), 24, 24); $pen.Dispose()
+  # dash-dot centerlines through the hole
+  $pen = New-Object System.Drawing.Pen($wtMid, 1)
+  $pen.DashStyle = [System.Drawing.Drawing2D.DashStyle]::DashDot
+  $g.DrawLine($pen, ($hole[0] - 48), $hole[1], ($hole[0] + 48), $hole[1])
+  $g.DrawLine($pen, $hole[0], ($hole[1] - 48), $hole[0], ($hole[1] + 48)); $pen.Dispose()
+}
+$pen = New-Object System.Drawing.Pen($wtMid, 2); $g.DrawEllipse($pen, ($px3 + $pw3 / 2 - 70), ($py3 + $ph3 / 2 - 70), 140, 140); $pen.Dispose()
+# section hatch, lower-left corner of the part
+$clip = New-Object System.Drawing.Rectangle($px3, ($py3 + $ph3 - 90), 150, 90)
+$g.SetClip($clip)
+for ($x = $px3 - 90; $x -lt $px3 + 160; $x += 14) {
+  $pen = New-Object System.Drawing.Pen($wtDim, 1); $g.DrawLine($pen, $x, ($py3 + $ph3), ($x + 90), ($py3 + $ph3 - 90)); $pen.Dispose()
+}
+$g.ResetClip()
+# dimension lines: extension + arrows + number dash
+$dimY = $py3 + $ph3 + 56
+$pen = New-Object System.Drawing.Pen($wtMid, 1)
+$g.DrawLine($pen, $px3, ($py3 + $ph3 + 10), $px3, ($dimY + 10))
+$g.DrawLine($pen, ($px3 + $pw3), ($py3 + $ph3 + 10), ($px3 + $pw3), ($dimY + 10))
+$g.DrawLine($pen, $px3, $dimY, ($px3 + $pw3), $dimY); $pen.Dispose()
+foreach ($arr in @(@($px3, 1), @(($px3 + $pw3), -1))) {
+  $pts = New-Object 'System.Drawing.Point[]' 3
+  $pts[0] = New-Object System.Drawing.Point($arr[0], $dimY)
+  $pts[1] = New-Object System.Drawing.Point(($arr[0] + 14 * $arr[1]), ($dimY - 5))
+  $pts[2] = New-Object System.Drawing.Point(($arr[0] + 14 * $arr[1]), ($dimY + 5))
+  $b = New-Object System.Drawing.SolidBrush($wtMid); $g.FillPolygon($b, $pts); $b.Dispose()
+}
+$b = New-Object System.Drawing.SolidBrush($wt); $g.FillRectangle($b, ($px3 + $pw3 / 2 - 40), ($dimY - 22), 80, 10); $b.Dispose()
+# vertical dimension on the left of the part
+$dimX = $px3 - 56
+$pen = New-Object System.Drawing.Pen($wtMid, 1)
+$g.DrawLine($pen, ($px3 - 10), $py3, ($dimX - 10), $py3)
+$g.DrawLine($pen, ($px3 - 10), ($py3 + $ph3), ($dimX - 10), ($py3 + $ph3))
+$g.DrawLine($pen, $dimX, $py3, $dimX, ($py3 + $ph3)); $pen.Dispose()
+$b = New-Object System.Drawing.SolidBrush($wt); $g.FillRectangle($b, ($dimX - 34), ($py3 + $ph3 / 2 - 5), 10, 60); $b.Dispose()
+# title block, bottom right
+$tbX = 1420; $tbY = 880
+$pen = New-Object System.Drawing.Pen($wt, 3); $g.DrawRectangle($pen, $tbX, $tbY, 400, 150); $pen.Dispose()
+$pen = New-Object System.Drawing.Pen($wtMid, 1)
+$g.DrawLine($pen, $tbX, ($tbY + 50), ($tbX + 400), ($tbY + 50))
+$g.DrawLine($pen, $tbX, ($tbY + 100), ($tbX + 400), ($tbY + 100))
+$g.DrawLine($pen, ($tbX + 150), $tbY, ($tbX + 150), ($tbY + 150)); $pen.Dispose()
+foreach ($rowOff in @(18, 68, 118)) {
+  DashRow $g ($tbX + 20) ($tbY + $rowOff) 110 $wtMid 8
+  DashRow $g ($tbX + 170) ($tbY + $rowOff) 200 $wtDim 8
+}
+Save $bmp $g "blueprint.png"
+
+# ── Redacted: typewritten dossier with black bars and stamps ──
+$rng = New-Object System.Random(1963)
+Get-Random -SetSeed 1963 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 239 236 226) (C 255 228 224 210)
+for ($i = 0; $i -lt 2400; $i++) {
+  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(5, 12) 70 62 48))
+  $g.FillRectangle($b, $rng.Next(0, $W), $rng.Next(0, $H), 1, 1); $b.Dispose()
+}
+$ink = C 230 44 40 34
+$inkDim = C 150 44 40 34
+$redStamp = C 200 168 52 40
+# classification banner top center + bottom center
+foreach ($by in @(56, 990)) {
+  $pen = New-Object System.Drawing.Pen($redStamp, 3); $g.DrawRectangle($pen, 810, $by, 300, 40); $pen.Dispose()
+  $b = New-Object System.Drawing.SolidBrush($redStamp); $g.FillRectangle($b, 840, ($by + 15), 240, 11); $b.Dispose()
+}
+# typewritten paragraphs with redaction bars, right-hand page area
+$rowY = 200
+while ($rowY -lt 920) {
+  $rowX = 1060
+  $total = 720
+  if ($rng.NextDouble() -lt 0.16) { $rowY += 26 }   # paragraph breaks
+  while ($rowX -lt 1060 + $total) {
+    $dw = $rng.Next(24, 90)
+    if ($rowX + $dw -gt 1060 + $total) { $dw = 1060 + $total - $rowX }
+    if ($rng.NextDouble() -lt 0.22) {
+      $b = New-Object System.Drawing.SolidBrush((C 245 20 18 16))
+      $g.FillRectangle($b, $rowX, ($rowY - 4), ($dw + 14), 18); $b.Dispose()
+      $rowX += $dw + 26
+    } else {
+      $b = New-Object System.Drawing.SolidBrush($(if ($rng.NextDouble() -lt 0.12) { $ink } else { $inkDim }))
+      $g.FillRectangle($b, $rowX, $rowY, $dw, 9); $b.Dispose()
+      $rowX += $dw + $rng.Next(10, 20)
+    }
+  }
+  $rowY += 30
+}
+# rotated oval stamp across the text
+$g.TranslateTransform(1430, 520)
+$g.RotateTransform(-14)
+$pen = New-Object System.Drawing.Pen($redStamp, 4); $g.DrawEllipse($pen, -190, -70, 380, 140); $pen.Dispose()
+$pen = New-Object System.Drawing.Pen($redStamp, 2); $g.DrawEllipse($pen, -170, -52, 340, 104); $pen.Dispose()
+$b = New-Object System.Drawing.SolidBrush($redStamp); $g.FillRectangle($b, -120, -8, 240, 14); $b.Dispose()
+$g.ResetTransform()
+# paperclip, top-left of the page area
+$pen = New-Object System.Drawing.Pen((C 180 120 116 104), 6)
+$g.DrawArc($pen, 1006, 130, 44, 46, 180, 180)
+$g.DrawLine($pen, 1006, 152, 1006, 250)
+$g.DrawLine($pen, 1050, 152, 1050, 224)
+$g.DrawArc($pen, 1014, 224, 36, 40, 0, 180)
+$pen.Dispose()
+# punched holes on the left edge of the page area
+foreach ($hy in @(300, 640)) {
+  $b = New-Object System.Drawing.SolidBrush((C 60 70 62 48)); $g.FillEllipse($b, 1002, $hy, 26, 26); $b.Dispose()
+  $pen = New-Object System.Drawing.Pen($inkDim, 2); $g.DrawEllipse($pen, 1002, $hy, 26, 26); $pen.Dispose()
+}
+EdgeFade $g "top" 80 22; EdgeFade $g "bottom" 80 26; EdgeFade $g "left" 100 18; EdgeFade $g "right" 100 20
+Save $bmp $g "redacted.png"
+
+# ── Persona-red: jagged star collage, halftone, slashes ──
+$rng = New-Object System.Random(2016)
+Get-Random -SetSeed 2016 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 14 5 8) (C 255 6 2 3)
+$red = C 255 226 32 54
+$cx = 1330; $cy = 600
+# jagged star: irregular radii, red
+function JaggedStar {
+  param($g, $cx4, $cy4, $rMin, $rMax, $points, $color, $seed)
+  $r2 = New-Object System.Random($seed)
+  $pts = New-Object 'System.Drawing.Point[]' ($points * 2)
+  for ($k = 0; $k -lt $points * 2; $k++) {
+    $ang = ($k / ($points * 2.0)) * 2 * [math]::PI + $r2.NextDouble() * 0.09
+    $rr = if ($k % 2 -eq 0) { $rMax * (0.82 + 0.36 * $r2.NextDouble()) } else { $rMin * (0.7 + 0.5 * $r2.NextDouble()) }
+    $pts[$k] = New-Object System.Drawing.Point([int]($cx4 + $rr * [math]::Cos($ang)), [int]($cy4 + $rr * [math]::Sin($ang)))
+  }
+  $b = New-Object System.Drawing.SolidBrush($color); $g.FillPolygon($b, $pts); $b.Dispose()
+}
+JaggedStar $g $cx $cy 210 430 14 (C 255 150 16 30) 7
+JaggedStar $g $cx $cy 190 390 14 $red 8
+JaggedStar $g ($cx - 20) ($cy + 10) 120 250 12 (C 255 246 240 238) 9
+JaggedStar $g ($cx - 24) ($cy + 14) 90 190 12 (C 255 16 6 8) 10
+# black slashes across the star
+foreach ($sl in @(@(880, 240, 1750, 860), @(950, 900, 1700, 300))) {
+  $pen = New-Object System.Drawing.Pen((C 255 8 3 4), 26)
+  $g.DrawLine($pen, $sl[0], $sl[1], $sl[2], $sl[3]); $pen.Dispose()
+}
+# halftone dot wedge bottom-left
+for ($row = 0; $row -lt 12; $row++) {
+  for ($col = 0; $col -lt 26; $col++) {
+    $dx = 140 + $col * 30; $dy = 760 + $row * 26
+    $sz = [math]::Max(1, 7 - [int](($col + $row) / 5))
+    if ($sz -gt 0) {
+      $b = New-Object System.Drawing.SolidBrush((C 200 226 32 54))
+      $g.FillEllipse($b, $dx, $dy, $sz, $sz); $b.Dispose()
+    }
+  }
+}
+# white tag star top right with red core
+JaggedStar $g 1710 170 55 110 10 (C 255 246 240 238) 11
+JaggedStar $g 1712 172 30 62 10 $red 12
+EdgeFade $g "top" 90 120; EdgeFade $g "bottom" 110 140; EdgeFade $g "left" 130 120; EdgeFade $g "right" 90 100
+Save $bmp $g "persona.png"
+
 "done -> $out"

@@ -15,7 +15,7 @@ A lightweight terminal for Windows with tmux-style session persistence: closing 
   </tr>
 </table>
 
-Every theme is a complete look — 27 of them, from clean classics to full scene art. Browse the whole set in the [theme gallery](store-assets/theme-pool).
+Every theme is a complete look — 39 of them, from clean classics to full scene art. Browse the whole set in the [theme gallery](store-assets/theme-pool).
 
 ## How it works
 
@@ -57,7 +57,7 @@ Tabs shrink browser-style as they multiply; overflow collapses into a `+N` menu.
 
 `cursor_style` is `bar` (default, Windows Terminal-like), `block`, or `underline`; `cursor_blink` defaults to true. Cursor settings apply to new windows/tabs.
 
-**Settings** (⚙ button): theme, font family/size, line height, cursor style/blink, and the undo window — applied live and saved to `config.json`. Themes are a whole look, not just colors — 27 of them, each carrying its own font, line spacing, cursor personality, and backdrop art, individually overridable. The whole chrome (tab bar, sidebar, menus) recolors along with the terminal, and every theme is contrast-audited.
+**Settings** (⚙ button): theme, font family/size, line height, cursor style/blink, and the undo window — applied live and saved to `config.json`. Themes are a whole look, not just colors — 39 of them, each carrying its own font, line spacing, cursor personality, and backdrop art, individually overridable. The whole chrome (tab bar, sidebar, menus) recolors along with the terminal, and every theme is contrast-audited.
 
 Sessions in their grace window get a dedicated **Closing soon** sidebar section with a live m:ss countdown; click to restore, × (twice) to kill immediately.
 

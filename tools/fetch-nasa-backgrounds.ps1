@@ -55,3 +55,5 @@ function Process-Image {
 Process-Image (Get-NasaImage "GSFC_20171208_Archive_e000256") "hyperspace.jpg" 0.5 0.4 0.52
 # Namib Desert sand sea from the ISS, zoomed into the orange dune field
 Process-Image (Get-NasaImage "iss073e0511487") "dune.jpg" 1.0 0.3 0.45 0.55
+# Apollo 8 Mission Operations Control Room, trajectory plot on the big board
+Process-Image (Get-NasaImage "S69-59525") "missionctl.jpg" 0.5 0.5 0.55
