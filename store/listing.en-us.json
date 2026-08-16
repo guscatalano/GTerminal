@@ -32,7 +32,7 @@
     "Lightweight Tauri + xterm.js WebGL stack — far lighter than Electron",
     "Typing latency regression-tested: p50 echo latency around 1-2 ms"
   ],
-  "ReleaseNotes": "0.2.8 — The theme drop: 23 new themes bring the total to 50, including Nostromo, Commodore 64, WOPR, Macintosh, Lumon, NERV, Aperture, Sheikah, Blueprint, Mission Control (a real Apollo 8 control-room photo), Redacted, Phantom, Akira, Bebop, Scouter, Backrooms, Swordfish, Hackers, Galactica, Ski Cabin, Rave, Datacenter, and Sakura. The theme picker is organized into categories and keeps keyboard focus, so Up/Down previews themes live. Settings got a UX pass: native file and folder pickers, full-width layout, rows that appear only when relevant, and a background transparency setting that also drives the settings and history pages.",
+  "ReleaseNotes": "0.2.9 — Ten more themes, bringing the total to 60: Pride, Valorant, Counter-Strike, and Dead by Daylight join the Games group; a new Consoles group adds Library, Blade, Cartridge, and Polygon; and Nightclub and Speakeasy join Places & vibes. Every theme ships its own generated backdrop art, font, spacing, and cursor personality, and all 60 are contrast-audited. The categorized theme picker keeps keyboard focus, so Up/Down previews themes live.",
   "CopyrightAndTrademarkInfo": "© 2026 Gus Catalano",
   "LicenseTerms": "",
   "DevStudio": "Gus Catalano",
