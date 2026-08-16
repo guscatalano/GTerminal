@@ -1482,10 +1482,17 @@ input.set-control {
   min-height: 0;
 }
 
+/* The gutter around the terminal holds no cells, so it would show the
+   background art at full strength while the cells behind text are
+   veiled — a bright strip left of column 0. It's a border, not padding,
+   so --cell-veil (the cells' own veil, set from JS) paints exactly that
+   gutter; a background here would instead double-veil the cells. */
 .pane {
   position: absolute;
   inset: 0;
-  padding: 8px 4px 4px 10px;
+  border-style: solid;
+  border-width: 8px 4px 4px 10px;
+  border-color: var(--cell-veil, transparent);
   display: none;
 }
 

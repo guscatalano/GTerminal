@@ -175,6 +175,14 @@ function applyBackground() {
   const transp = effTransparency();
   const washPct = Math.round(55 + (100 - transp) * 0.45);
   document.documentElement.style.setProperty("--wash-pct", `${washPct}%`);
+  // The pane's padding has no terminal cells in it, so without this it
+  // shows the art unveiled — a bright strip left of column 0. Paint the
+  // padding with exactly the veil the cells carry.
+  const veilAlpha = bgActive() ? (100 - transp) / 100 : 0;
+  document.documentElement.style.setProperty(
+    "--cell-veil",
+    veilAlpha > 0 ? hexToRgba(currentTheme().xterm.background ?? "#0f1115", veilAlpha) : "transparent"
+  );
   const image = resolvedBgCss();
   if (!image) {
     appEl.style.background = "";
