@@ -42,6 +42,11 @@ Seeded GDI+ renders — re-running the script reproduces them exactly.
 - `backrooms.png` — liminal yellow room, fluorescent panels, far doorway
 - `swordfish.png` — cipher-cascade windows, ghosted wireframe polyhedron
 - `hackers.png` — data-city towers with beacons on a perspective grid
+- `galactica.png` — DRADIS octagon rings with blips, cut-corner paper panels
+- `skicabin.png` — plank wall, string lights, snowy window, fire glow, skis
+- `rave.png` — laser fans, strobe horizon, speaker stack, haze
+- `datacenter.png` — LED-studded rack walls under a cold ceiling strip
+- `sakura.png` — blossom branch and drifting petals on a blush sky
 
 ## NASA imagery (public domain)
 

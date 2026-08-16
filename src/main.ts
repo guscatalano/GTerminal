@@ -1394,6 +1394,77 @@ THEMES.hackers = mkTheme(
 THEMES.hackers.xterm.cursor = "#39e878";
 THEMES.hackers.xterm.selectionBackground = "#ff4dd840";
 
+THEMES.galactica = mkTheme(
+  "Galactica",
+  "white",
+  ["Consolas, monospace", 1.15, "block"],
+  'linear-gradient(rgba(13,10,6,0.38), rgba(13,10,6,0.54)), url("/backgrounds/galactica.png") center / cover no-repeat, linear-gradient(180deg, #0d0a06, #070503)',
+  "#0d0a06",
+  "#e8d4ac",
+  [
+    "#0d0a06", "#ff6b5e", "#9dd07f", "#ffce7a", "#d8a850", "#c89ad0", "#8fc8c0", "#e0d0b0",
+    "#6e5c3e", "#ff8d80", "#bce89d", "#ffe0a0", "#e8c070", "#e0b8e8", "#a8e0d8", "#f8ecd8",
+  ]
+);
+THEMES.galactica.xterm.cursor = "#d8a850";
+
+THEMES.skicabin = mkTheme(
+  "Ski Cabin",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"],
+  'linear-gradient(rgba(36,26,18,0.4), rgba(36,26,18,0.55)), url("/backgrounds/skicabin.png") center / cover no-repeat, linear-gradient(180deg, #241a12, #1a120c)',
+  "#241a12",
+  "#ecdcc4",
+  [
+    "#241a12", "#ff8a70", "#a8c87f", "#f0c078", "#e0954a", "#d8a0b8", "#8fc8d8", "#e2d4bc",
+    "#7a6650", "#ffa890", "#c4e09d", "#ffd89a", "#f0b070", "#ecc0d0", "#b0e0ec", "#f8f0e0",
+  ]
+);
+THEMES.skicabin.xterm.cursor = "#e0954a";
+
+THEMES.rave = mkTheme(
+  "Rave",
+  "white",
+  ['"Cascadia Code", "Cascadia Mono", monospace', 1.1, "bar"],
+  'linear-gradient(rgba(8,3,12,0.42), rgba(8,3,12,0.58)), url("/backgrounds/rave.png") center / cover no-repeat, linear-gradient(180deg, #070309, #040106)',
+  "#070309",
+  "#eae0f4",
+  [
+    "#070309", "#ff4d6e", "#8fe83c", "#ffe23c", "#ff3de8", "#c86aff", "#3ee8e8", "#dcd4e8",
+    "#5c4a70", "#ff7a94", "#b0ff66", "#fff07a", "#ff70f0", "#dc98ff", "#7af8f8", "#f8f2fc",
+  ]
+);
+THEMES.rave.xterm.cursor = "#ff3de8";
+THEMES.rave.xterm.selectionBackground = "#ff3de840";
+
+THEMES.datacenter = mkTheme(
+  "Datacenter",
+  "white",
+  ["Consolas, monospace", 1.15, "bar"],
+  'linear-gradient(rgba(8,12,17,0.38), rgba(8,12,17,0.54)), url("/backgrounds/datacenter.png") center / cover no-repeat, linear-gradient(180deg, #070b10, #04070a)',
+  "#070b10",
+  "#cfe0e8",
+  [
+    "#070b10", "#ff7a72", "#4fe08a", "#ffce6b", "#5fb8e8", "#b89af0", "#6fd8d8", "#ccdae2",
+    "#3e5566", "#ff9c94", "#7cf0ac", "#ffe094", "#88ccf0", "#ccb0f8", "#98e8e8", "#eef6fa",
+  ]
+);
+THEMES.datacenter.xterm.cursor = "#4fe08a";
+
+THEMES.sakura = mkTheme(
+  "Sakura",
+  "black",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"],
+  'linear-gradient(rgba(246,233,238,0.3), rgba(246,233,238,0.42)), url("/backgrounds/sakura.png") center / cover no-repeat, linear-gradient(180deg, #f6e9ee, #eeD8e2)',
+  "#f6e9ee",
+  "#4a3540",
+  [
+    "#4a3540", "#b03a4c", "#4f7a4a", "#8a6224", "#c25d84", "#8a4a78", "#3f7a72", "#e8d2da",
+    "#6e5560", "#963142", "#42663e", "#6e4e1c", "#a04a6e", "#744064", "#356861", "#fdf6f8",
+  ]
+);
+THEMES.sakura.xterm.cursor = "#c25d84";
+
 let themeKey = "one-dark";
 function currentTheme(): ThemeDef {
   return THEMES[themeKey] ?? THEMES["one-dark"];
@@ -3313,11 +3384,12 @@ async function renderRestoreMenu() {
 const THEME_GROUPS: Array<[string, string[]]> = [
   ["Classics", ["one-dark", "dracula", "nord", "gruvbox", "tokyo-night", "catppuccin", "solarized-dark", "solarized-light", "monokai", "everforest"]],
   ["Retro hardware", ["amber-crt", "gameboy", "c64", "macintosh"]],
-  ["Film & TV", ["matrix", "bladerunner", "tron", "lcars", "dune", "umbrella", "nostromo", "wargames", "lumon", "swordfish", "hackers"]],
+  ["Film & TV", ["matrix", "bladerunner", "tron", "lcars", "dune", "umbrella", "nostromo", "wargames", "lumon", "swordfish", "hackers", "galactica"]],
   ["Games", ["cyberpunk", "deus-ex", "pipboy", "nier", "sheikah", "aperture", "persona"]],
   ["Anime", ["akira", "bebop", "scouter", "nerv"]],
   ["Space", ["hyperspace", "space", "missionctl"]],
-  ["Art & liminal", ["hermes", "nous", "synthwave", "blueprint", "redacted", "backrooms"]],
+  ["Places & vibes", ["skicabin", "rave", "datacenter", "backrooms"]],
+  ["Art & liminal", ["hermes", "nous", "synthwave", "blueprint", "redacted", "sakura"]],
 ];
 
 /// Grouped theme select: optgroups per category, then Custom, then any
