@@ -4858,6 +4858,69 @@ interface SystemStats {
   battery_charging: boolean;
   battery_minutes: number | null;
   uptime_s: number;
+  processes: number;
+  threads: number;
+  input: InputDelay | null;
+  gpu: GpuStats | null;
+  net: NetStats | null;
+  remote: RemoteStats | null;
+}
+
+interface InputDelay {
+  session_max_ms: number;
+  process_max_ms: number;
+  worst_process: string;
+  available: boolean;
+}
+
+interface GpuStats {
+  busy_pct: number;
+  engines: Array<{ kind: string; pct: number }>;
+  vram_used: number;
+  shared_used: number;
+  adapters: Array<{ name: string; driver: string; memory: number }>;
+}
+
+interface NetStats {
+  rx_bps: number;
+  tx_bps: number;
+  iface: string;
+  iface_count: number;
+}
+
+interface RemoteStats {
+  is_remote: boolean;
+  active_sessions: number;
+  total_sessions: number;
+  rtt_ms: number;
+  bandwidth_kbps: number;
+  loss_pct: number;
+  fps: number;
+  encode_ms: number;
+  frames_skipped: number;
+}
+
+/// Frame pacing of this window, measured off the real render loop —
+/// there is no system counter for "how smooth is this app". rAF is
+/// throttled while the window is hidden, so this reads 0 when minimised.
+const frameTimes: number[] = [];
+function startFpsMeter() {
+  let last = performance.now();
+  const tick = (now: number) => {
+    const dt = now - last;
+    last = now;
+    if (dt > 0 && dt < 1000) {
+      frameTimes.push(dt);
+      if (frameTimes.length > 90) frameTimes.shift();
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+function fpsNow(): number {
+  if (!frameTimes.length) return 0;
+  const avg = frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length;
+  return avg > 0 ? Math.round(1000 / avg) : 0;
 }
 
 interface StatusCtx {
@@ -5024,6 +5087,144 @@ const STATUS_BUILTINS: Record<string, StatusItemDef> = {
       ],
     }),
   },
+  fps: {
+    label: "Frame rate",
+    render: () => `${fpsNow()} fps`,
+    detail: (c) => {
+      const avg = frameTimes.length
+        ? frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length
+        : 0;
+      const worst = frameTimes.length ? Math.max(...frameTimes) : 0;
+      const tab = activeId === null ? undefined : tabs.get(activeId);
+      const rows: Array<[string, string]> = [
+        ["Frame rate", `${fpsNow()} fps`],
+        ["Frame time", `${avg.toFixed(1)} ms`],
+        ["Worst frame", `${worst.toFixed(1)} ms`],
+        ["Renderer", tab?.webgl ? "WebGL" : "DOM"],
+      ];
+      if (c.stats.gpu) {
+        rows.push(["GPU busy", pct(c.stats.gpu.busy_pct)]);
+        if (c.stats.gpu.adapters[0]) rows.push(["Adapter", c.stats.gpu.adapters[0].name]);
+      }
+      return { rows };
+    },
+  },
+  gpu: {
+    label: "GPU",
+    render: (c) => (c.stats.gpu ? `GPU ${pct(c.stats.gpu.busy_pct)}` : "GPU …"),
+    detail: (c) => {
+      const g = c.stats.gpu;
+      if (!g) return { rows: [["GPU", "sampling…"]] };
+      const rows: Array<[string, string]> = [
+        ["Busiest engine", pct(g.busy_pct)],
+        ["Dedicated memory", fmtBytes(g.vram_used)],
+        ["Shared memory", fmtBytes(g.shared_used)],
+      ];
+      for (const e of g.engines.slice(0, 6)) rows.push([`Engine ${e.kind}`, pct(e.pct)]);
+      for (const a of g.adapters) {
+        rows.push([a.name, a.memory ? fmtBytes(a.memory) : "—"]);
+        if (a.driver) rows.push([`  driver`, a.driver]);
+      }
+      return {
+        rows,
+        actions: [{ label: "Display settings", cmd: "Start-Process ms-settings:display" }],
+      };
+    },
+  },
+  net: {
+    label: "Network",
+    render: (c) =>
+      c.stats.net
+        ? `NET ↓${fmtRate(c.stats.net.rx_bps)} ↑${fmtRate(c.stats.net.tx_bps)}`
+        : "NET …",
+    detail: (c) => {
+      const n = c.stats.net;
+      if (!n) return { rows: [["Network", "sampling…"]] };
+      return {
+        rows: [
+          ["Received", fmtRate(n.rx_bps)],
+          ["Sent", fmtRate(n.tx_bps)],
+          ["Busiest adapter", n.iface || "—"],
+          ["Adapters counted", String(n.iface_count)],
+        ],
+        actions: [{ label: "Network settings", cmd: "Start-Process ms-settings:network" }],
+      };
+    },
+  },
+  remote: {
+    label: "Remote session",
+    render: (c) => {
+      const r = c.stats.remote;
+      if (!r) return "RDP …";
+      if (!r.is_remote) return "local";
+      return r.rtt_ms > 0 ? `RDP ${r.rtt_ms.toFixed(0)}ms` : "RDP";
+    },
+    detail: (c) => {
+      const r = c.stats.remote;
+      if (!r) return { rows: [["Session", "sampling…"]] };
+      const rows: Array<[string, string]> = [
+        ["This session", r.is_remote ? "remote (RDP)" : "local console"],
+        ["Active sessions", String(Math.round(r.active_sessions))],
+        ["Total sessions", String(Math.round(r.total_sessions))],
+      ];
+      if (r.is_remote) {
+        rows.push(
+          ["Round trip", r.rtt_ms > 0 ? `${r.rtt_ms.toFixed(1)} ms` : "—"],
+          ["Bandwidth", r.bandwidth_kbps > 0 ? `${Math.round(r.bandwidth_kbps)} kbps` : "—"],
+          ["Packet loss", r.loss_pct > 0 ? pct(r.loss_pct) : "0%"],
+          ["Output frames", r.fps > 0 ? `${r.fps.toFixed(0)} fps` : "—"],
+          ["Encode time", r.encode_ms > 0 ? `${r.encode_ms.toFixed(1)} ms` : "—"],
+          ["Frames skipped", r.frames_skipped.toFixed(1)]
+        );
+      } else {
+        rows.push(["RemoteFX", "not applicable on a local session"]);
+      }
+      return { rows };
+    },
+  },
+  input: {
+    label: "Input delay",
+    render: (c) => {
+      const i = c.stats.input;
+      if (!i) return "IN …";
+      if (!i.available) return "IN n/a";
+      return `IN ${Math.round(i.session_max_ms)}ms`;
+    },
+    detail: (c) => {
+      const i = c.stats.input;
+      if (!i) return { rows: [["Input delay", "sampling…"]] };
+      if (!i.available) {
+        return {
+          rows: [
+            ["Status", "counters not present"],
+            ["Needs", "Windows 10 1809 or newer"],
+          ],
+        };
+      }
+      return {
+        rows: [
+          ["Session worst", `${Math.round(i.session_max_ms)} ms`],
+          ["Process worst", `${Math.round(i.process_max_ms)} ms`],
+          ["Worst process", i.worst_process || "—"],
+          ["Source", "User Input Delay per Session/Process"],
+        ],
+      };
+    },
+  },
+  procs: {
+    label: "Processes",
+    render: (c) => `P ${Math.round(c.stats.processes)}`,
+    detail: (c) => ({
+      rows: [
+        ["Processes", String(Math.round(c.stats.processes))],
+        ["Threads", String(Math.round(c.stats.threads))],
+        [
+          "Threads per process",
+          c.stats.processes ? (c.stats.threads / c.stats.processes).toFixed(1) : "—",
+        ],
+      ],
+    }),
+  },
   sessions: {
     label: "Sessions",
     render: () => `S ${tabs.size}${hidden.size ? `+${hidden.size}` : ""}`,
@@ -5053,9 +5254,20 @@ let statusCtx: StatusCtx = {
     cpu_pct: 0, mem_used: 0, mem_total: 0, page_used: 0, page_total: 0,
     disk_read_bps: 0, disk_write_bps: 0, disk_free: 0, disk_total: 0,
     battery_pct: null, battery_charging: false, battery_minutes: null, uptime_s: 0,
+    processes: 0, threads: 0, input: null, gpu: null, net: null, remote: null,
   },
   perf: {},
   custom: {},
+};
+
+/// Items whose data costs a wildcard PDH sweep; only those groups get
+/// sampled, and only while an item that needs them is on the bar.
+const STATUS_GROUPS: Record<string, string> = {
+  gpu: "gfx",
+  fps: "gfx",
+  net: "net",
+  remote: "remote",
+  input: "input",
 };
 let statusOpenId: string | null = null;
 let statusTimer: number | undefined;
@@ -5129,7 +5341,10 @@ async function sampleStatus() {
   const ids = statusItemIds();
   const needStats = ids.some((i) => STATUS_BUILTINS[i]);
   if (needStats) {
-    statusCtx.stats = await invoke<SystemStats>("system_stats").catch(() => statusCtx.stats);
+    const groups = [...new Set(ids.map((i) => STATUS_GROUPS[i]).filter(Boolean))];
+    statusCtx.stats = await invoke<SystemStats>("system_stats", { groups }).catch(
+      () => statusCtx.stats
+    );
   }
   const paths = (config.status_perf ?? [])
     .filter((p) => ids.includes(p.id))
@@ -5587,6 +5802,7 @@ async function main() {
     { passive: false }
   );
   new ResizeObserver(() => refreshChrome()).observe(tabbar);
+  startFpsMeter();
   applyStatusBar();
   window.setInterval(updateLiveInfo, 5000);
   window.setInterval(aiAutoTitleTick, 120_000);

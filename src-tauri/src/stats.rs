@@ -24,6 +24,79 @@ pub struct SystemStats {
     /// Estimated minutes of battery left; None when unknown or on AC.
     pub battery_minutes: Option<u32>,
     pub uptime_s: u64,
+    pub processes: f64,
+    pub threads: f64,
+    /// Filled only when the caller asks for the "input" group.
+    pub input: Option<InputDelay>,
+    /// Filled only when the caller asks for the "gfx" group.
+    pub gpu: Option<GpuStats>,
+    /// Filled only when the caller asks for the "net" group.
+    pub net: Option<NetStats>,
+    /// Filled only when the caller asks for the "remote" group.
+    pub remote: Option<RemoteStats>,
+}
+
+#[derive(Default, Clone, serde::Serialize)]
+pub struct GpuStats {
+    /// Busiest single engine type — the figure Task Manager's GPU column
+    /// tracks. Summing every engine instead would exceed 100% routinely.
+    pub busy_pct: f64,
+    /// Utilization per engine type (3D, Copy, VideoDecode, ...).
+    pub engines: Vec<EngineUse>,
+    pub vram_used: u64,
+    pub shared_used: u64,
+    pub adapters: Vec<AdapterInfo>,
+}
+
+/// Windows' own "how long did the desktop take to react" counters — the
+/// same ones RDS/VDI deployments watch. Present on Windows 10 1809+.
+#[derive(Default, Clone, serde::Serialize)]
+pub struct InputDelay {
+    /// Worst input delay across sessions, in milliseconds.
+    pub session_max_ms: f64,
+    /// Worst single process, and its instance name.
+    pub process_max_ms: f64,
+    pub worst_process: String,
+    /// False when the counters are missing on this build of Windows.
+    pub available: bool,
+}
+
+#[derive(Default, Clone, serde::Serialize)]
+pub struct EngineUse {
+    pub kind: String,
+    pub pct: f64,
+}
+
+#[derive(Default, Clone, serde::Serialize)]
+pub struct AdapterInfo {
+    pub name: String,
+    pub driver: String,
+    pub memory: u64,
+}
+
+#[derive(Default, Clone, serde::Serialize)]
+pub struct NetStats {
+    pub rx_bps: f64,
+    pub tx_bps: f64,
+    /// Interface carrying the most traffic right now.
+    pub iface: String,
+    pub iface_count: u32,
+}
+
+#[derive(Default, Clone, serde::Serialize)]
+pub struct RemoteStats {
+    /// True when this process is running inside a remote session.
+    pub is_remote: bool,
+    pub active_sessions: f64,
+    pub total_sessions: f64,
+    /// RemoteFX transport, when the counters exist.
+    pub rtt_ms: f64,
+    pub bandwidth_kbps: f64,
+    pub loss_pct: f64,
+    /// RemoteFX graphics.
+    pub fps: f64,
+    pub encode_ms: f64,
+    pub frames_skipped: f64,
 }
 
 #[derive(Default, Clone, serde::Serialize)]
@@ -39,10 +112,16 @@ mod imp {
     use std::sync::{Mutex, OnceLock};
     use windows_sys::Win32::Foundation::FILETIME;
     use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    use super::{AdapterInfo, EngineUse, GpuStats, InputDelay, NetStats, RemoteStats};
     use windows_sys::Win32::System::Performance::{
         PdhAddEnglishCounterW, PdhCollectQueryData, PdhEnumObjectItemsW, PdhEnumObjectsW,
-        PdhGetFormattedCounterValue, PdhOpenQueryW, PDH_FMT_COUNTERVALUE, PDH_FMT_DOUBLE,
+        PdhGetFormattedCounterArrayW, PdhGetFormattedCounterValue, PdhOpenQueryW,
+        PDH_FMT_COUNTERVALUE, PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE,
     };
+    use windows_sys::Win32::System::Registry::{
+        RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_QWORD, RRF_RT_REG_SZ,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_REMOTESESSION};
     use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
     use windows_sys::Win32::System::SystemInformation::{
         GetTickCount64, GlobalMemoryStatusEx, MEMORYSTATUSEX,
@@ -244,7 +323,242 @@ mod imp {
         Ok(PerfItems { counters, instances })
     }
 
-    pub fn sample() -> SystemStats {
+    /// Read a wildcard counter path, returning every instance and value.
+    /// PDH needs the same two-collection priming as a single counter, so
+    /// the first call for a path comes back empty.
+    pub fn counter_array(path: &str) -> Vec<(String, f64)> {
+        let mut out = Vec::new();
+        let Some(lock) = counters() else { return out };
+        let Ok(mut c) = lock.lock() else { return out };
+        let handle = match c.handles.get(path) {
+            Some(&h) => h,
+            None => {
+                let mut h: *mut std::ffi::c_void = std::ptr::null_mut();
+                let wp = wide(path);
+                if unsafe { PdhAddEnglishCounterW(c.query, wp.as_ptr(), 0, &mut h) } != 0 {
+                    return out;
+                }
+                c.handles.insert(path.to_string(), h);
+                unsafe { PdhCollectQueryData(c.query) };
+                h
+            }
+        };
+        if unsafe { PdhCollectQueryData(c.query) } != 0 {
+            return out;
+        }
+        let mut size: u32 = 0;
+        let mut count: u32 = 0;
+        unsafe {
+            PdhGetFormattedCounterArrayW(
+                handle,
+                PDH_FMT_DOUBLE,
+                &mut size,
+                &mut count,
+                std::ptr::null_mut(),
+            );
+        }
+        if size == 0 || count == 0 {
+            return out;
+        }
+        // Allocate as items so the buffer is correctly aligned for them.
+        let item = std::mem::size_of::<PDH_FMT_COUNTERVALUE_ITEM_W>();
+        let mut buf: Vec<PDH_FMT_COUNTERVALUE_ITEM_W> =
+            Vec::with_capacity(size as usize / item + 2);
+        let rc = unsafe {
+            PdhGetFormattedCounterArrayW(
+                handle,
+                PDH_FMT_DOUBLE,
+                &mut size,
+                &mut count,
+                buf.as_mut_ptr(),
+            )
+        };
+        if rc != 0 {
+            return out;
+        }
+        unsafe { buf.set_len(count as usize) };
+        for it in buf.iter() {
+            let name = if it.szName.is_null() {
+                String::new()
+            } else {
+                let mut len = 0usize;
+                while unsafe { *it.szName.add(len) } != 0 {
+                    len += 1;
+                }
+                String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(it.szName, len) })
+            };
+            let v = unsafe { it.FmtValue.Anonymous.doubleValue };
+            if v.is_finite() {
+                out.push((name, v));
+            }
+        }
+        out
+    }
+
+    fn reg_str(path: &str, value: &str) -> Option<String> {
+        let mut buf = [0u16; 512];
+        let mut size = (buf.len() * 2) as u32;
+        let rc = unsafe {
+            RegGetValueW(
+                HKEY_LOCAL_MACHINE,
+                wide(path).as_ptr(),
+                wide(value).as_ptr(),
+                RRF_RT_REG_SZ,
+                std::ptr::null_mut(),
+                buf.as_mut_ptr() as *mut _,
+                &mut size,
+            )
+        };
+        if rc != 0 {
+            return None;
+        }
+        let len = buf.iter().position(|c| *c == 0).unwrap_or(0);
+        if len == 0 {
+            None
+        } else {
+            Some(String::from_utf16_lossy(&buf[..len]))
+        }
+    }
+
+    fn reg_qword(path: &str, value: &str) -> Option<u64> {
+        let mut out: u64 = 0;
+        let mut size = std::mem::size_of::<u64>() as u32;
+        let rc = unsafe {
+            RegGetValueW(
+                HKEY_LOCAL_MACHINE,
+                wide(path).as_ptr(),
+                wide(value).as_ptr(),
+                RRF_RT_REG_QWORD,
+                std::ptr::null_mut(),
+                &mut out as *mut u64 as *mut _,
+                &mut size,
+            )
+        };
+        if rc == 0 {
+            Some(out)
+        } else {
+            None
+        }
+    }
+
+    /// Display adapters straight out of the driver class key — no WMI and
+    /// no COM, just what the display class stores per adapter.
+    fn adapters() -> Vec<AdapterInfo> {
+        const CLASS: &str =
+            "SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}";
+        let mut out = Vec::new();
+        for i in 0..8u32 {
+            let sub = format!("{CLASS}\\{i:04}");
+            let Some(name) = reg_str(&sub, "DriverDesc") else { continue };
+            out.push(AdapterInfo {
+                name,
+                driver: reg_str(&sub, "DriverVersion").unwrap_or_default(),
+                memory: reg_qword(&sub, "HardwareInformation.qwMemorySize").unwrap_or(0),
+            });
+        }
+        out
+    }
+
+    /// Engine instances are named
+    /// `pid_1234_luid_0x…_phys_0_eng_0_engtype_3D`; the tail is the type.
+    fn engine_kind(instance: &str) -> String {
+        instance
+            .rsplit_once("engtype_")
+            .map(|(_, k)| k.to_string())
+            .unwrap_or_else(|| "Other".into())
+    }
+
+    pub fn gpu() -> GpuStats {
+        let mut by_kind: std::collections::BTreeMap<String, f64> = Default::default();
+        for (inst, v) in counter_array("\\GPU Engine(*)\\Utilization Percentage") {
+            *by_kind.entry(engine_kind(&inst)).or_insert(0.0) += v;
+        }
+        let mut engines: Vec<EngineUse> = by_kind
+            .into_iter()
+            .map(|(kind, pct)| EngineUse { kind, pct: pct.min(100.0) })
+            .collect();
+        engines.sort_by(|a, b| b.pct.partial_cmp(&a.pct).unwrap_or(std::cmp::Ordering::Equal));
+        let busy_pct = engines.first().map(|e| e.pct).unwrap_or(0.0);
+        let sum = |p: &str| -> f64 { counter_array(p).iter().map(|(_, v)| *v).sum() };
+        GpuStats {
+            busy_pct,
+            engines,
+            vram_used: sum("\\GPU Adapter Memory(*)\\Dedicated Usage") as u64,
+            shared_used: sum("\\GPU Adapter Memory(*)\\Shared Usage") as u64,
+            adapters: adapters(),
+        }
+    }
+
+    /// Interfaces that only carry tunnelled or loopback traffic would
+    /// otherwise drown out the real adapter in the totals.
+    fn real_iface(name: &str) -> bool {
+        let n = name.to_ascii_lowercase();
+        !(n.contains("loopback")
+            || n.contains("isatap")
+            || n.contains("teredo")
+            || n.contains("pseudo"))
+    }
+
+    pub fn net() -> NetStats {
+        let rx = counter_array("\\Network Interface(*)\\Bytes Received/sec");
+        let tx = counter_array("\\Network Interface(*)\\Bytes Sent/sec");
+        let mut s = NetStats::default();
+        let mut best = 0.0f64;
+        for (name, v) in rx.iter().filter(|(n, _)| real_iface(n)) {
+            s.rx_bps += v;
+            s.iface_count += 1;
+            let sent = tx.iter().find(|(n, _)| n == name).map(|(_, v)| *v).unwrap_or(0.0);
+            if v + sent > best {
+                best = v + sent;
+                s.iface = name.clone();
+            }
+        }
+        s.tx_bps = tx.iter().filter(|(n, _)| real_iface(n)).map(|(_, v)| *v).sum();
+        s
+    }
+
+    pub fn input_delay() -> InputDelay {
+        let sessions = counter_array("\\User Input Delay per Session(*)\\Max Input Delay");
+        let procs = counter_array("\\User Input Delay per Process(*)\\Max Input Delay");
+        let worst = procs
+            .iter()
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        InputDelay {
+            session_max_ms: sessions.iter().map(|(_, v)| *v).fold(0.0, f64::max),
+            process_max_ms: worst.map(|(_, v)| *v).unwrap_or(0.0),
+            // Instances read like "1234:notepad"; the tail is the friendlier half.
+            worst_process: worst
+                .map(|(n, _)| n.rsplit_once(':').map(|(_, p)| p.to_string()).unwrap_or_else(|| n.clone()))
+                .unwrap_or_default(),
+            available: !sessions.is_empty() || !procs.is_empty(),
+        }
+    }
+
+    pub fn remote() -> RemoteStats {
+        let mut r = RemoteStats {
+            is_remote: unsafe { GetSystemMetrics(SM_REMOTESESSION) } != 0,
+            ..Default::default()
+        };
+        let ts = read_counters(&[
+            "\\Terminal Services\\Active Sessions".to_string(),
+            "\\Terminal Services\\Total Sessions".to_string(),
+        ]);
+        r.active_sessions = ts.get("\\Terminal Services\\Active Sessions").copied().unwrap_or(0.0);
+        r.total_sessions = ts.get("\\Terminal Services\\Total Sessions").copied().unwrap_or(0.0);
+        // RemoteFX counters exist only inside an RDP session; a missing
+        // path just yields nothing rather than failing the whole sample.
+        let first = |path: &str| counter_array(path).first().map(|(_, v)| *v).unwrap_or(0.0);
+        r.rtt_ms = first("\\RemoteFX Network(*)\\Current TCP RTT") / 1000.0;
+        r.bandwidth_kbps = first("\\RemoteFX Network(*)\\Current TCP Bandwidth");
+        r.loss_pct = first("\\RemoteFX Network(*)\\Current UDP Packet Loss Rate");
+        r.fps = first("\\RemoteFX Graphics(*)\\Output Frames/Second");
+        r.encode_ms = first("\\RemoteFX Graphics(*)\\Average Encoding Time");
+        r.frames_skipped =
+            first("\\RemoteFX Graphics(*)\\Frames Skipped/Second - Insufficient Client Resources");
+        r
+    }
+
+    pub fn sample(groups: &[String]) -> SystemStats {
         let mut s = SystemStats {
             cpu_pct: cpu_pct(),
             uptime_s: unsafe { GetTickCount64() } / 1000,
@@ -270,9 +584,17 @@ mod imp {
             s.disk_total = total;
         }
 
-        let io = read_counters(&[DISK_READ.to_string(), DISK_WRITE.to_string()]);
-        s.disk_read_bps = io.get(DISK_READ).copied().unwrap_or(0.0);
-        s.disk_write_bps = io.get(DISK_WRITE).copied().unwrap_or(0.0);
+        // All the scalar counters ride along in one collection.
+        let base = read_counters(&[
+            DISK_READ.to_string(),
+            DISK_WRITE.to_string(),
+            "\\System\\Processes".to_string(),
+            "\\System\\Threads".to_string(),
+        ]);
+        s.disk_read_bps = base.get(DISK_READ).copied().unwrap_or(0.0);
+        s.disk_write_bps = base.get(DISK_WRITE).copied().unwrap_or(0.0);
+        s.processes = base.get("\\System\\Processes").copied().unwrap_or(0.0);
+        s.threads = base.get("\\System\\Threads").copied().unwrap_or(0.0);
 
         let mut power: SYSTEM_POWER_STATUS = unsafe { std::mem::zeroed() };
         if unsafe { GetSystemPowerStatus(&mut power) } != 0 {
@@ -285,6 +607,22 @@ mod imp {
                 s.battery_minutes = Some(power.BatteryLifeTime / 60);
             }
         }
+
+        // Wildcard groups cost noticeably more than the scalar counters
+        // above, so they are sampled only when an item actually wants them.
+        let want = |g: &str| groups.iter().any(|x| x == g);
+        if want("gfx") {
+            s.gpu = Some(gpu());
+        }
+        if want("net") {
+            s.net = Some(net());
+        }
+        if want("remote") {
+            s.remote = Some(remote());
+        }
+        if want("input") {
+            s.input = Some(input_delay());
+        }
         s
     }
 }
@@ -293,7 +631,7 @@ mod imp {
 mod imp {
     use super::{PerfItems, SystemStats};
     use std::collections::HashMap;
-    pub fn sample() -> SystemStats {
+    pub fn sample(_: &[String]) -> SystemStats {
         SystemStats::default()
     }
     pub fn read_counters(_: &[String]) -> HashMap<String, f64> {
@@ -307,10 +645,11 @@ mod imp {
     }
 }
 
-/// Sampled counters behind the built-in status-bar items.
+/// Sampled counters behind the built-in status-bar items. `groups` opts
+/// into the costlier wildcard families: "gfx", "net", "remote".
 #[tauri::command]
-pub fn system_stats() -> SystemStats {
-    imp::sample()
+pub fn system_stats(groups: Option<Vec<String>>) -> SystemStats {
+    imp::sample(&groups.unwrap_or_default())
 }
 
 /// Read arbitrary Windows performance counters by path, all in one
