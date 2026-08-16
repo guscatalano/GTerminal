@@ -4871,7 +4871,6 @@ interface InputDelay {
   process_max_ms: number;
   worst_process: string;
   available: boolean;
-  lag_counter_enabled: boolean;
 }
 
 interface GpuStats {
@@ -5188,51 +5187,20 @@ const STATUS_BUILTINS: Record<string, StatusItemDef> = {
     render: (c) => {
       const i = c.stats.input;
       if (!i) return "IN …";
-      if (!i.available) return i.lag_counter_enabled ? "IN —" : "IN off";
-      return `IN ${Math.round(i.session_max_ms)}ms`;
+      return i.available ? `IN ${Math.round(i.session_max_ms)}ms` : "IN —";
     },
     detail: (c) => {
       const i = c.stats.input;
       if (!i) return { rows: [["Input delay", "sampling…"]] };
-      if (!i.available) {
-        // Windows registers this counter set but ships the provider
-        // switched off, so it lists in Get-Counter -ListSet yet returns
-        // "object not found" until EnableLagCounter is set and the
-        // machine restarts.
-        const enabled = i.lag_counter_enabled;
-        return {
-          rows: [
-            ["Status", enabled ? "enabled, awaiting restart" : "provider disabled"],
-            ["EnableLagCounter", enabled ? "1" : "not set"],
-            ["Key", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server"],
-            ["After enabling", "restart Windows for data to appear"],
-          ],
-          actions: enabled
-            ? []
-            : [
-                {
-                  label: "Enable (admin)",
-                  cmd:
-                    "Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile','-Command'," +
-                    "'New-ItemProperty -Path \"HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\" " +
-                    "-Name EnableLagCounter -PropertyType DWord -Value 1 -Force'",
-                },
-              ],
-          links: [
-            {
-              label: "Microsoft docs",
-              url: "https://learn.microsoft.com/en-us/windows-server/remote/remote-desktop-services/rds-rdsh-performance-counters",
-            },
-          ],
-        };
-      }
+      const ms = (v: number) => (i.available ? `${Math.round(v)} ms` : "—");
       return {
         rows: [
-          ["Session worst", `${Math.round(i.session_max_ms)} ms`],
-          ["Process worst", `${Math.round(i.process_max_ms)} ms`],
+          ["Session worst", ms(i.session_max_ms)],
+          ["Process worst", ms(i.process_max_ms)],
           ["Worst process", i.worst_process || "—"],
           ["Source", "User Input Delay per Session/Process"],
         ],
+        actions: [{ label: "Services", cmd: "Start-Process services.msc" }],
       };
     },
   },
