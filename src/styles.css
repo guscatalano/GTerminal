@@ -1364,6 +1364,21 @@ input.set-control {
   grid-template-columns: 1fr 1.4fr 108px 108px 26px;
 }
 
+/* custom theme rows: name, base select, three swatches, use, delete */
+.ct-row {
+  grid-template-columns: 1fr 150px 34px 34px 34px 64px 26px;
+}
+
+.ct-color {
+  width: 34px;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid var(--border2);
+  border-radius: 5px;
+  background: var(--panel2);
+  cursor: pointer;
+}
+
 .ws-row .set-btn {
   width: 100%;
   padding: 4px 0;

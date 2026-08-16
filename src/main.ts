@@ -87,6 +87,16 @@ interface LaunchInfo {
 }
 let launchInfo: LaunchInfo | null = null;
 
+// A user-defined theme: a built-in base plus color/font overrides.
+interface CustomTheme {
+  name: string;
+  base?: string;
+  bg?: string;
+  fg?: string;
+  accent?: string;
+  font?: string;
+}
+
 interface AppConfig {
   cursor_style?: CursorStyle;
   cursor_blink?: boolean;
@@ -104,6 +114,7 @@ interface AppConfig {
   default_cwd?: string;
   templates?: SessionTemplate[];
   workspaces?: Workspace[];
+  custom_themes?: CustomTheme[];
   history_days?: number;
   prediction?: string;
   tab_width?: number;
@@ -1128,6 +1139,45 @@ THEMES.nier = mkTheme(
 let themeKey = "one-dark";
 function currentTheme(): ThemeDef {
   return THEMES[themeKey] ?? THEMES["one-dark"];
+}
+
+// ── user-defined themes ─────────────────────────────────────────────────
+// A custom theme picks a built-in as its base (palette, font, art) and
+// overrides background, text, accent, and font. Stored in config.json
+// under custom_themes; keys are "custom-<index>".
+const builtinThemeKeys = Object.keys(THEMES);
+function registerCustomThemes() {
+  for (const k of Object.keys(THEMES)) {
+    if (k.startsWith("custom-")) delete THEMES[k];
+  }
+  (config.custom_themes ?? []).forEach((ct, i) => {
+    const base = THEMES[ct.base ?? "one-dark"] ?? THEMES["one-dark"];
+    const x = base.xterm;
+    const bg = ct.bg ?? x.background!;
+    const fg = ct.fg ?? x.foreground!;
+    const ansi = [
+      x.black!, x.red!, x.green!, x.yellow!, x.blue!, x.magenta!, x.cyan!, x.white!,
+      x.brightBlack!, x.brightRed!, x.brightGreen!, x.brightYellow!,
+      x.brightBlue!, x.brightMagenta!, x.brightCyan!, x.brightWhite!,
+    ];
+    // A changed background keeps things predictable: flat color instead
+    // of base art that was palette-matched to different colors.
+    const bgArt = ct.bg ? `linear-gradient(0deg, ${bg}, ${bg})` : base.bgArt;
+    const t = mkTheme(
+      ct.name || `Custom ${i + 1}`,
+      base.tint,
+      [ct.font || base.font, base.lineHeight, base.cursorStyle],
+      bgArt,
+      bg,
+      fg,
+      ansi
+    );
+    if (ct.accent) {
+      t.xterm.blue = ct.accent;
+      t.xterm.selectionBackground = `${ct.accent}55`;
+    }
+    THEMES[`custom-${i}`] = t;
+  });
 }
 
 // Effective appearance: explicit setting > theme default > baseline.
@@ -3078,6 +3128,118 @@ function buildSettingsPage() {
       }
     )
   );
+
+  // Custom themes: base + color/font overrides, editable in place.
+  const ctInput = (ph: string, value: string, onChange: (v: string) => void) => {
+    const input = document.createElement("input");
+    input.className = "set-control";
+    input.type = "text";
+    input.placeholder = ph;
+    input.value = value;
+    input.addEventListener("change", () => onChange(input.value.trim()));
+    return input;
+  };
+  const ctColor = (value: string, title: string, onChange: (v: string) => void) => {
+    const input = document.createElement("input");
+    input.className = "ct-color";
+    input.type = "color";
+    input.title = title;
+    input.value = value;
+    input.addEventListener("change", () => onChange(input.value));
+    return input;
+  };
+  const ctCommit = (reopen = true) => {
+    saveConfig();
+    registerCustomThemes();
+    if (THEMES[themeKey] === undefined) applyTheme("one-dark");
+    else if (themeKey.startsWith("custom-")) applyTheme(themeKey);
+    if (reopen) buildSettingsPage();
+  };
+  const ctBlock = document.createElement("div");
+  ctBlock.className = "tpl-list";
+  (config.custom_themes ?? []).forEach((ct, i) => {
+    const row = document.createElement("div");
+    row.className = "tpl-row ct-row";
+    const base = THEMES[ct.base ?? "one-dark"] ?? THEMES["one-dark"];
+    const name = ctInput("Name", ct.name, (v) => {
+      ct.name = v || `Custom ${i + 1}`;
+      ctCommit();
+    });
+    const baseSel = mkSelect(
+      builtinThemeKeys.map((k) => [k, THEMES[k].label] as [string, string]),
+      ct.base ?? "one-dark",
+      (v) => {
+        ct.base = v;
+        ctCommit();
+      }
+    );
+    const bgC = ctColor(ct.bg ?? base.xterm.background!, "Background color", (v) => {
+      ct.bg = v;
+      ctCommit();
+    });
+    const fgC = ctColor(ct.fg ?? base.xterm.foreground!, "Text color", (v) => {
+      ct.fg = v;
+      ctCommit();
+    });
+    const acC = ctColor(ct.accent ?? base.xterm.blue!, "Accent color", (v) => {
+      ct.accent = v;
+      ctCommit();
+    });
+    const use = document.createElement("button");
+    use.className = "set-btn";
+    use.textContent = themeKey === `custom-${i}` ? "Active" : "Use";
+    use.addEventListener("click", () => {
+      applyTheme(`custom-${i}`);
+      buildSettingsPage();
+    });
+    const del = document.createElement("button");
+    del.className = "tpl-del";
+    del.textContent = "✕";
+    del.title = "Remove custom theme";
+    del.addEventListener("click", () => {
+      config.custom_themes!.splice(i, 1);
+      if (!config.custom_themes!.length) config.custom_themes = undefined;
+      // Keys shift down past the removed index; keep the active theme.
+      const m = /^custom-(\d+)$/.exec(themeKey);
+      if (m) {
+        const idx = Number(m[1]);
+        if (idx === i) themeKey = "one-dark";
+        else if (idx > i) themeKey = `custom-${idx - 1}`;
+      }
+      saveConfig();
+      registerCustomThemes();
+      applyTheme(THEMES[themeKey] ? themeKey : "one-dark");
+      buildSettingsPage();
+    });
+    row.append(name, baseSel, bgC, fgC, acC, use, del);
+    ctBlock.appendChild(row);
+  });
+  const ctAdd = document.createElement("button");
+  ctAdd.className = "set-btn";
+  ctAdd.textContent = "+ New theme from current";
+  ctAdd.addEventListener("click", () => {
+    const cur = currentTheme();
+    const curBase = /^custom-(\d+)$/.test(themeKey)
+      ? config.custom_themes?.[Number(/^custom-(\d+)$/.exec(themeKey)![1])]?.base ?? "one-dark"
+      : themeKey;
+    config.custom_themes = [
+      ...(config.custom_themes ?? []),
+      {
+        name: `My ${cur.label}`,
+        base: curBase,
+        bg: cur.xterm.background,
+        fg: cur.xterm.foreground,
+        accent: cur.xterm.blue,
+      },
+    ];
+    ctCommit();
+  });
+  ctBlock.appendChild(ctAdd);
+  settingRow(
+    "Custom themes",
+    "Your own themes: pick a built-in as the base, then override background, text, and accent colors. Changing the background swaps the base's art for a flat color.",
+    ctBlock
+  );
   settingRow(
     "Font",
     "Overrides the theme's font for all terminals.",
@@ -3533,6 +3695,7 @@ function buildSettingsPage() {
 
 async function main() {
   config = await invoke<AppConfig>("get_config").catch(() => ({}));
+  registerCustomThemes();
   applyTheme(config.theme ?? localStorage.getItem("gterm-theme") ?? "one-dark");
   applyBackground();
   // The window starts hidden (tauri.conf visible:false) so users never
