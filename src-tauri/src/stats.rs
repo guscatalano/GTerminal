@@ -57,8 +57,12 @@ pub struct InputDelay {
     /// Worst single process, and its instance name.
     pub process_max_ms: f64,
     pub worst_process: String,
-    /// False when the counters are missing on this build of Windows.
+    /// False when the counter object returns no data.
     pub available: bool,
+    /// Windows registers this counter set but leaves the provider off
+    /// until EnableLagCounter is set under Control\Terminal Server (and
+    /// the machine restarted), which is the usual reason for no data.
+    pub lag_counter_enabled: bool,
 }
 
 #[derive(Default, Clone, serde::Serialize)]
@@ -119,7 +123,7 @@ mod imp {
         PDH_FMT_COUNTERVALUE, PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE,
     };
     use windows_sys::Win32::System::Registry::{
-        RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_QWORD, RRF_RT_REG_SZ,
+        RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_QWORD, RRF_RT_REG_SZ,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_REMOTESESSION};
     use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
@@ -420,6 +424,27 @@ mod imp {
         }
     }
 
+    fn reg_dword(path: &str, value: &str) -> Option<u32> {
+        let mut out: u32 = 0;
+        let mut size = std::mem::size_of::<u32>() as u32;
+        let rc = unsafe {
+            RegGetValueW(
+                HKEY_LOCAL_MACHINE,
+                wide(path).as_ptr(),
+                wide(value).as_ptr(),
+                RRF_RT_REG_DWORD,
+                std::ptr::null_mut(),
+                &mut out as *mut u32 as *mut _,
+                &mut size,
+            )
+        };
+        if rc == 0 {
+            Some(out)
+        } else {
+            None
+        }
+    }
+
     fn reg_qword(path: &str, value: &str) -> Option<u64> {
         let mut out: u64 = 0;
         let mut size = std::mem::size_of::<u64>() as u32;
@@ -531,6 +556,12 @@ mod imp {
                 .map(|(n, _)| n.rsplit_once(':').map(|(_, p)| p.to_string()).unwrap_or_else(|| n.clone()))
                 .unwrap_or_default(),
             available: !sessions.is_empty() || !procs.is_empty(),
+            lag_counter_enabled: reg_dword(
+                "SYSTEM\\CurrentControlSet\\Control\\Terminal Server",
+                "EnableLagCounter",
+            )
+            .unwrap_or(0)
+                == 1,
         }
     }
 

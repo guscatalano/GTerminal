@@ -4871,6 +4871,7 @@ interface InputDelay {
   process_max_ms: number;
   worst_process: string;
   available: boolean;
+  lag_counter_enabled: boolean;
 }
 
 interface GpuStats {
@@ -5187,17 +5188,41 @@ const STATUS_BUILTINS: Record<string, StatusItemDef> = {
     render: (c) => {
       const i = c.stats.input;
       if (!i) return "IN …";
-      if (!i.available) return "IN n/a";
+      if (!i.available) return i.lag_counter_enabled ? "IN —" : "IN off";
       return `IN ${Math.round(i.session_max_ms)}ms`;
     },
     detail: (c) => {
       const i = c.stats.input;
       if (!i) return { rows: [["Input delay", "sampling…"]] };
       if (!i.available) {
+        // Windows registers this counter set but ships the provider
+        // switched off, so it lists in Get-Counter -ListSet yet returns
+        // "object not found" until EnableLagCounter is set and the
+        // machine restarts.
+        const enabled = i.lag_counter_enabled;
         return {
           rows: [
-            ["Status", "counters not present"],
-            ["Needs", "Windows 10 1809 or newer"],
+            ["Status", enabled ? "enabled, awaiting restart" : "provider disabled"],
+            ["EnableLagCounter", enabled ? "1" : "not set"],
+            ["Key", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server"],
+            ["After enabling", "restart Windows for data to appear"],
+          ],
+          actions: enabled
+            ? []
+            : [
+                {
+                  label: "Enable (admin)",
+                  cmd:
+                    "Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile','-Command'," +
+                    "'New-ItemProperty -Path \"HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\" " +
+                    "-Name EnableLagCounter -PropertyType DWord -Value 1 -Force'",
+                },
+              ],
+          links: [
+            {
+              label: "Microsoft docs",
+              url: "https://learn.microsoft.com/en-us/windows-server/remote/remote-desktop-services/rds-rdsh-performance-counters",
+            },
           ],
         };
       }
