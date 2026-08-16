@@ -1101,14 +1101,14 @@ THEMES.pipboy = mkTheme(
   ['"Lucida Console", Consolas, monospace', 1.2, "block"],
   'linear-gradient(rgba(4,16,9,0.42), rgba(4,16,9,0.58)), url("/backgrounds/pipboy.png") center / cover no-repeat, linear-gradient(180deg, #08170d, #04100a)',
   "#06130a",
-  "#2bf06a",
+  "#1aff80",
   [
-    "#06130a", "#ff8d7a", "#2ee868", "#a9f06e", "#3fd98a", "#63e8a8", "#8dffc4", "#c9ffdb",
-    "#1e7a44", "#ffab99", "#55ff92", "#c9ff90", "#66e8aa", "#9effc9", "#c2ffe0", "#ebfff3",
+    "#06130a", "#ff8d7a", "#1de876", "#a9f06e", "#2fd98f", "#63e8a8", "#7dffc9", "#c4ffdf",
+    "#1e7a44", "#ffab99", "#4dff9d", "#c9ff90", "#5ce8ab", "#9effc9", "#c2ffe0", "#ebfff3",
   ]
 );
-THEMES.pipboy.xterm.cursor = "#55ff92";
-THEMES.pipboy.xterm.selectionBackground = "#2bff6633";
+THEMES.pipboy.xterm.cursor = "#3aff95";
+THEMES.pipboy.xterm.selectionBackground = "#1aff8033";
 
 // NieR: the YoRHa menu look — beige paper, olive-gray ink, bronze
 // accent, drop-shadowed UI bars in the backdrop.

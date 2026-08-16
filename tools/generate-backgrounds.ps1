@@ -1453,88 +1453,200 @@ function EdgeFade {
   $g.FillRectangle($br, $rect); $br.Dispose()
 }
 
-# ── Pip-Boy: phosphor-green wrist-console HUD on a CRT ──
-$rng = New-Object System.Random(111)
+# -- Pip-Boy: phosphor-green console screen (researched layout: tabs, list, radio graph, rad gauge, footer, CRT treatment) --
+$rng = New-Object System.Random(76)
 $bmp, $g = New-Canvas
-Fill-Vertical $g (C 255 8 26 13) (C 255 3 12 7)
-Glow $g 960 560 950 (C 24 60 255 130)          # CRT center bloom
-Glow $g 1430 760 340 (C 26 70 255 140)         # bloom behind the dial
+Fill-Vertical $g (C 255 6 24 13) (C 255 2 11 6)
+Glow $g 960 520 980 (C 22 26 255 128)            # CRT center bloom
+Glow $g 1460 760 380 (C 22 26 255 128)           # bloom behind the graph
+Glow $g 470 780 260 (C 16 26 255 128)            # bloom behind the gauge
 # phosphor grain
-for ($i = 0; $i -lt 900; $i++) {
-  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(8, 24) 90 255 140))
+for ($i = 0; $i -lt 1000; $i++) {
+  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(7, 22) 26 220 110))
   $g.FillRectangle($b, $rng.Next(0, $W), $rng.Next(0, $H), 1, 1); $b.Dispose()
 }
-$ln = C 210 70 240 120       # bright phosphor line
-$lnDim = C 90 60 200 105     # dim phosphor line
-# ── dial gauge, bottom right ──
-$cx = 1430; $cy = 760
-$pen = New-Object System.Drawing.Pen($ln, 3)
-$g.DrawEllipse($pen, $cx - 190, $cy - 190, 380, 380); $pen.Dispose()
+$ln = C 225 26 255 128        # bright phosphor
+$lnMid = C 130 24 220 110
+$lnDim = C 80 20 180 92
+
+# ── header: five tabs, active one bracketed + filled, underline, sub-ticks ──
+foreach ($i in 0..4) {
+  $tx = 1090 + $i * 140
+  if ($i -eq 1) {
+    $b = New-Object System.Drawing.SolidBrush((C 70 26 255 128)); $g.FillRectangle($b, $tx, 82, 118, 34); $b.Dispose()
+    $pen = New-Object System.Drawing.Pen($ln, 2); $g.DrawRectangle($pen, $tx, 82, 118, 34); $pen.Dispose()
+    # bracket ticks outside the active tab
+    $pen = New-Object System.Drawing.Pen($ln, 2)
+    $g.DrawLine($pen, ($tx - 8), 82, ($tx - 8), 116); $g.DrawLine($pen, ($tx + 126), 82, ($tx + 126), 116); $pen.Dispose()
+    # label bar stand-in
+    $b = New-Object System.Drawing.SolidBrush((C 190 26 255 128)); $g.FillRectangle($b, ($tx + 26), 96, 66, 7); $b.Dispose()
+  } else {
+    $b = New-Object System.Drawing.SolidBrush((C $rng.Next(60, 85) 24 220 110)); $g.FillRectangle($b, ($tx + 24), 96, 70, 7); $b.Dispose()
+  }
+}
+$pen = New-Object System.Drawing.Pen($lnMid, 2); $g.DrawLine($pen, 1070, 130, 1810, 130); $pen.Dispose()
+# sub-tab ticks under the header line
+foreach ($i in 0..2) {
+  $sx = 1180 + $i * 120
+  $alpha = if ($i -eq 0) { 170 } else { 75 }
+  $b = New-Object System.Drawing.SolidBrush((C $alpha 24 230 115)); $g.FillRectangle($b, $sx, 146, 74, 6); $b.Dispose()
+}
+
+# ── data list rows (dim), under the header on the right ──
+$selRow = 1
+for ($i = 0; $i -lt 5; $i++) {
+  $ry = 205 + $i * 40
+  if ($i -eq $selRow) {
+    $b = New-Object System.Drawing.SolidBrush((C 60 26 255 128)); $g.FillRectangle($b, 1092, ($ry - 9), 560, 30); $b.Dispose()
+    $b = New-Object System.Drawing.SolidBrush((C 200 26 255 128)); $g.FillRectangle($b, 1104, $ry, 10, 10); $b.Dispose()
+  }
+  $bw2 = $rng.Next(180, 420)
+  $b = New-Object System.Drawing.SolidBrush((C $(if ($i -eq $selRow) { 170 } else { 85 }) 24 225 112))
+  $g.FillRectangle($b, 1130, $ry, $bw2, 9); $b.Dispose()
+  # right-aligned value stub
+  $b = New-Object System.Drawing.SolidBrush((C $(if ($i -eq $selRow) { 150 } else { 70 }) 24 225 112))
+  $g.FillRectangle($b, 1590, $ry, 52, 9); $b.Dispose()
+}
+
+# ── oscilloscope radio graph, lower right ──
+$gx = 1130; $gy = 560; $gw = 640; $gh = 370
+# grid
+for ($i = 0; $i -le 8; $i++) {
+  $pen = New-Object System.Drawing.Pen((C 30 24 200 100), 1)
+  $g.DrawLine($pen, ($gx + [int]($gw * $i / 8)), $gy, ($gx + [int]($gw * $i / 8)), ($gy + $gh)); $pen.Dispose()
+}
+for ($i = 0; $i -le 5; $i++) {
+  $pen = New-Object System.Drawing.Pen((C 30 24 200 100), 1)
+  $g.DrawLine($pen, $gx, ($gy + [int]($gh * $i / 5)), ($gx + $gw), ($gy + [int]($gh * $i / 5))); $pen.Dispose()
+}
+# axes
+$pen = New-Object System.Drawing.Pen($lnMid, 2)
+$g.DrawLine($pen, $gx, $gy, $gx, ($gy + $gh)); $g.DrawLine($pen, $gx, ($gy + $gh), ($gx + $gw), ($gy + $gh)); $pen.Dispose()
+# axis ticks
+for ($i = 0; $i -le 8; $i++) {
+  $pen = New-Object System.Drawing.Pen($lnMid, 2)
+  $g.DrawLine($pen, ($gx + [int]($gw * $i / 8)), ($gy + $gh), ($gx + [int]($gw * $i / 8)), ($gy + $gh + 8)); $pen.Dispose()
+}
+# damped sine trace, three bloom passes
+$mid = $gy + 185
+foreach ($pass in @(@(36, 9), @(90, 5), @(230, 2))) {
+  $prevX = $gx + 6; $prevY = $mid
+  for ($x = $gx + 14; $x -le $gx + $gw - 6; $x += 7) {
+    $t = ($x - $gx) / 34.0
+    $decay = [math]::Exp( - ($x - $gx) / 520.0)
+    $yy = $mid + [int](120 * $decay * [math]::Sin($t) * [math]::Sin($t * 0.23))
+    $pen = New-Object System.Drawing.Pen((C $pass[0] 26 255 128), $pass[1])
+    $g.DrawLine($pen, $prevX, $prevY, $x, $yy); $pen.Dispose()
+    $prevX = $x; $prevY = $yy
+  }
+}
+# tuning line + marker
+$tunX = $gx + 430
+$pen = New-Object System.Drawing.Pen((C 150 26 255 128), 2)
+$g.DrawLine($pen, $tunX, ($gy - 6), $tunX, ($gy + $gh)); $pen.Dispose()
+Glow $g $tunX ($gy - 10) 22 (C 140 26 255 128)
+$tri = New-Object 'System.Drawing.Point[]' 3
+$tri[0] = New-Object System.Drawing.Point(($tunX - 8), ($gy - 18))
+$tri[1] = New-Object System.Drawing.Point(($tunX + 8), ($gy - 18))
+$tri[2] = New-Object System.Drawing.Point($tunX, ($gy - 4))
+$b = New-Object System.Drawing.SolidBrush($ln); $g.FillPolygon($b, $tri); $b.Dispose()
+
+# ── radiation gauge, lower left: arc + ticks + needle + trefoil hub ──
+$cx = 470; $cy = 810
+$pen = New-Object System.Drawing.Pen($lnMid, 3)
+$g.DrawArc($pen, ($cx - 170), ($cy - 170), 340, 340, 180, 180); $pen.Dispose()
 $pen = New-Object System.Drawing.Pen($lnDim, 2)
-$g.DrawEllipse($pen, $cx - 210, $cy - 210, 420, 420); $pen.Dispose()
-$pen = New-Object System.Drawing.Pen($lnDim, 2)
-$g.DrawArc($pen, $cx - 150, $cy - 150, 300, 300, 150, 240); $pen.Dispose()
-# rim ticks
-for ($i = 0; $i -lt 24; $i++) {
-  $ang = ($i / 24.0) * 2 * [math]::PI
-  $r1 = if ($i % 3 -eq 0) { 162 } else { 174 }
+$g.DrawArc($pen, ($cx - 140), ($cy - 140), 280, 280, 180, 180); $pen.Dispose()
+for ($i = 0; $i -le 10; $i++) {
+  $ang = (180 + 18 * $i) * [math]::PI / 180
+  $r1 = if ($i % 5 -eq 0) { 146 } else { 156 }
   $x1 = $cx + [int]($r1 * [math]::Cos($ang)); $y1 = $cy + [int]($r1 * [math]::Sin($ang))
-  $x2 = $cx + [int](186 * [math]::Cos($ang)); $y2 = $cy + [int](186 * [math]::Sin($ang))
-  $pen = New-Object System.Drawing.Pen($(if ($i % 3 -eq 0) { $ln } else { $lnDim }), $(if ($i % 3 -eq 0) { 3 } else { 2 }))
+  $x2 = $cx + [int](170 * [math]::Cos($ang)); $y2 = $cy + [int](170 * [math]::Sin($ang))
+  $pen = New-Object System.Drawing.Pen($(if ($i % 5 -eq 0) { $ln } else { $lnMid }), $(if ($i % 5 -eq 0) { 3 } else { 2 }))
   $g.DrawLine($pen, $x1, $y1, $x2, $y2); $pen.Dispose()
 }
-# needle at 205 degrees + hub
-$nAng = 205 * [math]::PI / 180
-$nx = $cx + [int](150 * [math]::Cos($nAng)); $ny = $cy + [int](150 * [math]::Sin($nAng))
-Glow $g $nx $ny 26 (C 120 90 255 150)
-$pen = New-Object System.Drawing.Pen($ln, 4)
-$g.DrawLine($pen, $cx, $cy, $nx, $ny); $pen.Dispose()
-$b = New-Object System.Drawing.SolidBrush($ln); $g.FillEllipse($b, $cx - 9, $cy - 9, 18, 18); $b.Dispose()
-# ── waveform in bracket frame, bottom left-of-center ──
-$fx = 340; $fy = 790; $fw = 600; $fh = 190
-foreach ($corner in @(@($fx, $fy, 1, 1), @(($fx + $fw), $fy, -1, 1), @($fx, ($fy + $fh), 1, -1), @(($fx + $fw), ($fy + $fh), -1, -1))) {
-  $pen = New-Object System.Drawing.Pen($ln, 3)
-  $g.DrawLine($pen, $corner[0], $corner[1], $corner[0] + 34 * $corner[2], $corner[1]);
-  $g.DrawLine($pen, $corner[0], $corner[1], $corner[0], $corner[1] + 26 * $corner[3]); $pen.Dispose()
-}
-$prevX = $fx + 12; $prevY = $fy + 95
-for ($x = $fx + 20; $x -le $fx + $fw - 12; $x += 8) {
-  $t = ($x - $fx) / 70.0
-  $amp = 26 + 44 * [math]::Exp( - [math]::Pow(($x - ($fx + $fw * 0.62)) / 120.0, 2))
-  $yy = $fy + 95 + [int]($amp * [math]::Sin($t * 2.1))
-  $pen = New-Object System.Drawing.Pen((C 70 60 220 110), 5)
-  $g.DrawLine($pen, $prevX, $prevY, $x, $yy); $pen.Dispose()
-  $pen = New-Object System.Drawing.Pen($ln, 2)
-  $g.DrawLine($pen, $prevX, $prevY, $x, $yy); $pen.Dispose()
-  $prevX = $x; $prevY = $yy
-}
-# ── segmented meter column between waveform and dial ──
-$mx = 1090
-for ($i = 0; $i -lt 12; $i++) {
-  $alpha = [int](235 - $i * 17)
-  $b = New-Object System.Drawing.SolidBrush((C $alpha 70 240 120))
-  $g.FillRectangle($b, $mx, 960 - $i * 24, 48, 15); $b.Dispose()
-}
-$pen = New-Object System.Drawing.Pen($lnDim, 2)
-$g.DrawRectangle($pen, $mx - 7, 960 - 11 * 24 - 6, 62, 11 * 24 + 28); $pen.Dispose()
-# ── header tabs, top right ──
-foreach ($i in 0..2) {
-  $tx = 1210 + $i * 156
-  if ($i -eq 1) {
-    $b = New-Object System.Drawing.SolidBrush((C 60 70 240 120)); $g.FillRectangle($b, $tx, 86, 130, 36); $b.Dispose()
+$nAng = 244 * [math]::PI / 180
+$nx = $cx + [int](140 * [math]::Cos($nAng)); $ny = $cy + [int](140 * [math]::Sin($nAng))
+Glow $g $nx $ny 24 (C 120 26 255 128)
+$pen = New-Object System.Drawing.Pen($ln, 4); $g.DrawLine($pen, $cx, $cy, $nx, $ny); $pen.Dispose()
+# trefoil hub: three 54-degree blades + center dot with a dark gap ring
+$b = New-Object System.Drawing.SolidBrush($lnMid)
+foreach ($sa in @(-117, 3, 123)) { $g.FillPie($b, ($cx - 38), ($cy - 38), 76, 76, $sa, 54) }
+$b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 255 4 18 9)); $g.FillEllipse($b, ($cx - 16), ($cy - 16), 32, 32); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush($lnMid); $g.FillEllipse($b, ($cx - 8), ($cy - 8), 16, 16); $b.Dispose()
+$pen = New-Object System.Drawing.Pen($lnMid, 2); $g.DrawLine($pen, ($cx - 178), $cy, ($cx + 178), $cy); $pen.Dispose()
+
+# ── bracketed segmented footer: HP | LEVEL chevrons | AP ──
+$fy = 986
+foreach ($grp in 0..2) {
+  $gx2 = 420 + $grp * 480
+  $pen = New-Object System.Drawing.Pen($lnMid, 3)
+  # end brackets
+  $g.DrawLine($pen, ($gx2 - 22), ($fy - 6), ($gx2 - 22), ($fy + 26))
+  $g.DrawLine($pen, ($gx2 - 22), ($fy - 6), ($gx2 - 10), ($fy - 6))
+  $g.DrawLine($pen, ($gx2 - 22), ($fy + 26), ($gx2 - 10), ($fy + 26))
+  $g.DrawLine($pen, ($gx2 + 322), ($fy - 6), ($gx2 + 322), ($fy + 26))
+  $g.DrawLine($pen, ($gx2 + 310), ($fy - 6), ($gx2 + 322), ($fy - 6))
+  $g.DrawLine($pen, ($gx2 + 310), ($fy + 26), ($gx2 + 322), ($fy + 26))
+  $pen.Dispose()
+  if ($grp -eq 1) {
+    # chevron progress
+    for ($i = 0; $i -lt 7; $i++) {
+      $chX = $gx2 + 20 + $i * 42
+      $pen = New-Object System.Drawing.Pen($(if ($i -lt 4) { $ln } else { $lnDim }), 4)
+      $g.DrawLine($pen, $chX, ($fy - 2), ($chX + 14), ($fy + 10))
+      $g.DrawLine($pen, ($chX + 14), ($fy + 10), $chX, ($fy + 22)); $pen.Dispose()
+    }
+  } else {
+    $lit = if ($grp -eq 0) { 9 } else { 6 }
+    for ($i = 0; $i -lt 12; $i++) {
+      $alpha = if ($i -lt $lit) { 215 } else { 55 }
+      $b = New-Object System.Drawing.SolidBrush((C $alpha 26 240 120))
+      $g.FillRectangle($b, ($gx2 + $i * 25), $fy, 19, 20); $b.Dispose()
+    }
   }
-  $pen = New-Object System.Drawing.Pen($(if ($i -eq 1) { $ln } else { $lnDim }), 2)
-  $g.DrawRectangle($pen, $tx, 86, 130, 36); $pen.Dispose()
 }
-$pen = New-Object System.Drawing.Pen($lnDim, 2)
-$g.DrawLine($pen, 1190, 138, 1700, 138); $pen.Dispose()
-# ── CRT scanlines + slow roll band ──
-for ($y = 0; $y -lt $H; $y += 4) {
-  $pen = New-Object System.Drawing.Pen((C 26 0 0 0), 1)
+
+# ── CRT treatment ──
+# interlaced scanlines, alternating weight
+$row = 0
+for ($y = 0; $y -lt $H; $y += 3) {
+  $pen = New-Object System.Drawing.Pen((C $(if ($row % 2 -eq 0) { 30 } else { 15 }) 0 0 0), 1)
   $g.DrawLine($pen, 0, $y, $W, $y); $pen.Dispose()
+  $row++
 }
-$b = New-Object System.Drawing.SolidBrush((C 9 90 255 150)); $g.FillRectangle($b, 0, 236, $W, 90); $b.Dispose()
-EdgeFade $g "top" 120 110; EdgeFade $g "bottom" 140 130; EdgeFade $g "left" 150 110; EdgeFade $g "right" 150 110
+# jitter lines: a few brighter rows
+foreach ($jy in @(348, 706, 902)) {
+  $pen = New-Object System.Drawing.Pen((C 16 26 255 128), 1)
+  $g.DrawLine($pen, 0, $jy, $W, $jy); $pen.Dispose()
+}
+# roll band: soft gradient stripe drifting down the tube
+$band = New-Object System.Drawing.Rectangle(0, 200, $W, 150)
+$br = New-Object System.Drawing.Drawing2D.LinearGradientBrush($band, (C 0 26 255 128), (C 0 26 255 128), 90.0)
+$blend = New-Object System.Drawing.Drawing2D.ColorBlend(3)
+$blend.Colors = @((C 0 26 255 128), (C 13 26 255 128), (C 0 26 255 128))
+$blend.Positions = @([single]0, [single]0.5, [single]1)
+$br.InterpolationColors = $blend
+$g.FillRectangle($br, $band); $br.Dispose()
+# rounded CRT corners: the sliver between the corner and a 100px arc
+# (arc across the corner, two straight edges back to the corner point)
+$cr = 100
+foreach ($corner in @(
+    @(0, 0, 180, 90),          # top-left: arc from (0,$cr) to ($cr,0)
+    @($W, 0, 270, 90),         # top-right
+    @($W, $H, 0, 90),          # bottom-right
+    @(0, $H, 90, 90))) {       # bottom-left
+  $px = $corner[0]; $py = $corner[1]
+  $ex = if ($px -eq 0) { 0 } else { $W - 2 * $cr }
+  $ey = if ($py -eq 0) { 0 } else { $H - 2 * $cr }
+  $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $path.AddArc($ex, $ey, (2 * $cr), (2 * $cr), $corner[2], $corner[3])
+  $path.AddLine($path.GetLastPoint(), (New-Object System.Drawing.PointF($px, $py)))
+  $path.CloseFigure()
+  $b = New-Object System.Drawing.SolidBrush((C 235 1 6 3)); $g.FillPath($b, $path); $b.Dispose(); $path.Dispose()
+}
+EdgeFade $g "top" 110 130; EdgeFade $g "bottom" 120 120; EdgeFade $g "left" 140 120; EdgeFade $g "right" 140 120
 Save $bmp $g "pipboy.png"
 
 # ── NieR: beige YoRHa-style menu UI, dithered paper, drop shadows ──
