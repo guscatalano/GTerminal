@@ -1034,9 +1034,9 @@ input.set-control {
 }
 
 .settings-inner {
-  max-width: 640px;
-  margin: 0 auto;
-  padding: 28px 24px 56px;
+  max-width: none;
+  margin: 0;
+  padding: 28px 40px 56px;
 }
 
 .settings-h1 {
@@ -1083,6 +1083,25 @@ input.set-control {
 }
 
 .setting-meta {
+  min-width: 0;
+  max-width: 620px; /* keep descriptions readable on a full-width page */
+}
+
+/* Wide block controls (templates, workspaces, custom themes): stack
+   the label above the block so the grid gets the full row width and
+   never fights the description for space. */
+.setting:has(> .tpl-list) {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.setting > .tpl-list {
+  flex: none;
+  width: 100%;
+  max-width: 980px;
+  min-width: 0;
+}
+.tpl-row {
   min-width: 0;
 }
 

@@ -123,6 +123,7 @@ interface AppConfig {
   bg_style?: string;
   bg_image?: string;
   bg_dim?: number;
+  bg_transparency?: number;
 }
 
 // Built-in decorative backgrounds — pure CSS, no assets.
@@ -1209,8 +1210,15 @@ function saveConfig() {
 /// background is active so it shows through the cells.
 function effXtermTheme(): ITheme {
   const t = currentTheme().xterm;
-  // Hex8 form: xterm's color parser handles it reliably everywhere.
-  return bgActive() ? { ...t, background: "#00000000" } : t;
+  if (!bgActive()) return t;
+  // See-through terminal cells: the theme background at reduced alpha
+  // veils the art. 100 = art fully visible (hex8 form: xterm's color
+  // parser handles it reliably everywhere).
+  const transp = Math.min(100, Math.max(0, config.bg_transparency ?? 100));
+  const alpha = Math.round(((100 - transp) / 100) * 255)
+    .toString(16)
+    .padStart(2, "0");
+  return { ...t, background: `${t.background}${alpha}` };
 }
 
 /// Push current appearance settings into every open terminal, switching
@@ -3382,6 +3390,16 @@ function buildSettingsPage() {
       "How strongly the theme color covers the background — higher keeps text more readable.",
       mkNumber(config.bg_dim ?? 50, 0, 95, (v) => {
         config.bg_dim = v;
+        changed();
+      })
+    );
+  }
+  if (bgStyle !== "none") {
+    settingRow(
+      "Background transparency (%)",
+      "How much the background shows through the terminal itself. 100 = fully see-through cells, 0 = solid terminal background.",
+      mkNumber(config.bg_transparency ?? 100, 0, 100, (v) => {
+        config.bg_transparency = v === 100 ? undefined : v;
         changed();
       })
     );
