@@ -1379,6 +1379,43 @@ input.set-control {
   cursor: pointer;
 }
 
+/* text input + Browse… button pair */
+.path-wrap {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.path-wrap .set-control {
+  flex: 1;
+  min-width: 0;
+}
+
+/* compact folder-picker inside template grid cells */
+.tpl-cell {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  min-width: 0;
+}
+.tpl-cell .set-control {
+  flex: 1;
+  min-width: 0;
+}
+.browse-mini {
+  flex: none;
+  border: 1px solid var(--border2);
+  background: var(--panel2);
+  color: var(--muted);
+  border-radius: 5px;
+  padding: 4px 9px;
+  cursor: pointer;
+  font: 12px "Segoe UI", sans-serif;
+}
+.browse-mini:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
 .ws-row .set-btn {
   width: 100%;
   padding: 4px 0;

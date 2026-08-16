@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Terminal } from "@xterm/xterm";
 import type { ITheme } from "@xterm/xterm";
 import Anthropic from "@anthropic-ai/sdk";
@@ -3109,10 +3109,40 @@ function settingRow(title: string, desc: string, control: HTMLElement) {
 }
 
 function buildSettingsPage() {
+  // Conditional rows rebuild the page; keep the scroll position stable.
+  const scroller = document.getElementById("settings-page")!;
+  const scrollAt = scroller.scrollTop;
   settingsList.innerHTML = "";
   const changed = () => {
     applyAppearance();
     saveConfig();
+  };
+  // Native file/folder picker attached to a text input: picking fills
+  // the input and fires its change handler; typing still works.
+  const browseInto = async (
+    input: HTMLInputElement,
+    folder: boolean,
+    filters?: { name: string; extensions: string[] }[]
+  ) => {
+    const picked = await openDialog({ directory: folder, multiple: false, filters }).catch(() => null);
+    if (typeof picked === "string" && picked) {
+      input.value = picked;
+      input.dispatchEvent(new Event("change"));
+    }
+  };
+  const withBrowse = (
+    input: HTMLInputElement,
+    folder: boolean,
+    filters?: { name: string; extensions: string[] }[]
+  ) => {
+    const wrap = document.createElement("div");
+    wrap.className = "path-wrap";
+    const btn = document.createElement("button");
+    btn.className = "set-btn";
+    btn.textContent = "Browse…";
+    btn.addEventListener("click", () => void browseInto(input, folder, filters));
+    wrap.append(input, btn);
+    return wrap;
   };
 
   settingsSection("Appearance");
@@ -3268,14 +3298,6 @@ function buildSettingsPage() {
     })
   );
   settingRow(
-    "Tab width (px)",
-    "Maximum width of tabs in the tab bar. Ctrl+scroll over the tab bar also resizes.",
-    mkNumber(config.tab_width ?? 220, 110, 400, (v) => {
-      config.tab_width = v;
-      changed();
-    })
-  );
-  settingRow(
     "Line height",
     "Vertical spacing between terminal lines.",
     mkSelect(
@@ -3301,12 +3323,21 @@ function buildSettingsPage() {
   );
   settingRow(
     "Cursor blink",
-    "",
+    "Whether the terminal cursor blinks.",
     mkSelect([["on", "On"], ["off", "Off"]], effCursorBlink() ? "on" : "off", (v) => {
       config.cursor_blink = v === "on";
       changed();
     })
   );
+  settingRow(
+    "Tab width (px)",
+    "Maximum width of tabs in the tab bar. Ctrl+scroll over the tab bar also resizes. Dragging one tab's edge sizes just that tab.",
+    mkNumber(config.tab_width ?? 220, 110, 400, (v) => {
+      config.tab_width = v;
+      changed();
+    })
+  );
+  const bgStyle = config.bg_style ?? "theme";
   settingRow(
     "Background",
     "Each theme ships its own background art (the default). New tabs render transparently over it; already-open tabs keep a solid background until reopened.",
@@ -3319,31 +3350,42 @@ function buildSettingsPage() {
         ["grid", "Synth grid"],
         ["custom", "Custom image"],
       ],
-      config.bg_style ?? "theme",
+      bgStyle,
       (v) => {
         config.bg_style = v === "theme" ? undefined : v;
         changed();
+        buildSettingsPage(); // image/dim rows only show when relevant
       }
     )
   );
-  const bgInput = document.createElement("input");
-  bgInput.className = "set-control set-wide";
-  bgInput.type = "text";
-  bgInput.placeholder = "C:\\path\\to\\image.jpg or https://…";
-  bgInput.value = config.bg_image ?? "";
-  bgInput.addEventListener("change", () => {
-    config.bg_image = bgInput.value.trim() || undefined;
-    changed();
-  });
-  settingRow("Background image", "Used when Background is Custom image. Local file path or URL.", bgInput);
-  settingRow(
-    "Background dim (%)",
-    "How strongly the theme color covers the background — higher keeps text more readable.",
-    mkNumber(config.bg_dim ?? 50, 0, 95, (v) => {
-      config.bg_dim = v;
+  if (bgStyle === "custom") {
+    const bgInput = document.createElement("input");
+    bgInput.className = "set-control set-wide";
+    bgInput.type = "text";
+    bgInput.placeholder = "C:\\path\\to\\image.jpg or https://…";
+    bgInput.value = config.bg_image ?? "";
+    bgInput.addEventListener("change", () => {
+      config.bg_image = bgInput.value.trim() || undefined;
       changed();
-    })
-  );
+    });
+    settingRow(
+      "Background image",
+      "Local image file or URL.",
+      withBrowse(bgInput, false, [
+        { name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp"] },
+      ])
+    );
+  }
+  if (["aurora", "nebula", "grid", "custom"].includes(bgStyle)) {
+    settingRow(
+      "Background dim (%)",
+      "How strongly the theme color covers the background — higher keeps text more readable.",
+      mkNumber(config.bg_dim ?? 50, 0, 95, (v) => {
+        config.bg_dim = v;
+        changed();
+      })
+    );
+  }
 
   settingsSection("Tab titles");
   settingRow(
@@ -3362,24 +3404,27 @@ function buildSettingsPage() {
         config.title_mode = v === "smart" ? undefined : v;
         saveConfig();
         updateLiveInfo();
+        buildSettingsPage(); // template row only shows for Custom
       }
     )
   );
-  const tplInput = document.createElement("input");
-  tplInput.className = "set-control set-wide";
-  tplInput.type = "text";
-  tplInput.placeholder = "{program} · {folder}";
-  tplInput.value = config.title_template ?? "";
-  tplInput.addEventListener("change", () => {
-    config.title_template = tplInput.value.trim() || undefined;
-    saveConfig();
-    updateLiveInfo();
-  });
-  settingRow(
-    "Custom template",
-    "Used when style is Custom. Placeholders: {program} {folder} {parent} {path} {shell} {title}. Join parts with ·",
-    tplInput
-  );
+  if (config.title_mode === "custom") {
+    const tplInput = document.createElement("input");
+    tplInput.className = "set-control set-wide";
+    tplInput.type = "text";
+    tplInput.placeholder = "{program} · {folder}";
+    tplInput.value = config.title_template ?? "";
+    tplInput.addEventListener("change", () => {
+      config.title_template = tplInput.value.trim() || undefined;
+      saveConfig();
+      updateLiveInfo();
+    });
+    settingRow(
+      "Custom template",
+      "Placeholders: {program} {folder} {parent} {path} {shell} {title}. Join parts with ·",
+      tplInput
+    );
+  }
 
   settingsSection("Sessions");
   settingRow(
@@ -3402,7 +3447,7 @@ function buildSettingsPage() {
   settingRow(
     "Default directory",
     "New tabs start in this folder. Falls back to your home directory if the path doesn't exist.",
-    cwdInput
+    withBrowse(cwdInput, true)
   );
   // Session templates: named presets combining shell, folder, and title.
   const mkTplInput = (ph: string, value: string, onChange: (v: string) => void) => {
@@ -3437,6 +3482,14 @@ function buildSettingsPage() {
         t.cwd = v || undefined;
         saveConfig();
       });
+      const cwdCell = document.createElement("div");
+      cwdCell.className = "tpl-cell";
+      const cwdBrowse = document.createElement("button");
+      cwdBrowse.className = "browse-mini";
+      cwdBrowse.textContent = "…";
+      cwdBrowse.title = "Browse for a folder";
+      cwdBrowse.addEventListener("click", () => void browseInto(cwd, true));
+      cwdCell.append(cwd, cwdBrowse);
       const title = mkTplInput("Tab title (blank = automatic)", t.title ?? "", (v) => {
         t.title = v || undefined;
         saveConfig();
@@ -3451,7 +3504,7 @@ function buildSettingsPage() {
         saveConfig();
         renderTemplates();
       });
-      row.append(name, shellSel, cwd, title, del);
+      row.append(name, shellSel, cwdCell, title, del);
       tplBlock.appendChild(row);
     });
     const add = document.createElement("button");
@@ -3691,6 +3744,7 @@ function buildSettingsPage() {
   about.append(aboutApp, aboutBy, aboutLinks);
   settingsList.appendChild(about);
   filterSettings(); // rebuilds (e.g. theme change) keep the active query
+  scroller.scrollTop = scrollAt;
 }
 
 async function main() {
