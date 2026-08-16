@@ -167,6 +167,12 @@ function applyBackground() {
   // Painted on #main (behind panes, settings, and history alike) so the
   // art stays visible on every page, not just the terminals.
   const mainEl = document.getElementById("main")!;
+  // The settings/history wash follows the transparency setting too:
+  // fully see-through terminals keep the light 55% wash, a solid
+  // terminal makes those pages solid as well.
+  const transp = Math.min(100, Math.max(0, config.bg_transparency ?? 100));
+  const washPct = Math.round(55 + (100 - transp) * 0.45);
+  document.documentElement.style.setProperty("--wash-pct", `${washPct}%`);
   const image = resolvedBgCss();
   if (!image) {
     mainEl.style.background = "";
