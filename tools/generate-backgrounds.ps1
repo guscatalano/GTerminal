@@ -1440,4 +1440,167 @@ foreach ($corner in @(@(0, 0), @($W, 0))) {
 }
 Save $bmp $g "space.png"
 
+function EdgeFade {
+  # subtle vignette: darken one edge with a linear falloff
+  param($g, $side, $depth, $alpha)
+  switch ($side) {
+    "top"    { $rect = New-Object System.Drawing.Rectangle(0, 0, $W, $depth); $ang = 90.0 }
+    "bottom" { $rect = New-Object System.Drawing.Rectangle(0, ($H - $depth), $W, $depth); $ang = 270.0 }
+    "left"   { $rect = New-Object System.Drawing.Rectangle(0, 0, $depth, $H); $ang = 0.0 }
+    "right"  { $rect = New-Object System.Drawing.Rectangle(($W - $depth), 0, $depth, $H); $ang = 180.0 }
+  }
+  $br = New-Object System.Drawing.Drawing2D.LinearGradientBrush($rect, (C $alpha 0 0 0), (C 0 0 0 0), $ang)
+  $g.FillRectangle($br, $rect); $br.Dispose()
+}
+
+# ── Pip-Boy: phosphor-green wrist-console HUD on a CRT ──
+$rng = New-Object System.Random(111)
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 8 26 13) (C 255 3 12 7)
+Glow $g 960 560 950 (C 24 60 255 130)          # CRT center bloom
+Glow $g 1430 760 340 (C 26 70 255 140)         # bloom behind the dial
+# phosphor grain
+for ($i = 0; $i -lt 900; $i++) {
+  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(8, 24) 90 255 140))
+  $g.FillRectangle($b, $rng.Next(0, $W), $rng.Next(0, $H), 1, 1); $b.Dispose()
+}
+$ln = C 210 70 240 120       # bright phosphor line
+$lnDim = C 90 60 200 105     # dim phosphor line
+# ── dial gauge, bottom right ──
+$cx = 1430; $cy = 760
+$pen = New-Object System.Drawing.Pen($ln, 3)
+$g.DrawEllipse($pen, $cx - 190, $cy - 190, 380, 380); $pen.Dispose()
+$pen = New-Object System.Drawing.Pen($lnDim, 2)
+$g.DrawEllipse($pen, $cx - 210, $cy - 210, 420, 420); $pen.Dispose()
+$pen = New-Object System.Drawing.Pen($lnDim, 2)
+$g.DrawArc($pen, $cx - 150, $cy - 150, 300, 300, 150, 240); $pen.Dispose()
+# rim ticks
+for ($i = 0; $i -lt 24; $i++) {
+  $ang = ($i / 24.0) * 2 * [math]::PI
+  $r1 = if ($i % 3 -eq 0) { 162 } else { 174 }
+  $x1 = $cx + [int]($r1 * [math]::Cos($ang)); $y1 = $cy + [int]($r1 * [math]::Sin($ang))
+  $x2 = $cx + [int](186 * [math]::Cos($ang)); $y2 = $cy + [int](186 * [math]::Sin($ang))
+  $pen = New-Object System.Drawing.Pen($(if ($i % 3 -eq 0) { $ln } else { $lnDim }), $(if ($i % 3 -eq 0) { 3 } else { 2 }))
+  $g.DrawLine($pen, $x1, $y1, $x2, $y2); $pen.Dispose()
+}
+# needle at 205 degrees + hub
+$nAng = 205 * [math]::PI / 180
+$nx = $cx + [int](150 * [math]::Cos($nAng)); $ny = $cy + [int](150 * [math]::Sin($nAng))
+Glow $g $nx $ny 26 (C 120 90 255 150)
+$pen = New-Object System.Drawing.Pen($ln, 4)
+$g.DrawLine($pen, $cx, $cy, $nx, $ny); $pen.Dispose()
+$b = New-Object System.Drawing.SolidBrush($ln); $g.FillEllipse($b, $cx - 9, $cy - 9, 18, 18); $b.Dispose()
+# ── waveform in bracket frame, bottom left-of-center ──
+$fx = 340; $fy = 790; $fw = 600; $fh = 190
+foreach ($corner in @(@($fx, $fy, 1, 1), @(($fx + $fw), $fy, -1, 1), @($fx, ($fy + $fh), 1, -1), @(($fx + $fw), ($fy + $fh), -1, -1))) {
+  $pen = New-Object System.Drawing.Pen($ln, 3)
+  $g.DrawLine($pen, $corner[0], $corner[1], $corner[0] + 34 * $corner[2], $corner[1]);
+  $g.DrawLine($pen, $corner[0], $corner[1], $corner[0], $corner[1] + 26 * $corner[3]); $pen.Dispose()
+}
+$prevX = $fx + 12; $prevY = $fy + 95
+for ($x = $fx + 20; $x -le $fx + $fw - 12; $x += 8) {
+  $t = ($x - $fx) / 70.0
+  $amp = 26 + 44 * [math]::Exp( - [math]::Pow(($x - ($fx + $fw * 0.62)) / 120.0, 2))
+  $yy = $fy + 95 + [int]($amp * [math]::Sin($t * 2.1))
+  $pen = New-Object System.Drawing.Pen((C 70 60 220 110), 5)
+  $g.DrawLine($pen, $prevX, $prevY, $x, $yy); $pen.Dispose()
+  $pen = New-Object System.Drawing.Pen($ln, 2)
+  $g.DrawLine($pen, $prevX, $prevY, $x, $yy); $pen.Dispose()
+  $prevX = $x; $prevY = $yy
+}
+# ── segmented meter column between waveform and dial ──
+$mx = 1090
+for ($i = 0; $i -lt 12; $i++) {
+  $alpha = [int](235 - $i * 17)
+  $b = New-Object System.Drawing.SolidBrush((C $alpha 70 240 120))
+  $g.FillRectangle($b, $mx, 960 - $i * 24, 48, 15); $b.Dispose()
+}
+$pen = New-Object System.Drawing.Pen($lnDim, 2)
+$g.DrawRectangle($pen, $mx - 7, 960 - 11 * 24 - 6, 62, 11 * 24 + 28); $pen.Dispose()
+# ── header tabs, top right ──
+foreach ($i in 0..2) {
+  $tx = 1210 + $i * 156
+  if ($i -eq 1) {
+    $b = New-Object System.Drawing.SolidBrush((C 60 70 240 120)); $g.FillRectangle($b, $tx, 86, 130, 36); $b.Dispose()
+  }
+  $pen = New-Object System.Drawing.Pen($(if ($i -eq 1) { $ln } else { $lnDim }), 2)
+  $g.DrawRectangle($pen, $tx, 86, 130, 36); $pen.Dispose()
+}
+$pen = New-Object System.Drawing.Pen($lnDim, 2)
+$g.DrawLine($pen, 1190, 138, 1700, 138); $pen.Dispose()
+# ── CRT scanlines + slow roll band ──
+for ($y = 0; $y -lt $H; $y += 4) {
+  $pen = New-Object System.Drawing.Pen((C 26 0 0 0), 1)
+  $g.DrawLine($pen, 0, $y, $W, $y); $pen.Dispose()
+}
+$b = New-Object System.Drawing.SolidBrush((C 9 90 255 150)); $g.FillRectangle($b, 0, 236, $W, 90); $b.Dispose()
+EdgeFade $g "top" 120 110; EdgeFade $g "bottom" 140 130; EdgeFade $g "left" 150 110; EdgeFade $g "right" 150 110
+Save $bmp $g "pipboy.png"
+
+# ── NieR: beige YoRHa-style menu UI, dithered paper, drop shadows ──
+$rng = New-Object System.Random(2017)
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 214 209 188) (C 255 199 194 175)
+$ink = C 255 74 70 58
+# dither dot grid
+for ($y = 8; $y -lt $H; $y += 13) {
+  $off = if ((($y / 13) % 2) -eq 0) { 0 } else { 6 }
+  for ($x = 8 + $off; $x -lt $W; $x += 13) {
+    if ($rng.NextDouble() -lt 0.7) {
+      $b = New-Object System.Drawing.SolidBrush((C 11 74 70 58))
+      $g.FillRectangle($b, $x, $y, 1, 1); $b.Dispose()
+    }
+  }
+}
+# paper grain
+for ($i = 0; $i -lt 2200; $i++) {
+  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(5, 13) 60 56 46))
+  $g.FillRectangle($b, $rng.Next(0, $W), $rng.Next(0, $H), 1, 1); $b.Dispose()
+}
+# section divider with diamond, right column
+$pen = New-Object System.Drawing.Pen((C 130 74 70 58), 2)
+$g.DrawLine($pen, 1150, 486, 1640, 486); $pen.Dispose()
+$dia = New-Object 'System.Drawing.Point[]' 4
+$dia[0] = New-Object System.Drawing.Point(1150, 478); $dia[1] = New-Object System.Drawing.Point(1158, 486)
+$dia[2] = New-Object System.Drawing.Point(1150, 494); $dia[3] = New-Object System.Drawing.Point(1142, 486)
+$b = New-Object System.Drawing.SolidBrush((C 220 74 70 58)); $g.FillPolygon($b, $dia); $b.Dispose()
+# menu bars with offset drop shadows; first is "selected" (light with bullet)
+for ($i = 0; $i -lt 5; $i++) {
+  $by = 540 + $i * 68
+  $b = New-Object System.Drawing.SolidBrush((C 46 40 38 30))
+  $g.FillRectangle($b, 1158, $by + 7, 482, 46); $b.Dispose()
+  if ($i -eq 0) {
+    $b = New-Object System.Drawing.SolidBrush((C 255 235 230 210)); $g.FillRectangle($b, 1150, $by, 482, 46); $b.Dispose()
+    $pen = New-Object System.Drawing.Pen($ink, 2); $g.DrawRectangle($pen, 1150, $by, 482, 46); $pen.Dispose()
+    $b = New-Object System.Drawing.SolidBrush($ink); $g.FillRectangle($b, 1166, $by + 17, 12, 12); $b.Dispose()
+    $b = New-Object System.Drawing.SolidBrush((C 150 74 70 58)); $g.FillRectangle($b, 1192, $by + 19, 300, 8); $b.Dispose()
+  } else {
+    $b = New-Object System.Drawing.SolidBrush((C 232 74 70 58)); $g.FillRectangle($b, 1150, $by, 482, 46); $b.Dispose()
+    $b = New-Object System.Drawing.SolidBrush((C 120 214 209 188)); $g.FillRectangle($b, 1166, $by + 19, $rng.Next(180, 340), 8); $b.Dispose()
+  }
+}
+# small square cluster, top right (data blocks)
+for ($row = 0; $row -lt 4; $row++) {
+  for ($col = 0; $col -lt 6; $col++) {
+    $sx = 1470 + $col * 24; $sy = 120 + $row * 24
+    if ($rng.NextDouble() -lt 0.45) {
+      $b = New-Object System.Drawing.SolidBrush((C 205 74 70 58)); $g.FillRectangle($b, $sx, $sy, 15, 15); $b.Dispose()
+    } else {
+      $pen = New-Object System.Drawing.Pen((C 95 74 70 58), 1); $g.DrawRectangle($pen, $sx, $sy, 15, 15); $pen.Dispose()
+    }
+  }
+}
+# bottom diagonal-stripe band
+$clip = New-Object System.Drawing.Rectangle(0, 972, $W, 66)
+$g.SetClip($clip)
+for ($x = -80; $x -lt $W + 80; $x += 26) {
+  $pen = New-Object System.Drawing.Pen((C 22 74 70 58), 9)
+  $g.DrawLine($pen, $x, 1050, $x + 70, 960); $pen.Dispose()
+}
+$g.ResetClip()
+$pen = New-Object System.Drawing.Pen((C 90 74 70 58), 2)
+$g.DrawLine($pen, 0, 972, $W, 972); $g.DrawLine($pen, 0, 1038, $W, 1038); $pen.Dispose()
+EdgeFade $g "top" 90 24; EdgeFade $g "bottom" 90 26; EdgeFade $g "left" 110 20; EdgeFade $g "right" 110 20
+Save $bmp $g "nier.png"
+
 "done -> $out"

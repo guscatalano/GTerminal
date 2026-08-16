@@ -1093,6 +1093,38 @@ THEMES.space = mkTheme(
 THEMES.space.xterm.cursor = "#59dfff";
 THEMES.space.xterm.selectionBackground = "#59dfff33";
 
+// Pip-Boy: monochrome phosphor-green wrist-console CRT — dial gauge,
+// waveform, and meter HUD behind scanlines.
+THEMES.pipboy = mkTheme(
+  "Pip-Boy",
+  "white",
+  ['"Lucida Console", Consolas, monospace', 1.2, "block"],
+  'linear-gradient(rgba(4,16,9,0.42), rgba(4,16,9,0.58)), url("/backgrounds/pipboy.png") center / cover no-repeat, linear-gradient(180deg, #08170d, #04100a)',
+  "#06130a",
+  "#2bf06a",
+  [
+    "#06130a", "#ff8d7a", "#2ee868", "#a9f06e", "#3fd98a", "#63e8a8", "#8dffc4", "#c9ffdb",
+    "#1e7a44", "#ffab99", "#55ff92", "#c9ff90", "#66e8aa", "#9effc9", "#c2ffe0", "#ebfff3",
+  ]
+);
+THEMES.pipboy.xterm.cursor = "#55ff92";
+THEMES.pipboy.xterm.selectionBackground = "#2bff6633";
+
+// NieR: the YoRHa menu look — beige paper, olive-gray ink, bronze
+// accent, drop-shadowed UI bars in the backdrop.
+THEMES.nier = mkTheme(
+  "NieR",
+  "black",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "underline"],
+  'linear-gradient(rgba(214,209,188,0.35), rgba(214,209,188,0.48)), url("/backgrounds/nier.png") center / cover no-repeat, linear-gradient(180deg, #d6d1bc, #c7c2af)',
+  "#d1ccb5",
+  "#454138",
+  [
+    "#454138", "#a3492f", "#5f7134", "#8a6c22", "#6e5a2e", "#7d5165", "#4f7266", "#c9c4ad",
+    "#5c574a", "#8a3d27", "#4d5c2a", "#66501a", "#57482a", "#684458", "#3f5d52", "#d6d1bc",
+  ]
+);
+
 let themeKey = "one-dark";
 function currentTheme(): ThemeDef {
   return THEMES[themeKey] ?? THEMES["one-dark"];
