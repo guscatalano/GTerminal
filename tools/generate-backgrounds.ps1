@@ -1577,36 +1577,56 @@ $b = New-Object System.Drawing.SolidBrush((C 255 4 18 9)); $g.FillEllipse($b, ($
 $b = New-Object System.Drawing.SolidBrush($lnMid); $g.FillEllipse($b, ($cx - 8), ($cy - 8), 16, 16); $b.Dispose()
 $pen = New-Object System.Drawing.Pen($lnMid, 2); $g.DrawLine($pen, ($cx - 178), $cy, ($cx + 178), $cy); $pen.Dispose()
 
-# ── STAT figure, center: cartoon-proportioned silhouette with limb
-# condition bars on leader lines (big head, standing pose) ──
+# ── STAT figure, center: retro-cartoon line-art guy, big grin and a
+# thumbs-up (original mascot in the 50s-cartoon style, not a copy) ──
 $fx = 860
 Glow $g $fx 750 240 (C 20 26 255 128)
-$fill = New-Object System.Drawing.SolidBrush((C 175 24 235 118))
-$limb = New-Object System.Drawing.Pen((C 175 24 235 118), 20)
-$limb.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
-$limb.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
-# head (big, cartoon proportions) + neck
-$g.FillEllipse($fill, ($fx - 46), 556, 92, 92)
-$pen = New-Object System.Drawing.Pen($ln, 3); $g.DrawEllipse($pen, ($fx - 46), 556, 92, 92); $pen.Dispose()
-$g.FillRectangle($fill, ($fx - 12), 646, 24, 18)
-# torso: shoulders wider than hips
-$torso = New-Object 'System.Drawing.Point[]' 4
-$torso[0] = New-Object System.Drawing.Point(($fx - 52), 664)
-$torso[1] = New-Object System.Drawing.Point(($fx + 52), 664)
-$torso[2] = New-Object System.Drawing.Point(($fx + 34), 800)
-$torso[3] = New-Object System.Drawing.Point(($fx - 34), 800)
-$g.FillPolygon($fill, $torso)
-# arms: slight A-pose, two segments each
-$g.DrawLine($limb, ($fx - 50), 684, ($fx - 92), 748)
-$g.DrawLine($limb, ($fx - 92), 748, ($fx - 104), 812)
-$g.DrawLine($limb, ($fx + 50), 684, ($fx + 92), 748)
-$g.DrawLine($limb, ($fx + 92), 748, ($fx + 104), 812)
-# legs
-$g.DrawLine($limb, ($fx - 20), 796, ($fx - 34), 902)
-$g.DrawLine($limb, ($fx - 34), 902, ($fx - 38), 950)
-$g.DrawLine($limb, ($fx + 20), 796, ($fx + 34), 902)
-$g.DrawLine($limb, ($fx + 34), 902, ($fx + 38), 950)
-$limb.Dispose(); $fill.Dispose()
+$stroke = New-Object System.Drawing.Pen($ln, 7)
+$stroke.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+$stroke.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+$thin = New-Object System.Drawing.Pen($ln, 4)
+$thin.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+$thin.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+# big cartoon head
+$g.DrawEllipse($stroke, ($fx - 56), 548, 112, 112)
+# face: two dot eyes + wide grin arc + brow flick
+$b = New-Object System.Drawing.SolidBrush($ln)
+$g.FillEllipse($b, ($fx - 26), 586, 10, 10); $g.FillEllipse($b, ($fx + 16), 586, 10, 10); $b.Dispose()
+$g.DrawArc($thin, ($fx - 32), 588, 64, 52, 25, 130)
+$g.DrawArc($thin, ($fx + 10), 574, 22, 12, 200, 120)
+# neck + collar V
+$g.DrawLine($thin, ($fx - 10), 660, ($fx - 10), 676)
+$g.DrawLine($thin, ($fx + 10), 660, ($fx + 10), 676)
+$g.DrawLine($thin, ($fx - 26), 682, $fx, 706); $g.DrawLine($thin, ($fx + 26), 682, $fx, 706)
+# torso outline: shoulders to waist, open at the neck
+$g.DrawLine($stroke, ($fx - 48), 682, ($fx + 48), 682)
+$g.DrawLine($stroke, ($fx - 48), 682, ($fx - 34), 788)
+$g.DrawLine($stroke, ($fx + 48), 682, ($fx + 34), 788)
+$g.DrawLine($stroke, ($fx - 34), 788, ($fx + 34), 788)
+# belt with buckle
+$g.DrawLine($thin, ($fx - 36), 762, ($fx + 36), 762)
+$pen = New-Object System.Drawing.Pen($ln, 3); $g.DrawRectangle($pen, ($fx - 9), 756, 18, 12); $pen.Dispose()
+# left arm akimbo: shoulder -> elbow out -> hand on hip
+$g.DrawLine($stroke, ($fx - 46), 692, ($fx - 88), 730)
+$g.DrawLine($stroke, ($fx - 88), 730, ($fx - 52), 766)
+# right arm raised in a thumbs-up: shoulder -> elbow -> up
+$g.DrawLine($stroke, ($fx + 46), 692, ($fx + 96), 672)
+$g.DrawLine($stroke, ($fx + 96), 672, ($fx + 116), 622)
+# fist (filled) with a chunky thumb angled back
+$b = New-Object System.Drawing.SolidBrush($ln); $g.FillEllipse($b, ($fx + 98), 590, 34, 30); $b.Dispose()
+$thumb = New-Object System.Drawing.Pen($ln, 11)
+$thumb.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+$thumb.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+$g.DrawLine($thumb, ($fx + 108), 594, ($fx + 98), 566)
+$thumb.Dispose()
+# legs slightly apart, outward feet
+$g.DrawLine($stroke, ($fx - 18), 792, ($fx - 30), 900)
+$g.DrawLine($stroke, ($fx - 30), 900, ($fx - 34), 944)
+$g.DrawLine($stroke, ($fx - 34), 944, ($fx - 62), 946)
+$g.DrawLine($stroke, ($fx + 18), 792, ($fx + 30), 900)
+$g.DrawLine($stroke, ($fx + 30), 900, ($fx + 34), 944)
+$g.DrawLine($stroke, ($fx + 34), 944, ($fx + 62), 946)
+$stroke.Dispose(); $thin.Dispose()
 # limb condition bars: leader line + 4-segment bar, per head/arms/legs
 function LimbBar {
   param($g2, $lx1, $ly1, $lx2, $ly2, $lit)
@@ -1619,9 +1639,9 @@ function LimbBar {
     $g2.FillRectangle($b2, ($bx + $i * 16), ($ly2 - 5), 12, 10); $b2.Dispose()
   }
 }
-LimbBar $g ($fx + 40) 588 ($fx + 130) 570 4      # head
-LimbBar $g ($fx - 98) 760 ($fx - 160) 742 3      # left arm
-LimbBar $g ($fx + 98) 760 ($fx + 175) 742 4      # right arm
+LimbBar $g ($fx - 46) 574 ($fx - 140) 556 4      # head
+LimbBar $g ($fx - 90) 734 ($fx - 165) 738 3      # left arm
+LimbBar $g ($fx + 126) 610 ($fx + 190) 640 4     # right arm
 LimbBar $g ($fx - 36) 912 ($fx - 150) 928 4      # left leg
 LimbBar $g ($fx + 36) 912 ($fx + 150) 928 2      # right leg
 
