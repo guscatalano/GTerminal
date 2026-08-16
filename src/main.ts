@@ -2033,14 +2033,12 @@ function saveConfig() {
 function effXtermTheme(): ITheme {
   const t = currentTheme().xterm;
   if (!bgActive()) return t;
-  // See-through terminal cells: the theme background at reduced alpha
-  // veils the art. 100 = art fully visible (hex8 form: xterm's color
-  // parser handles it reliably everywhere).
-  const transp = effTransparency();
-  const alpha = Math.round(((100 - transp) / 100) * 255)
-    .toString(16)
-    .padStart(2, "0");
-  return { ...t, background: `${t.background}${alpha}` };
+  // Cells stay fully transparent and the veil lives on the pane instead
+  // (--cell-veil). Veiling the cells themselves leaves every pixel that
+  // isn't a cell — the gutter, and the remainder where the row grid does
+  // not divide evenly into the pane — showing the art at full strength.
+  // Hex8 form: xterm's colour parser handles it reliably everywhere.
+  return { ...t, background: "#00000000" };
 }
 
 /// Push current appearance settings into every open terminal, switching
@@ -2956,8 +2954,23 @@ function showContextMenu(x: number, y: number, items: CtxItem[]) {
   }
   closeMenus(ctxMenu);
   ctxMenu.classList.add("open");
-  ctxMenu.style.left = `${Math.min(x, window.innerWidth - ctxMenu.offsetWidth - 8)}px`;
-  ctxMenu.style.top = `${Math.min(y, window.innerHeight - ctxMenu.offsetHeight - 8)}px`;
+  placeFloating(ctxMenu, x, y);
+}
+
+/// Position a floating element at a point, kept wholly inside the window.
+/// Flips above the point when there is more room there, and clamps on
+/// both axes so nothing can end up off-screen and unreachable.
+function placeFloating(el: HTMLElement, x: number, y: number) {
+  const margin = 8;
+  const w = el.offsetWidth;
+  const h = el.offsetHeight;
+  const roomBelow = window.innerHeight - y;
+  const top =
+    h + margin > roomBelow && y > roomBelow
+      ? Math.max(margin, y - h) // flip above the anchor point
+      : Math.min(y, window.innerHeight - h - margin);
+  el.style.left = `${Math.max(margin, Math.min(x, window.innerWidth - w - margin))}px`;
+  el.style.top = `${Math.max(margin, top)}px`;
 }
 
 /// Rename wherever the tab is actually visible: the sidebar row when the
@@ -4919,10 +4932,10 @@ const STATUS_BUILTINS: Record<string, StatusItemDef> = {
         ["Logical cores", String(navigator.hardwareConcurrency || "?")],
         ["Uptime", fmtDuration(c.stats.uptime_s)],
       ],
-      actions: [
-        { label: "Task Manager", cmd: "Start-Process taskmgr" },
-        { label: "Resource Monitor", cmd: "Start-Process resmon" },
-      ],
+      // Each external tool is offered by exactly one item: Task Manager
+      // here, Resource Monitor on Disk I/O, Performance Monitor on
+      // counter items.
+      actions: [{ label: "Task Manager", cmd: "Start-Process taskmgr" }],
     }),
   },
   mem: {
@@ -4938,8 +4951,8 @@ const STATUS_BUILTINS: Record<string, StatusItemDef> = {
           ["Total", fmtBytes(s.mem_total)],
           ["In use", s.mem_total ? pct((s.mem_used / s.mem_total) * 100) : "—"],
           ["Commit", `${fmtBytes(s.page_used)} / ${fmtBytes(s.page_total)}`],
+          ["Free commit", fmtBytes(s.page_total - s.page_used)],
         ],
-        actions: [{ label: "Task Manager", cmd: "Start-Process taskmgr" }],
       };
     },
   },
@@ -5177,12 +5190,14 @@ function toggleStatusDetail(id: string, anchor: HTMLElement) {
   }
   statusOpenId = id;
   renderStatusDetail(id);
-  // Anchor to the item, clamped inside the window.
+  // Centre on the item and sit just above the bar, clamped to the window.
   const r = anchor.getBoundingClientRect();
   statusDetailEl.classList.add("open");
-  const w = statusDetailEl.offsetWidth;
-  const left = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), window.innerWidth - w - 8);
-  statusDetailEl.style.left = `${left}px`;
+  placeFloating(
+    statusDetailEl,
+    r.left + r.width / 2 - statusDetailEl.offsetWidth / 2,
+    r.top - statusDetailEl.offsetHeight - 6
+  );
   renderStatusBar();
 }
 

@@ -669,7 +669,9 @@ button.armed,
   right: 8px;
   z-index: 10;
   min-width: 220px;
-  max-height: 320px;
+  /* Never taller than the window itself — a fixed cap alone lets the
+     bottom of a long menu fall outside the frame, unreachable. */
+  max-height: min(320px, calc(100vh - 60px));
   overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -1535,11 +1537,12 @@ input.set-control {
 /* expanded detail, anchored just above the bar */
 #status-detail {
   display: none;
-  position: absolute;
-  bottom: 24px;
+  position: fixed;
   z-index: 40;
   min-width: 260px;
-  max-width: 460px;
+  max-width: min(460px, calc(100vw - 16px));
+  max-height: calc(100vh - 60px);
+  overflow-y: auto;
   padding: 12px 14px;
   border: 1px solid var(--border2);
   border-radius: 8px;
@@ -1669,17 +1672,17 @@ input.set-control {
   min-height: 0;
 }
 
-/* The gutter around the terminal holds no cells, so it would show the
-   background art at full strength while the cells behind text are
-   veiled — a bright strip left of column 0. It's a border, not padding,
-   so --cell-veil (the cells' own veil, set from JS) paints exactly that
-   gutter; a background here would instead double-veil the cells. */
+/* The whole pane carries the background veil (--cell-veil, set from JS
+   from the transparency setting) and the terminal's own cells are fully
+   transparent. Veiling the cells instead leaves the gutter — and the
+   remainder where the row grid doesn't divide evenly into the pane —
+   showing the art at full strength, which reads as the background
+   bleeding past the terminal's edges. */
 .pane {
   position: absolute;
   inset: 0;
-  border-style: solid;
-  border-width: 8px 4px 4px 10px;
-  border-color: var(--cell-veil, transparent);
+  padding: 8px 4px 4px 10px;
+  background: var(--cell-veil, transparent);
   display: none;
 }
 
