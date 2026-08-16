@@ -1728,10 +1728,25 @@ EdgeFade $g "top" 110 130; EdgeFade $g "bottom" 120 120; EdgeFade $g "left" 140 
 Save $bmp $g "pipboy.png"
 
 # ── NieR: beige YoRHa-style menu UI, dithered paper, drop shadows ──
+function Diamond {
+  param($g, $x, $y, $r, $color)
+  $pts = New-Object 'System.Drawing.Point[]' 4
+  $pts[0] = New-Object System.Drawing.Point($x, ($y - $r))
+  $pts[1] = New-Object System.Drawing.Point(($x + $r), $y)
+  $pts[2] = New-Object System.Drawing.Point($x, ($y + $r))
+  $pts[3] = New-Object System.Drawing.Point(($x - $r), $y)
+  $b = New-Object System.Drawing.SolidBrush($color); $g.FillPolygon($b, $pts); $b.Dispose()
+}
+
 $rng = New-Object System.Random(2017)
 $bmp, $g = New-Canvas
 Fill-Vertical $g (C 255 214 209 188) (C 255 199 194 175)
-$ink = C 255 74 70 58
+$inkC = C 255 74 70 58            # muddy dark olive-gray "ink"
+$blockC = C 245 64 60 50          # header/selection block fill
+$shadowC = C 44 40 38 30          # drop shadow
+$subBarC = C 255 224 219 200      # lighter beige sub-bar
+$liteDash = C 200 214 209 188     # light text dash on dark blocks
+
 # dither dot grid
 for ($y = 8; $y -lt $H; $y += 13) {
   $off = if ((($y / 13) % 2) -eq 0) { 0 } else { 6 }
@@ -1747,49 +1762,110 @@ for ($i = 0; $i -lt 2200; $i++) {
   $b = New-Object System.Drawing.SolidBrush((C $rng.Next(5, 13) 60 56 46))
   $g.FillRectangle($b, $rng.Next(0, $W), $rng.Next(0, $H), 1, 1); $b.Dispose()
 }
-# section divider with diamond, right column
-$pen = New-Object System.Drawing.Pen((C 130 74 70 58), 2)
-$g.DrawLine($pen, 1150, 486, 1640, 486); $pen.Dispose()
-$dia = New-Object 'System.Drawing.Point[]' 4
-$dia[0] = New-Object System.Drawing.Point(1150, 478); $dia[1] = New-Object System.Drawing.Point(1158, 486)
-$dia[2] = New-Object System.Drawing.Point(1150, 494); $dia[3] = New-Object System.Drawing.Point(1142, 486)
-$b = New-Object System.Drawing.SolidBrush((C 220 74 70 58)); $g.FillPolygon($b, $dia); $b.Dispose()
-# menu bars with offset drop shadows; first is "selected" (light with bullet)
-for ($i = 0; $i -lt 5; $i++) {
-  $by = 540 + $i * 68
-  $b = New-Object System.Drawing.SolidBrush((C 46 40 38 30))
-  $g.FillRectangle($b, 1158, $by + 7, 482, 46); $b.Dispose()
-  if ($i -eq 0) {
-    $b = New-Object System.Drawing.SolidBrush((C 255 235 230 210)); $g.FillRectangle($b, 1150, $by, 482, 46); $b.Dispose()
-    $pen = New-Object System.Drawing.Pen($ink, 2); $g.DrawRectangle($pen, 1150, $by, 482, 46); $pen.Dispose()
-    $b = New-Object System.Drawing.SolidBrush($ink); $g.FillRectangle($b, 1166, $by + 17, 12, 12); $b.Dispose()
-    $b = New-Object System.Drawing.SolidBrush((C 150 74 70 58)); $g.FillRectangle($b, 1192, $by + 19, 300, 8); $b.Dispose()
+
+# ── header: muddy dark block, letter-spaced dashes, tag chips ──
+$b = New-Object System.Drawing.SolidBrush($shadowC); $g.FillRectangle($b, 1067, 77, 770, 54); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush($blockC); $g.FillRectangle($b, 1060, 70, 770, 54); $b.Dispose()
+$hx = 1092
+foreach ($dw in @(64, 12, 46, 12, 78, 12, 30)) {
+  if ($dw -gt 20) {
+    $b = New-Object System.Drawing.SolidBrush($liteDash); $g.FillRectangle($b, $hx, 90, $dw, 13); $b.Dispose()
+  }
+  $hx += $dw
+}
+$pen = New-Object System.Drawing.Pen((C 130 74 70 58), 2); $g.DrawLine($pen, 1060, 146, 1830, 146); $pen.Dispose()
+Diamond $g 1060 146 7 $inkC
+# tag chips under the header line
+$tx = 1060
+foreach ($tw in @(96, 74, 118)) {
+  if ($tx -eq 1060) {
+    $b = New-Object System.Drawing.SolidBrush($blockC); $g.FillRectangle($b, $tx, 160, $tw, 24); $b.Dispose()
+    $b = New-Object System.Drawing.SolidBrush($liteDash); $g.FillRectangle($b, ($tx + 14), 169, ($tw - 28), 7); $b.Dispose()
   } else {
-    $b = New-Object System.Drawing.SolidBrush((C 232 74 70 58)); $g.FillRectangle($b, 1150, $by, 482, 46); $b.Dispose()
-    $b = New-Object System.Drawing.SolidBrush((C 120 214 209 188)); $g.FillRectangle($b, 1166, $by + 19, $rng.Next(180, 340), 8); $b.Dispose()
+    $pen = New-Object System.Drawing.Pen((C 120 74 70 58), 1); $g.DrawRectangle($pen, $tx, 160, $tw, 24); $pen.Dispose()
+    $b = New-Object System.Drawing.SolidBrush((C 150 74 70 58)); $g.FillRectangle($b, ($tx + 14), 169, ($tw - 28), 7); $b.Dispose()
+  }
+  $tx += $tw + 14
+}
+
+# ── menu column: dark inverted selection first, beige sub-bars after ──
+for ($i = 0; $i -lt 5; $i++) {
+  $by = 226 + $i * 64
+  $b = New-Object System.Drawing.SolidBrush($shadowC); $g.FillRectangle($b, 1157, ($by + 7), 500, 46); $b.Dispose()
+  if ($i -eq 0) {
+    $b = New-Object System.Drawing.SolidBrush($blockC); $g.FillRectangle($b, 1150, $by, 500, 46); $b.Dispose()
+    Diamond $g 1176 ($by + 23) 7 $liteDash
+    $b = New-Object System.Drawing.SolidBrush($liteDash); $g.FillRectangle($b, 1198, ($by + 19), 250, 9); $b.Dispose()
+  } else {
+    $b = New-Object System.Drawing.SolidBrush($subBarC); $g.FillRectangle($b, 1150, $by, 500, 46); $b.Dispose()
+    $b = New-Object System.Drawing.SolidBrush((C 190 74 70 58)); $g.FillRectangle($b, 1178, ($by + 19), $rng.Next(170, 320), 9); $b.Dispose()
   }
 }
-# small square cluster, top right (data blocks)
-for ($row = 0; $row -lt 4; $row++) {
-  for ($col = 0; $col -lt 6; $col++) {
-    $sx = 1470 + $col * 24; $sy = 120 + $row * 24
-    if ($rng.NextDouble() -lt 0.45) {
-      $b = New-Object System.Drawing.SolidBrush((C 205 74 70 58)); $g.FillRectangle($b, $sx, $sy, 15, 15); $b.Dispose()
-    } else {
-      $pen = New-Object System.Drawing.Pen((C 95 74 70 58), 1); $g.DrawRectangle($pen, $sx, $sy, 15, 15); $pen.Dispose()
-    }
-  }
+
+# ── ring gauge lower right: ticks, arc highlight, diamond hub ──
+$cx = 1420; $cy = 800
+$pen = New-Object System.Drawing.Pen((C 160 74 70 58), 2)
+$g.DrawEllipse($pen, ($cx - 140), ($cy - 140), 280, 280); $pen.Dispose()
+$pen = New-Object System.Drawing.Pen((C 90 74 70 58), 1)
+$g.DrawEllipse($pen, ($cx - 118), ($cy - 118), 236, 236); $pen.Dispose()
+for ($i = 0; $i -lt 24; $i++) {
+  $ang = ($i / 24.0) * 2 * [math]::PI
+  $r1 = if ($i % 6 -eq 0) { 126 } else { 133 }
+  $x1 = $cx + [int]($r1 * [math]::Cos($ang)); $y1 = $cy + [int]($r1 * [math]::Sin($ang))
+  $x2 = $cx + [int](140 * [math]::Cos($ang)); $y2 = $cy + [int](140 * [math]::Sin($ang))
+  $pen = New-Object System.Drawing.Pen((C $(if ($i % 6 -eq 0) { 190 } else { 110 }) 74 70 58), $(if ($i % 6 -eq 0) { 3 } else { 1 }))
+  $g.DrawLine($pen, $x1, $y1, $x2, $y2); $pen.Dispose()
 }
-# bottom diagonal-stripe band
-$clip = New-Object System.Drawing.Rectangle(0, 972, $W, 66)
+$pen = New-Object System.Drawing.Pen($inkC, 4)
+$g.DrawArc($pen, ($cx - 140), ($cy - 140), 280, 280, 300, 62); $pen.Dispose()
+$pen = New-Object System.Drawing.Pen((C 110 74 70 58), 1)
+$g.DrawLine($pen, ($cx - 150), $cy, ($cx + 150), $cy)
+$g.DrawLine($pen, $cx, ($cy - 150), $cx, ($cy + 150)); $pen.Dispose()
+Diamond $g $cx $cy 9 $inkC
+
+# ── chip inventory, bottom left: slot track + colored striped chips ──
+$px = 300; $py = 770; $pw = 580; $ph = 170
+$b = New-Object System.Drawing.SolidBrush((C 20 74 70 58)); $g.FillRectangle($b, $px, $py, $pw, $ph); $b.Dispose()
+$pen = New-Object System.Drawing.Pen((C 150 74 70 58), 2); $g.DrawRectangle($pen, $px, $py, $pw, $ph); $pen.Dispose()
+$b = New-Object System.Drawing.SolidBrush($inkC); $g.FillRectangle($b, ($px + 14), ($py - 26), 120, 10); $b.Dispose()
+# slot ruler along the bottom of the panel
+for ($i = 0; $i -le 20; $i++) {
+  $sx = $px + 20 + $i * 27
+  $pen = New-Object System.Drawing.Pen((C 130 74 70 58), 1)
+  $g.DrawLine($pen, $sx, ($py + $ph - 22), $sx, ($py + $ph - 12)); $pen.Dispose()
+}
+# chips: striped colored bars of varying width plugged onto the track
+$chipColors = @((C 235 163 73 47), (C 235 95 113 52), (C 235 79 114 102), (C 235 138 111 63))
+$chX = $px + 20
+foreach ($i in 0..3) {
+  $cw = @(120, 66, 174, 93)[$i]
+  $cc = $chipColors[$i]
+  $chTop = $py + 52
+  $b = New-Object System.Drawing.SolidBrush($cc); $g.FillRectangle($b, $chX, $chTop, $cw, 72); $b.Dispose()
+  # stripes: dark thin verticals through the chip
+  for ($sx = $chX + 5; $sx -lt $chX + $cw - 3; $sx += 9) {
+    $b = New-Object System.Drawing.SolidBrush((C 90 40 38 30)); $g.FillRectangle($b, $sx, $chTop, 3, 72); $b.Dispose()
+  }
+  $pen = New-Object System.Drawing.Pen((C 170 40 38 30), 1); $g.DrawRectangle($pen, $chX, $chTop, $cw, 72); $pen.Dispose()
+  $chX += $cw + 27 - (($cw + 20) % 27)  # snap the next chip to the slot grid
+}
+
+# ── footer: diagonal stripe band + button hint pairs ──
+$clip = New-Object System.Drawing.Rectangle(0, 986, $W, 52)
 $g.SetClip($clip)
 for ($x = -80; $x -lt $W + 80; $x += 26) {
   $pen = New-Object System.Drawing.Pen((C 22 74 70 58), 9)
-  $g.DrawLine($pen, $x, 1050, $x + 70, 960); $pen.Dispose()
+  $g.DrawLine($pen, $x, 1052, ($x + 56), 972); $pen.Dispose()
 }
 $g.ResetClip()
 $pen = New-Object System.Drawing.Pen((C 90 74 70 58), 2)
-$g.DrawLine($pen, 0, 972, $W, 972); $g.DrawLine($pen, 0, 1038, $W, 1038); $pen.Dispose()
+$g.DrawLine($pen, 0, 986, $W, 986); $g.DrawLine($pen, 0, 1038, $W, 1038); $pen.Dispose()
+$bx = 1490
+foreach ($i in 0..2) {
+  $pen = New-Object System.Drawing.Pen($inkC, 2); $g.DrawEllipse($pen, $bx, 1002, 20, 20); $pen.Dispose()
+  $b = New-Object System.Drawing.SolidBrush((C 190 74 70 58)); $g.FillRectangle($b, ($bx + 30), 1009, 56, 7); $b.Dispose()
+  $bx += 116
+}
 EdgeFade $g "top" 90 24; EdgeFade $g "bottom" 90 26; EdgeFade $g "left" 110 20; EdgeFade $g "right" 110 20
 Save $bmp $g "nier.png"
 

@@ -1133,7 +1133,7 @@ THEMES.pipboy.xterm.selectionBackground = "#1aff8033";
 THEMES.nier = mkTheme(
   "NieR",
   "black",
-  ['"Cascadia Mono", Consolas, monospace', 1.2, "underline"],
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "block"],
   'linear-gradient(rgba(214,209,188,0.35), rgba(214,209,188,0.48)), url("/backgrounds/nier.png") center / cover no-repeat, linear-gradient(180deg, #d6d1bc, #c7c2af)',
   "#d1ccb5",
   "#454138",
