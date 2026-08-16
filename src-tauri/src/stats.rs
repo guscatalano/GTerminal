@@ -499,6 +499,11 @@ mod imp {
             || n.contains("pseudo"))
     }
 
+    /// Last adapter that actually carried traffic. On an idle tick nothing
+    /// "wins", and recomputing from scratch would blank the name out and
+    /// then bring it back — so the last known one is kept instead.
+    static LAST_IFACE: OnceLock<Mutex<String>> = OnceLock::new();
+
     pub fn net() -> NetStats {
         let rx = counter_array("\\Network Interface(*)\\Bytes Received/sec");
         let tx = counter_array("\\Network Interface(*)\\Bytes Sent/sec");
@@ -514,6 +519,26 @@ mod imp {
             }
         }
         s.tx_bps = tx.iter().filter(|(n, _)| real_iface(n)).map(|(_, v)| *v).sum();
+
+        let cell = LAST_IFACE.get_or_init(|| Mutex::new(String::new()));
+        if let Ok(mut last) = cell.lock() {
+            if s.iface.is_empty() {
+                // Idle: reuse the last busy adapter, or name any real one
+                // so the field is never blank once interfaces are known.
+                s.iface = if last.is_empty() {
+                    rx.iter()
+                        .map(|(n, _)| n)
+                        .find(|n| real_iface(n))
+                        .cloned()
+                        .unwrap_or_default()
+                } else {
+                    last.clone()
+                };
+            }
+            if !s.iface.is_empty() {
+                *last = s.iface.clone();
+            }
+        }
         s
     }
 
