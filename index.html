@@ -55,8 +55,6 @@
           <div id="hidden-menu" class="menu"></div>
         </div>
         <div id="panes"></div>
-        <div id="status-detail"></div>
-        <div id="statusbar"></div>
         <div id="settings-page">
           <div class="settings-inner">
             <div class="settings-h1">
@@ -87,6 +85,11 @@
           </div>
           <div id="history-term"></div>
         </div>
+        <!-- Last in the column on purpose: the settings and history pages
+             replace #panes, so a status bar placed before them rides up to
+             the top whenever one of those is open. -->
+        <div id="status-detail"></div>
+        <div id="statusbar"></div>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

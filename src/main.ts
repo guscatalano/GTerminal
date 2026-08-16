@@ -4444,10 +4444,20 @@ function buildSettingsPage() {
           saveConfig();
           applyStatusBar();
         });
-        const every = mkNumber(c.interval_s ?? 10, 2, 3600, (v) => {
+        // A bare number in a row of text fields tells you nothing, so it
+        // carries its own unit.
+        const every = document.createElement("label");
+        every.className = "unit-field";
+        every.title = "How often to run this command, in seconds";
+        const everyPre = document.createElement("span");
+        everyPre.textContent = "every";
+        const everyNum = mkNumber(c.interval_s ?? 10, 2, 3600, (v) => {
           c.interval_s = v;
           saveConfig();
         });
+        const everyPost = document.createElement("span");
+        everyPost.textContent = "s";
+        every.append(everyPre, everyNum, everyPost);
         const del = document.createElement("button");
         del.className = "tpl-del";
         del.textContent = "✕";

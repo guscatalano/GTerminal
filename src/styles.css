@@ -1661,7 +1661,22 @@ input.set-control {
 }
 
 .cmd-row {
-  grid-template-columns: 1fr 1.6fr 90px 26px;
+  grid-template-columns: 1fr 1.6fr 150px 26px;
+}
+
+/* a number input that carries its own unit, e.g. "every [10] s" */
+.unit-field {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font: 11px var(--ui-font, "Segoe UI"), sans-serif;
+  white-space: nowrap;
+}
+
+.unit-field input {
+  width: 58px;
 }
 
 /* ── terminal panes ──────────────────────────────────────────────────── */
