@@ -89,13 +89,13 @@ interface PerfStatusItem {
   format?: string; // raw | int | bytes | rate | pct
 }
 
-/// A status-bar item showing the first line of a shell command.
+/// A status-bar item showing the first line of a shell command. Always
+/// runs in the active tab's working folder.
 interface CmdStatusItem {
   id: string;
   label: string;
   command: string;
   interval_s?: number;
-  cwd_from_tab?: boolean;
 }
 
 interface LaunchInfo {
@@ -4332,6 +4332,18 @@ function buildSettingsPage() {
     const renderItems = () => {
       itemsBlock.innerHTML = "";
       const ids = statusItemIds();
+      /// Move an item within the bar; out-of-range targets are no-ops so
+      /// the end buttons simply do nothing rather than wrapping around.
+      const move = (from: number, to: number) => {
+        const next = [...statusItemIds()];
+        if (to < 0 || to >= next.length) return;
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        config.status_items = next;
+        saveConfig();
+        applyStatusBar();
+        renderItems();
+      };
       ids.forEach((id, i) => {
         const row = document.createElement("div");
         row.className = "tpl-row sb-row";
@@ -4343,6 +4355,18 @@ function buildSettingsPage() {
           applyStatusBar();
           renderItems();
         });
+        const up = document.createElement("button");
+        up.className = "row-move";
+        up.textContent = "↑";
+        up.title = "Move left along the bar";
+        up.disabled = i === 0;
+        up.addEventListener("click", () => move(i, i - 1));
+        const down = document.createElement("button");
+        down.className = "row-move";
+        down.textContent = "↓";
+        down.title = "Move right along the bar";
+        down.disabled = i === ids.length - 1;
+        down.addEventListener("click", () => move(i, i + 1));
         const del = document.createElement("button");
         del.className = "tpl-del";
         del.textContent = "✕";
@@ -4353,7 +4377,7 @@ function buildSettingsPage() {
           applyStatusBar();
           renderItems();
         });
-        row.append(sel, del);
+        row.append(sel, up, down, del);
         itemsBlock.appendChild(row);
       });
       const add = document.createElement("button");
@@ -4370,7 +4394,11 @@ function buildSettingsPage() {
       itemsBlock.appendChild(add);
     };
     renderItems();
-    settingRow("Items", "Shown left to right; the list splits around the middle.", itemsBlock);
+    settingRow(
+      "Items",
+      "Shown left to right in this order — use ↑ and ↓ to rearrange. The bar splits around the middle of the list.",
+      itemsBlock
+    );
 
     // Performance counters: any PDH path this machine exposes.
     const perfBlock = document.createElement("div");
@@ -4479,7 +4507,7 @@ function buildSettingsPage() {
         const id = `cmd-${Date.now().toString(36)}`;
         config.status_custom = [
           ...(config.status_custom ?? []),
-          { id, label: "branch", command: "git branch --show-current", interval_s: 10, cwd_from_tab: true },
+          { id, label: "branch", command: "git branch --show-current", interval_s: 10 },
         ];
         config.status_items = [...statusItemIds(), id];
         saveConfig();
@@ -4491,7 +4519,7 @@ function buildSettingsPage() {
     renderCmds();
     settingRow(
       "Command items",
-      "First line of a PowerShell command, on its own timer. New items default to the git branch of the active tab's folder.",
+      "First line of a PowerShell command, on its own timer. Each one runs in the active tab's current working folder, so directory-sensitive commands like git report on whatever you're looking at. New items default to showing the current branch.",
       cmdBlock
     );
   }
@@ -5316,7 +5344,7 @@ function statusItemDef(id: string): StatusItemDef | undefined {
           ["Output", c.custom[cmd.id] ?? "—"],
           ["Command", cmd.command],
           ["Every", `${cmd.interval_s ?? 10}s`],
-          ["Runs in", cmd.cwd_from_tab ? "active tab's folder" : "home"],
+          ["Working folder", activeCwd() ?? "the active tab's folder"],
         ],
       }),
     };
@@ -5363,10 +5391,9 @@ async function sampleStatus() {
     const every = Math.max(2, c.interval_s ?? 10) * 1000;
     if (now - (customLastRun.get(c.id) ?? 0) < every) continue;
     customLastRun.set(c.id, now);
-    invoke<string>("status_command", {
-      command: c.command,
-      cwd: c.cwd_from_tab ? activeCwd() ?? null : null,
-    })
+    // Always the active tab's folder: that is what makes `git branch`
+    // and friends report on whatever the user is actually looking at.
+    invoke<string>("status_command", { command: c.command, cwd: activeCwd() ?? null })
       .then((out) => {
         statusCtx.custom[c.id] = out;
         renderStatusBar();

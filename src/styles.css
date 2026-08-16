@@ -1653,7 +1653,28 @@ input.set-control {
 
 /* status-bar rows in settings */
 .sb-row {
-  grid-template-columns: 1fr 26px;
+  grid-template-columns: 1fr 26px 26px 26px;
+}
+
+/* reorder arrows on list rows */
+.row-move {
+  background: none;
+  border: none;
+  color: var(--muted2);
+  cursor: pointer;
+  font-size: 13px;
+  border-radius: 4px;
+  padding: 3px 0;
+}
+
+.row-move:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.row-move:disabled {
+  opacity: 0.25;
+  cursor: default;
 }
 
 .perf-row {
