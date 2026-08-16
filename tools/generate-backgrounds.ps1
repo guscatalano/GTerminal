@@ -1577,6 +1577,54 @@ $b = New-Object System.Drawing.SolidBrush((C 255 4 18 9)); $g.FillEllipse($b, ($
 $b = New-Object System.Drawing.SolidBrush($lnMid); $g.FillEllipse($b, ($cx - 8), ($cy - 8), 16, 16); $b.Dispose()
 $pen = New-Object System.Drawing.Pen($lnMid, 2); $g.DrawLine($pen, ($cx - 178), $cy, ($cx + 178), $cy); $pen.Dispose()
 
+# ── STAT figure, center: cartoon-proportioned silhouette with limb
+# condition bars on leader lines (big head, standing pose) ──
+$fx = 860
+Glow $g $fx 750 240 (C 20 26 255 128)
+$fill = New-Object System.Drawing.SolidBrush((C 175 24 235 118))
+$limb = New-Object System.Drawing.Pen((C 175 24 235 118), 20)
+$limb.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+$limb.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+# head (big, cartoon proportions) + neck
+$g.FillEllipse($fill, ($fx - 46), 556, 92, 92)
+$pen = New-Object System.Drawing.Pen($ln, 3); $g.DrawEllipse($pen, ($fx - 46), 556, 92, 92); $pen.Dispose()
+$g.FillRectangle($fill, ($fx - 12), 646, 24, 18)
+# torso: shoulders wider than hips
+$torso = New-Object 'System.Drawing.Point[]' 4
+$torso[0] = New-Object System.Drawing.Point(($fx - 52), 664)
+$torso[1] = New-Object System.Drawing.Point(($fx + 52), 664)
+$torso[2] = New-Object System.Drawing.Point(($fx + 34), 800)
+$torso[3] = New-Object System.Drawing.Point(($fx - 34), 800)
+$g.FillPolygon($fill, $torso)
+# arms: slight A-pose, two segments each
+$g.DrawLine($limb, ($fx - 50), 684, ($fx - 92), 748)
+$g.DrawLine($limb, ($fx - 92), 748, ($fx - 104), 812)
+$g.DrawLine($limb, ($fx + 50), 684, ($fx + 92), 748)
+$g.DrawLine($limb, ($fx + 92), 748, ($fx + 104), 812)
+# legs
+$g.DrawLine($limb, ($fx - 20), 796, ($fx - 34), 902)
+$g.DrawLine($limb, ($fx - 34), 902, ($fx - 38), 950)
+$g.DrawLine($limb, ($fx + 20), 796, ($fx + 34), 902)
+$g.DrawLine($limb, ($fx + 34), 902, ($fx + 38), 950)
+$limb.Dispose(); $fill.Dispose()
+# limb condition bars: leader line + 4-segment bar, per head/arms/legs
+function LimbBar {
+  param($g2, $lx1, $ly1, $lx2, $ly2, $lit)
+  $pen2 = New-Object System.Drawing.Pen($lnMid, 2)
+  $g2.DrawLine($pen2, $lx1, $ly1, $lx2, $ly2); $pen2.Dispose()
+  $bx = if ($lx2 -gt $lx1) { $lx2 + 4 } else { $lx2 - 66 }
+  for ($i = 0; $i -lt 4; $i++) {
+    $alpha = if ($i -lt $lit) { 210 } else { 55 }
+    $b2 = New-Object System.Drawing.SolidBrush((C $alpha 26 240 120))
+    $g2.FillRectangle($b2, ($bx + $i * 16), ($ly2 - 5), 12, 10); $b2.Dispose()
+  }
+}
+LimbBar $g ($fx + 40) 588 ($fx + 130) 570 4      # head
+LimbBar $g ($fx - 98) 760 ($fx - 160) 742 3      # left arm
+LimbBar $g ($fx + 98) 760 ($fx + 175) 742 4      # right arm
+LimbBar $g ($fx - 36) 912 ($fx - 150) 928 4      # left leg
+LimbBar $g ($fx + 36) 912 ($fx + 150) 928 2      # right leg
+
 # ── bracketed segmented footer: HP | LEVEL chevrons | AP ──
 $fy = 986
 foreach ($grp in 0..2) {
