@@ -2156,6 +2156,10 @@ function makeShortcutHandler(getId: () => number) {
         toggleSidebar();
         return false;
       }
+      if (key === "S") {
+        toggleStatusBar();
+        return false;
+      }
       if (key === "Z") {
         restoreLast();
         return false;
@@ -5610,6 +5614,15 @@ async function openPerfBrowser() {
   });
 }
 
+/// Shared by both key paths: the window-level handler ignores anything
+/// typed inside a terminal, so the per-terminal handler has to offer the
+/// same shortcut or it never fires while you're actually typing.
+function toggleStatusBar() {
+  config.status_bar = !(config.status_bar ?? true);
+  saveConfig();
+  applyStatusBar();
+}
+
 function applyStatusBar() {
   const on = config.status_bar ?? true;
   config.status_bar = on;
@@ -5813,9 +5826,7 @@ async function main() {
     }
     if (e.ctrlKey && e.shiftKey && e.key.toUpperCase() === "S") {
       e.preventDefault();
-      config.status_bar = !(config.status_bar ?? true);
-      saveConfig();
-      applyStatusBar();
+      toggleStatusBar();
     }
   });
   // Ctrl+scroll over the tab bar resizes tabs live.
