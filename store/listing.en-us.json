@@ -32,7 +32,7 @@
     "Lightweight Tauri + xterm.js WebGL stack — far lighter than Electron",
     "Typing latency regression-tested: p50 echo latency around 1-2 ms"
   ],
-  "ReleaseNotes": "0.2.9 — Ten more themes, bringing the total to 60: Pride, Valorant, Counter-Strike, and Dead by Daylight join the Games group; a new Consoles group adds Library, Blade, Cartridge, and Polygon; and Nightclub and Speakeasy join Places & vibes. Every theme ships its own generated backdrop art, font, spacing, and cursor personality, and all 60 are contrast-audited. The categorized theme picker keeps keyboard focus, so Up/Down previews themes live.",
+  "ReleaseNotes": "0.3.0 — Twenty more themes, bringing the total to 80. A new Operating systems group covers DOS, Penguin, Cupertino, Material, Macintosh, Chicago, Aero, and Fluent; a new Dev & tooling group adds Coral, Monochrome, Git, Circuit, Containers, Helm, Mainframe, Punch Card, Kernel Panic, Whiteboard, E-Ink, and Rubber Duck; and Zenburn joins the classics. Background art now spans the whole window instead of stopping at the sidebar, and each theme carries its own transparency default — busier art veils itself more so text stays legible, with your setting still overriding it.",
   "CopyrightAndTrademarkInfo": "© 2026 Gus Catalano",
   "LicenseTerms": "",
   "DevStudio": "Gus Catalano",
