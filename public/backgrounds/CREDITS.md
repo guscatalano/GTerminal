@@ -57,6 +57,13 @@ Seeded GDI+ renders — re-running the script reproduces them exactly.
 - `polygon.png` — low-poly wireframe terrain under geometric glyphs
 - `nightclub.png` — disco ball, light cones, lit dance floor, bottle shelf
 - `speakeasy.png` — backlit bottle shelves, pendant lamps, bar top, tumbler
+- `dos.png` — black screen, DIR listing, blue TUI panel, block cursor
+- `penguin.png` — tiling-WM panes, status bar, package bars, mascot
+- `cupertino.png` — gradient wallpaper, translucent window, dock
+- `material.png` — dark surfaces, elevated cards, chips, FAB
+- `chicago.png` — teal desktop, beveled gray window, taskbar
+- `aero.png` — blue gradient wallpaper, glass window, glass taskbar
+- `fluent.png` — flat dark, accent blue, tile grid, thin taskbar
 
 ## NASA imagery (public domain)
 

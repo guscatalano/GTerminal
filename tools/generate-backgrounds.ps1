@@ -3849,4 +3849,506 @@ $b = New-Object System.Drawing.SolidBrush((C 90 255 240 220)); $g.FillRectangle(
 EdgeFade $g "top" 120 120; EdgeFade $g "bottom" 120 120; EdgeFade $g "left" 130 110; EdgeFade $g "right" 120 100
 Save $bmp $g "speakeasy.png"
 
+function RoundRect {
+  param($x, $y, $rw, $rh, $r)
+  $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $path.AddArc($x, $y, (2 * $r), (2 * $r), 180, 90)
+  $path.AddArc(($x + $rw - 2 * $r), $y, (2 * $r), (2 * $r), 270, 90)
+  $path.AddArc(($x + $rw - 2 * $r), ($y + $rh - 2 * $r), (2 * $r), (2 * $r), 0, 90)
+  $path.AddArc($x, ($y + $rh - 2 * $r), (2 * $r), (2 * $r), 90, 90)
+  $path.CloseFigure()
+  return $path
+}
+function Bevel {
+  # Win9x 3D border: light top/left, dark bottom/right
+  param($g, $x, $y, $rw, $rh, $light, $dark, $thick)
+  for ($i = 0; $i -lt $thick; $i++) {
+    $pen = New-Object System.Drawing.Pen($light, 1)
+    $g.DrawLine($pen, ($x + $i), ($y + $i), ($x + $rw - $i), ($y + $i))
+    $g.DrawLine($pen, ($x + $i), ($y + $i), ($x + $i), ($y + $rh - $i)); $pen.Dispose()
+    $pen = New-Object System.Drawing.Pen($dark, 1)
+    $g.DrawLine($pen, ($x + $rw - $i), ($y + $i), ($x + $rw - $i), ($y + $rh - $i))
+    $g.DrawLine($pen, ($x + $i), ($y + $rh - $i), ($x + $rw - $i), ($y + $rh - $i)); $pen.Dispose()
+  }
+}
+
+# ── Penguin: tiling WM layout, status bar, package output, mascot ──
+$rng = New-Object System.Random(1991)
+Get-Random -SetSeed 1991 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 18 20 26) (C 255 10 11 15)
+$amber = C 225 232 160 60
+$amberDim = C 110 190 130 55
+$paneBg = C 235 22 25 32
+# status bar: workspace pills + right-side info
+$b = New-Object System.Drawing.SolidBrush((C 255 26 29 37)); $g.FillRectangle($b, 60, 60, 1800, 48); $b.Dispose()
+foreach ($i in 0..5) {
+  $wx = 80 + $i * 54
+  if ($i -eq 1) {
+    $b = New-Object System.Drawing.SolidBrush($amber); $g.FillRectangle($b, $wx, 68, 42, 32); $b.Dispose()
+    $b = New-Object System.Drawing.SolidBrush((C 255 20 22 28)); $g.FillRectangle($b, ($wx + 16), 80, 10, 10); $b.Dispose()
+  } else {
+    $pen = New-Object System.Drawing.Pen($amberDim, 2); $g.DrawRectangle($pen, $wx, 68, 42, 32); $pen.Dispose()
+    $b = New-Object System.Drawing.SolidBrush($amberDim); $g.FillRectangle($b, ($wx + 16), 80, 10, 10); $b.Dispose()
+  }
+}
+DashRow $g 1420 78 400 $amberDim 10
+# tiling panes with gaps; one focused with an accent border
+foreach ($pane in @(@(60, 140, 880, 520, $true), @(970, 140, 890, 250, $false), @(970, 420, 890, 240, $false), @(60, 690, 560, 330, $false), @(650, 690, 1210, 330, $false))) {
+  $b = New-Object System.Drawing.SolidBrush($paneBg); $g.FillRectangle($b, $pane[0], $pane[1], $pane[2], $pane[3]); $b.Dispose()
+  $pen = New-Object System.Drawing.Pen($(if ($pane[4]) { $amber } else { C 90 70 78 92 }), $(if ($pane[4]) { 3 } else { 2 }))
+  $g.DrawRectangle($pen, $pane[0], $pane[1], $pane[2], $pane[3]); $pen.Dispose()
+  # prompt-ish content rows
+  $rowY = $pane[1] + 26
+  while ($rowY -lt $pane[1] + $pane[3] - 22) {
+    $b = New-Object System.Drawing.SolidBrush($(if ($rng.NextDouble() -lt 0.2) { $amber } else { C 70 150 165 190 }))
+    $g.FillRectangle($b, ($pane[0] + 22), $rowY, 14, 9); $b.Dispose()
+    DashRow $g ($pane[0] + 48) $rowY ($pane[2] - 110) (C $(if ($rng.NextDouble() -lt 0.15) { 150 } else { 60 }) 150 165 190) 9
+    $rowY += 26
+  }
+}
+# package-install progress bars in the focused pane
+foreach ($i in 0..2) {
+  $py = 560 + $i * 30
+  $pen = New-Object System.Drawing.Pen($amberDim, 1); $g.DrawRectangle($pen, 100, $py, 500, 16); $pen.Dispose()
+  $b = New-Object System.Drawing.SolidBrush($amber); $g.FillRectangle($b, 102, ($py + 2), ([int](496 * $rng.NextDouble())), 13); $b.Dispose()
+}
+# penguin mascot silhouette, bottom-right pane
+$px = 1560; $py2 = 790
+$b = New-Object System.Drawing.SolidBrush((C 250 16 17 22))
+$g.FillEllipse($b, ($px - 90), ($py2 - 130), 180, 220)      # body
+$g.FillEllipse($b, ($px - 62), ($py2 - 210), 124, 116)      # head
+$b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 250 236 238 242))
+$g.FillEllipse($b, ($px - 62), ($py2 - 100), 124, 172)      # belly
+$g.FillEllipse($b, ($px - 44), ($py2 - 178), 88, 76)        # face
+$b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 255 22 24 30))
+$g.FillEllipse($b, ($px - 30), ($py2 - 166), 18, 22); $g.FillEllipse($b, ($px + 12), ($py2 - 166), 18, 22)
+$b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 255 240 170 40))
+$beak = New-Object 'System.Drawing.Point[]' 3
+$beak[0] = New-Object System.Drawing.Point(($px - 22), ($py2 - 132))
+$beak[1] = New-Object System.Drawing.Point(($px + 22), ($py2 - 132))
+$beak[2] = New-Object System.Drawing.Point($px, ($py2 - 106))
+$g.FillPolygon($b, $beak)
+$g.FillEllipse($b, ($px - 74), ($py2 + 72), 62, 26); $g.FillEllipse($b, ($px + 12), ($py2 + 72), 62, 26)
+$b.Dispose()
+EdgeFade $g "top" 90 90; EdgeFade $g "bottom" 100 100; EdgeFade $g "left" 110 90; EdgeFade $g "right" 110 90
+Save $bmp $g "penguin.png"
+
+# ── Cupertino: gradient wallpaper, translucent window, dock ──
+$rng = New-Object System.Random(2020)
+Get-Random -SetSeed 20200 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 26 16 48) (C 255 10 8 26)
+# blurred colour blobs
+foreach ($blob in @(@(420, 300, 520, 236, 82, 255), @(1300, 240, 620, 255, 96, 150), @(1600, 820, 560, 96, 120, 255), @(700, 900, 600, 180, 70, 220))) {
+  Glow $g $blob[0] $blob[1] $blob[2] (C 90 $blob[3] $blob[4] $blob[5])
+}
+# menu bar
+$b = New-Object System.Drawing.SolidBrush((C 90 250 250 255)); $g.FillRectangle($b, 0, 0, $W, 40); $b.Dispose()
+$mx = 40
+foreach ($mw in @(26, 60, 48, 54, 62)) {
+  $b = New-Object System.Drawing.SolidBrush((C 150 245 245 255)); $g.FillRectangle($b, $mx, 15, $mw, 10); $b.Dispose()
+  $mx += $mw + 34
+}
+foreach ($i in 0..3) {
+  $b = New-Object System.Drawing.SolidBrush((C 150 245 245 255)); $g.FillRectangle($b, (1660 + $i * 60), 15, 34, 10); $b.Dispose()
+}
+# translucent window with traffic lights + sidebar
+$path = RoundRect 980 220 800 560 22
+$b = New-Object System.Drawing.SolidBrush((C 150 30 26 48)); $g.FillPath($b, $path); $b.Dispose()
+$pen = New-Object System.Drawing.Pen((C 90 255 255 255), 2); $g.DrawPath($pen, $path); $pen.Dispose(); $path.Dispose()
+$path = RoundRect 980 220 800 56 22
+$b = New-Object System.Drawing.SolidBrush((C 110 255 255 255)); $g.FillPath($b, $path); $b.Dispose(); $path.Dispose()
+foreach ($light in @(@(1014, 255, 92, 88), @(1046, 255, 190, 78), @(1078, 60, 200, 90))) {
+  $b = New-Object System.Drawing.SolidBrush((C 250 $light[1] $light[2] $light[3]))
+  $g.FillEllipse($b, $light[0], 238, 20, 20); $b.Dispose()
+}
+$b = New-Object System.Drawing.SolidBrush((C 80 255 255 255)); $g.FillRectangle($b, 980, 276, 220, 504); $b.Dispose()
+for ($i = 0; $i -lt 8; $i++) {
+  $sy = 300 + $i * 44
+  if ($i -eq 2) {
+    $path = RoundRect 996 ($sy - 8) 188 34 10
+    $b = New-Object System.Drawing.SolidBrush((C 140 120 150 255)); $g.FillPath($b, $path); $b.Dispose(); $path.Dispose()
+  }
+  $b = New-Object System.Drawing.SolidBrush((C 190 240 242 250)); $g.FillEllipse($b, 1010, $sy, 16, 16); $b.Dispose()
+  $b = New-Object System.Drawing.SolidBrush((C 170 235 238 248)); $g.FillRectangle($b, 1036, ($sy + 3), $rng.Next(60, 130), 10); $b.Dispose()
+}
+$rowY = 310
+while ($rowY -lt 740) {
+  DashRow $g 1240 $rowY 480 (C 120 240 242 250) 10
+  $rowY += 34
+}
+# dock
+$path = RoundRect 620 960 680 90 24
+$b = New-Object System.Drawing.SolidBrush((C 120 255 255 255)); $g.FillPath($b, $path); $b.Dispose()
+$pen = New-Object System.Drawing.Pen((C 70 255 255 255), 2); $g.DrawPath($pen, $path); $pen.Dispose(); $path.Dispose()
+$dockCols = @(@(90, 140, 255), @(255, 120, 90), @(90, 210, 140), @(255, 190, 80), @(180, 120, 255), @(90, 200, 240), @(240, 110, 170))
+for ($i = 0; $i -lt 7; $i++) {
+  $cc = $dockCols[$i]
+  $path = RoundRect (650 + $i * 90) 978 62 62 16
+  $b = New-Object System.Drawing.SolidBrush((C 235 $cc[0] $cc[1] $cc[2])); $g.FillPath($b, $path); $b.Dispose(); $path.Dispose()
+}
+Save $bmp $g "cupertino.png"
+
+# ── Material: dark surfaces, elevated cards, FAB, chips ──
+$rng = New-Object System.Random(2014)
+Get-Random -SetSeed 2014 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 18 20 19) (C 255 11 13 12)
+$grn = C 235 61 220 132
+$surf = C 255 30 34 32
+# app bar
+$b = New-Object System.Drawing.SolidBrush((C 255 26 30 28)); $g.FillRectangle($b, 0, 0, $W, 96); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 210 224 232 228)); $g.FillRectangle($b, 60, 44, 34, 5)
+$g.FillRectangle($b, 60, 56, 34, 5); $g.FillRectangle($b, 60, 32, 34, 5); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 200 224 232 228)); $g.FillRectangle($b, 130, 40, 220, 14); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush($grn); $g.FillEllipse($b, 1820, 34, 30, 30); $b.Dispose()
+# chip row
+foreach ($i in 0..4) {
+  $cx5 = 70 + $i * 190
+  $path = RoundRect $cx5 140 160 48 24
+  if ($i -eq 1) {
+    $b = New-Object System.Drawing.SolidBrush((C 190 61 220 132)); $g.FillPath($b, $path); $b.Dispose()
+  } else {
+    $pen = New-Object System.Drawing.Pen((C 120 120 140 130), 2); $g.DrawPath($pen, $path); $pen.Dispose()
+  }
+  $path.Dispose()
+  $b = New-Object System.Drawing.SolidBrush($(if ($i -eq 1) { C 230 18 26 22 } else { C 150 200 216 208 }))
+  $g.FillRectangle($b, ($cx5 + 34), 158, 92, 11); $b.Dispose()
+}
+# elevated cards with shadows
+foreach ($card in @(@(70, 240, 560, 300), @(680, 240, 560, 300), @(1290, 240, 560, 300), @(70, 580, 860, 320), @(980, 580, 870, 320))) {
+  $path = RoundRect ($card[0] + 6) ($card[1] + 10) $card[2] $card[3] 22
+  $b = New-Object System.Drawing.SolidBrush((C 70 0 0 0)); $g.FillPath($b, $path); $b.Dispose(); $path.Dispose()
+  $path = RoundRect $card[0] $card[1] $card[2] $card[3] 22
+  $b = New-Object System.Drawing.SolidBrush($surf); $g.FillPath($b, $path); $b.Dispose(); $path.Dispose()
+  # media strip in the card's own tint
+  $tint = @(@(61, 220, 132), @(96, 165, 250), @(250, 180, 90), @(200, 120, 250), @(250, 120, 140))[$rng.Next(0, 5)]
+  $path = RoundRect ($card[0] + 20) ($card[1] + 20) ($card[2] - 40) 92 14
+  $b = New-Object System.Drawing.SolidBrush((C 130 $tint[0] $tint[1] $tint[2])); $g.FillPath($b, $path); $b.Dispose(); $path.Dispose()
+  $b = New-Object System.Drawing.SolidBrush((C 210 226 234 230)); $g.FillRectangle($b, ($card[0] + 24), ($card[1] + 136), ([int]($card[2] * 0.5)), 13); $b.Dispose()
+  $rowY = $card[1] + 172
+  while ($rowY -lt $card[1] + $card[3] - 56) {
+    DashRow $g ($card[0] + 24) $rowY ($card[2] - 70) (C 110 180 196 190) 9
+    $rowY += 28
+  }
+  # text button pair
+  $b = New-Object System.Drawing.SolidBrush($grn)
+  $g.FillRectangle($b, ($card[0] + 24), ($card[1] + $card[3] - 40), 76, 11)
+  $g.FillRectangle($b, ($card[0] + 124), ($card[1] + $card[3] - 40), 60, 11); $b.Dispose()
+}
+# FAB with shadow
+Glow $g 1770 950 90 (C 60 61 220 132)
+$b = New-Object System.Drawing.SolidBrush((C 90 0 0 0)); $g.FillEllipse($b, 1712, 902, 116, 116); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush($grn); $g.FillEllipse($b, 1706, 894, 116, 116); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 255 16 22 18))
+$g.FillRectangle($b, 1757, 928, 14, 48); $g.FillRectangle($b, 1740, 945, 48, 14); $b.Dispose()
+Save $bmp $g "material.png"
+
+# ── Chicago: teal desktop, beveled gray window, taskbar ──
+$rng = New-Object System.Random(1998)
+Get-Random -SetSeed 1998 | Out-Null
+$bmp, $g = New-Canvas
+$b = New-Object System.Drawing.SolidBrush((C 255 0 128 128)); $g.FillRectangle($b, 0, 0, $W, $H); $b.Dispose()
+$gray = C 255 192 192 192
+$white = C 255 255 255 255
+$dgray = C 255 128 128 128
+$black = C 255 0 0 0
+# desktop icons, top-left
+foreach ($i in 0..2) {
+  $iy = 60 + $i * 150
+  $b = New-Object System.Drawing.SolidBrush((C 255 224 224 224)); $g.FillRectangle($b, 70, $iy, 64, 56); $b.Dispose()
+  Bevel $g 70 $iy 64 56 $white $dgray 2
+  $b = New-Object System.Drawing.SolidBrush((C 255 0 0 160)); $g.FillRectangle($b, 78, ($iy + 10), 48, 12); $b.Dispose()
+  $b = New-Object System.Drawing.SolidBrush($white); $g.FillRectangle($b, 62, ($iy + 68), 80, 10); $b.Dispose()
+}
+# main window
+$wx2 = 620; $wy2 = 180; $ww2 = 1120; $wh2 = 660
+$b = New-Object System.Drawing.SolidBrush($gray); $g.FillRectangle($b, $wx2, $wy2, $ww2, $wh2); $b.Dispose()
+Bevel $g $wx2 $wy2 $ww2 $wh2 $white $black 2
+# title bar gradient navy -> light blue
+$rect = New-Object System.Drawing.Rectangle(($wx2 + 4), ($wy2 + 4), ($ww2 - 8), 40)
+$br = New-Object System.Drawing.Drawing2D.LinearGradientBrush($rect, (C 255 0 0 128), (C 255 16 132 208), 0.0)
+$g.FillRectangle($br, $rect); $br.Dispose()
+$b = New-Object System.Drawing.SolidBrush($white); $g.FillRectangle($b, ($wx2 + 44), ($wy2 + 18), 240, 12); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 255 224 224 0)); $g.FillRectangle($b, ($wx2 + 14), ($wy2 + 14), 20, 20); $b.Dispose()
+foreach ($i in 0..2) {
+  $bx2 = $wx2 + $ww2 - 40 - (2 - $i) * 34
+  $b = New-Object System.Drawing.SolidBrush($gray); $g.FillRectangle($b, $bx2, ($wy2 + 10), 28, 26); $b.Dispose()
+  Bevel $g $bx2 ($wy2 + 10) 28 26 $white $black 2
+  $b = New-Object System.Drawing.SolidBrush($black); $g.FillRectangle($b, ($bx2 + 8), ($wy2 + 28), 12, 3); $b.Dispose()
+}
+# menu strip
+$mx2 = $wx2 + 14
+foreach ($mw in @(38, 42, 52, 44, 40)) {
+  $b = New-Object System.Drawing.SolidBrush($black); $g.FillRectangle($b, $mx2, ($wy2 + 56), $mw, 10); $b.Dispose()
+  $mx2 += $mw + 26
+}
+# sunken content well with list rows
+$b = New-Object System.Drawing.SolidBrush($white); $g.FillRectangle($b, ($wx2 + 16), ($wy2 + 84), ($ww2 - 32), ($wh2 - 110)); $b.Dispose()
+Bevel $g ($wx2 + 16) ($wy2 + 84) ($ww2 - 32) ($wh2 - 110) $dgray $white 2
+for ($i = 0; $i -lt 14; $i++) {
+  $ly = $wy2 + 104 + $i * 36
+  if ($i -eq 3) {
+    $b = New-Object System.Drawing.SolidBrush((C 255 0 0 128)); $g.FillRectangle($b, ($wx2 + 22), ($ly - 6), ($ww2 - 44), 30); $b.Dispose()
+  }
+  $b = New-Object System.Drawing.SolidBrush((C 255 224 224 96)); $g.FillRectangle($b, ($wx2 + 36), $ly, 24, 20); $b.Dispose()
+  $b = New-Object System.Drawing.SolidBrush($(if ($i -eq 3) { $white } else { $black }))
+  $g.FillRectangle($b, ($wx2 + 74), ($ly + 5), $rng.Next(150, 420), 11); $b.Dispose()
+}
+# taskbar with start button + tasks + clock
+$b = New-Object System.Drawing.SolidBrush($gray); $g.FillRectangle($b, 0, ($H - 56), $W, 56); $b.Dispose()
+Bevel $g 0 ($H - 56) ($W - 1) 55 $white $dgray 2
+$b = New-Object System.Drawing.SolidBrush($gray); $g.FillRectangle($b, 8, ($H - 48), 130, 40); $b.Dispose()
+Bevel $g 8 ($H - 48) 130 40 $white $black 2
+foreach ($sq in @(@(20, 0, 0, 200), @(38, 200, 0, 0), @(20, 0, 140, 0), @(38, 200, 180, 0))) {
+  $b = New-Object System.Drawing.SolidBrush((C 255 $sq[1] $sq[2] $sq[3]))
+  $g.FillRectangle($b, $sq[0], ($H - 42 + $(if ($sq[0] -eq 20) { 0 } else { 0 })), 14, 14); $b.Dispose()
+}
+$b = New-Object System.Drawing.SolidBrush((C 255 0 0 200)); $g.FillRectangle($b, 20, ($H - 42), 14, 14); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 255 200 0 0)); $g.FillRectangle($b, 36, ($H - 42), 14, 14); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 255 0 140 0)); $g.FillRectangle($b, 20, ($H - 26), 14, 14); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 255 210 180 0)); $g.FillRectangle($b, 36, ($H - 26), 14, 14); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush($black); $g.FillRectangle($b, 62, ($H - 34), 60, 12); $b.Dispose()
+foreach ($i in 0..2) {
+  $tx = 160 + $i * 220
+  $b = New-Object System.Drawing.SolidBrush($gray); $g.FillRectangle($b, $tx, ($H - 48), 200, 40); $b.Dispose()
+  Bevel $g $tx ($H - 48) 200 40 $(if ($i -eq 0) { $dgray } else { $white }) $(if ($i -eq 0) { $white } else { $black }) 2
+  $b = New-Object System.Drawing.SolidBrush($black); $g.FillRectangle($b, ($tx + 16), ($H - 34), 120, 11); $b.Dispose()
+}
+$b = New-Object System.Drawing.SolidBrush($gray); $g.FillRectangle($b, ($W - 150), ($H - 48), 140, 40); $b.Dispose()
+Bevel $g ($W - 150) ($H - 48) 140 40 $dgray $white 2
+$b = New-Object System.Drawing.SolidBrush($black); $g.FillRectangle($b, ($W - 120), ($H - 34), 80, 12); $b.Dispose()
+Save $bmp $g "chicago.png"
+
+# ── Aero: blue gradient wallpaper, glass window, glass taskbar ──
+$rng = New-Object System.Random(2009)
+Get-Random -SetSeed 2009 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 12 46 96) (C 255 4 16 44)
+Glow $g 960 460 900 (C 60 90 180 255)
+Glow $g 400 820 520 (C 40 60 140 230)
+# light ribbons across the wallpaper
+foreach ($rib in @(@(-100, 700, 600, 380, 1300, 760, 2020, 520, 60), @(-100, 860, 700, 620, 1400, 900, 2020, 700, 40))) {
+  $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $path.AddBezier($rib[0], $rib[1], $rib[2], $rib[3], $rib[4], $rib[5], $rib[6], $rib[7])
+  foreach ($pass in @(@(($rib[8] / 3), 60), @(($rib[8] / 2), 24), @($rib[8], 6))) {
+    $pen = New-Object System.Drawing.Pen((C ([int]$pass[0]) 150 210 255), $pass[1])
+    $g.DrawPath($pen, $path); $pen.Dispose()
+  }
+  $path.Dispose()
+}
+# glass window
+$path = RoundRect 560 200 900 620 16
+$b = New-Object System.Drawing.SolidBrush((C 90 200 225 255)); $g.FillPath($b, $path); $b.Dispose()
+$pen = New-Object System.Drawing.Pen((C 170 235 245 255), 3); $g.DrawPath($pen, $path); $pen.Dispose(); $path.Dispose()
+Glow $g 1010 500 420 (C 26 150 210 255)
+# glass title bar with a highlight sheen
+$path = RoundRect 560 200 900 74 16
+$b = New-Object System.Drawing.SolidBrush((C 110 230 242 255)); $g.FillPath($b, $path); $b.Dispose(); $path.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 70 255 255 255)); $g.FillRectangle($b, 570, 210, 880, 26); $b.Dispose()
+# window buttons: rounded, red close
+foreach ($i in 0..2) {
+  $bx3 = 1290 + $i * 52
+  $path = RoundRect $bx3 214 44 34 8
+  $b = New-Object System.Drawing.SolidBrush($(if ($i -eq 2) { C 220 220 60 60 } else { C 120 240 250 255 }))
+  $g.FillPath($b, $path); $b.Dispose()
+  $pen = New-Object System.Drawing.Pen((C 150 255 255 255), 2); $g.DrawPath($pen, $path); $pen.Dispose(); $path.Dispose()
+}
+$b = New-Object System.Drawing.SolidBrush((C 220 255 255 255)); $g.FillRectangle($b, 600, 228, 240, 12); $b.Dispose()
+# content: white pane with list
+$b = New-Object System.Drawing.SolidBrush((C 210 250 252 255)); $g.FillRectangle($b, 580, 292, 860, 512); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 120 210 232 250)); $g.FillRectangle($b, 580, 292, 230, 512); $b.Dispose()
+for ($i = 0; $i -lt 9; $i++) {
+  $sy2 = 320 + $i * 52
+  $b = New-Object System.Drawing.SolidBrush((C 190 60 120 200)); $g.FillEllipse($b, 604, $sy2, 20, 20); $b.Dispose()
+  $b = New-Object System.Drawing.SolidBrush((C 170 40 70 120)); $g.FillRectangle($b, 636, ($sy2 + 5), $rng.Next(70, 150), 11); $b.Dispose()
+}
+$rowY = 330
+while ($rowY -lt 780) {
+  DashRow $g 840 $rowY 560 (C 140 40 70 120) 10
+  $rowY += 36
+}
+# glass taskbar with rounded icon buttons
+$b = New-Object System.Drawing.SolidBrush((C 120 180 215 255)); $g.FillRectangle($b, 0, ($H - 80), $W, 80); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 80 255 255 255)); $g.FillRectangle($b, 0, ($H - 80), $W, 26); $b.Dispose()
+Glow $g 90 ($H - 40) 90 (C 120 120 200 255)
+$b = New-Object System.Drawing.SolidBrush((C 210 60 130 220)); $g.FillEllipse($b, 44, ($H - 68), 56, 56); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 220 240 250 255)); $g.FillEllipse($b, 58, ($H - 54), 28, 28); $b.Dispose()
+$taskCols = @(@(90, 170, 250), @(250, 190, 80), @(120, 220, 140), @(250, 130, 120), @(190, 140, 250))
+for ($i = 0; $i -lt 5; $i++) {
+  $cc = $taskCols[$i]
+  $path = RoundRect (150 + $i * 78) ($H - 66) 58 52 10
+  $b = New-Object System.Drawing.SolidBrush((C 110 255 255 255)); $g.FillPath($b, $path); $b.Dispose()
+  $pen = New-Object System.Drawing.Pen((C 90 255 255 255), 2); $g.DrawPath($pen, $path); $pen.Dispose(); $path.Dispose()
+  $b = New-Object System.Drawing.SolidBrush((C 230 $cc[0] $cc[1] $cc[2])); $g.FillRectangle($b, (164 + $i * 78), ($H - 54), 30, 30); $b.Dispose()
+}
+Save $bmp $g "aero.png"
+
+# ── Fluent: flat dark, accent blue, tile grid, thin taskbar ──
+$rng = New-Object System.Random(2015)
+Get-Random -SetSeed 2015 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 16 20 26) (C 255 10 13 17)
+Glow $g 1500 300 700 (C 30 0 120 212)
+$acc = C 255 0 120 212
+# tile grid: flat colored squares of two sizes
+$tiles = @(
+  @(1080, 200, 200, 200, 0, 120, 212), @(1300, 200, 200, 200, 16, 137, 62),
+  @(1520, 200, 420, 200, 202, 80, 16), @(1080, 420, 420, 200, 92, 45, 145),
+  @(1520, 420, 200, 200, 0, 153, 188), @(1740, 420, 200, 200, 202, 24, 60),
+  @(1080, 640, 200, 200, 16, 124, 16), @(1300, 640, 420, 200, 0, 99, 177),
+  @(1740, 640, 200, 200, 122, 117, 116)
+)
+foreach ($t in $tiles) {
+  $b = New-Object System.Drawing.SolidBrush((C 235 $t[4] $t[5] $t[6]))
+  $g.FillRectangle($b, $t[0], $t[1], ($t[2] - 8), ($t[3] - 8)); $b.Dispose()
+  # glyph block + label bar inside the tile
+  $b = New-Object System.Drawing.SolidBrush((C 200 250 252 255))
+  $g.FillRectangle($b, ($t[0] + 32), ($t[1] + 40), 52, 52); $b.Dispose()
+  $b = New-Object System.Drawing.SolidBrush((C 170 250 252 255))
+  $g.FillRectangle($b, ($t[0] + 24), ($t[3] + $t[1] - 46), ([int](($t[2] - 8) * 0.5)), 11); $b.Dispose()
+}
+# start-panel column on the left of the tiles
+$b = New-Object System.Drawing.SolidBrush((C 235 24 28 34)); $g.FillRectangle($b, 720, 200, 340, 640); $b.Dispose()
+for ($i = 0; $i -lt 11; $i++) {
+  $ly2 = 226 + $i * 56
+  if ($i -eq 4) {
+    $b = New-Object System.Drawing.SolidBrush((C 90 0 120 212)); $g.FillRectangle($b, 720, ($ly2 - 10), 340, 46); $b.Dispose()
+    $b = New-Object System.Drawing.SolidBrush($acc); $g.FillRectangle($b, 720, ($ly2 - 10), 4, 46); $b.Dispose()
+  }
+  $b = New-Object System.Drawing.SolidBrush((C 190 220 228 236)); $g.FillRectangle($b, 748, $ly2, 22, 22); $b.Dispose()
+  $b = New-Object System.Drawing.SolidBrush((C 160 210 220 230)); $g.FillRectangle($b, 786, ($ly2 + 6), $rng.Next(90, 220), 11); $b.Dispose()
+}
+# flat window, left
+$b = New-Object System.Drawing.SolidBrush((C 240 32 36 42)); $g.FillRectangle($b, 90, 200, 560, 640); $b.Dispose()
+$pen = New-Object System.Drawing.Pen((C 90 90 100 115), 1); $g.DrawRectangle($pen, 90, 200, 560, 640); $pen.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 255 26 30 36)); $g.FillRectangle($b, 90, 200, 560, 48); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 200 220 228 236)); $g.FillRectangle($b, 116, 218, 180, 12); $b.Dispose()
+foreach ($i in 0..2) {
+  $b = New-Object System.Drawing.SolidBrush($(if ($i -eq 2) { C 230 232 17 35 } else { C 150 200 210 220 }))
+  $g.FillRectangle($b, (520 + $i * 40), 218, 14, 12); $b.Dispose()
+}
+$rowY = 280
+while ($rowY -lt 800) {
+  DashRow $g 118 $rowY 480 (C 120 180 195 210) 10
+  $rowY += 34
+}
+# thin taskbar with centered-ish icons and accent underline
+$b = New-Object System.Drawing.SolidBrush((C 250 20 24 30)); $g.FillRectangle($b, 0, ($H - 60), $W, 60); $b.Dispose()
+$pen = New-Object System.Drawing.Pen((C 60 90 100 115), 1); $g.DrawLine($pen, 0, ($H - 60), $W, ($H - 60)); $pen.Dispose()
+$taskCols2 = @(@(0, 120, 212), @(16, 137, 62), @(202, 80, 16), @(92, 45, 145), @(0, 153, 188), @(202, 24, 60))
+for ($i = 0; $i -lt 6; $i++) {
+  $cc = $taskCols2[$i]
+  $tx2 = 760 + $i * 72
+  $b = New-Object System.Drawing.SolidBrush((C 235 $cc[0] $cc[1] $cc[2])); $g.FillRectangle($b, $tx2, ($H - 46), 32, 32); $b.Dispose()
+  if ($i -eq 1) {
+    $b = New-Object System.Drawing.SolidBrush($acc); $g.FillRectangle($b, ($tx2 + 4), ($H - 10), 24, 3); $b.Dispose()
+  }
+}
+$b = New-Object System.Drawing.SolidBrush((C 180 210 220 230)); $g.FillRectangle($b, ($W - 150), ($H - 40), 90, 12); $b.Dispose()
+Save $bmp $g "fluent.png"
+
+# ── DOS: black screen, DIR listing, blue TUI panel with shadow ──
+$rng = New-Object System.Random(1981)
+Get-Random -SetSeed 1981 | Out-Null
+$bmp, $g = New-Canvas
+$b = New-Object System.Drawing.SolidBrush((C 255 0 0 0)); $g.FillRectangle($b, 0, 0, $W, $H); $b.Dispose()
+Glow $g 960 520 900 (C 12 170 170 170)
+$gray = C 215 170 170 170
+$grayDim = C 120 130 130 130
+$white = C 240 236 236 236
+$cell = 20   # character cell width for the fake text grid
+
+function TextRow {
+  # Fake monospace text: fixed-width cell blocks, so it reads as DOS text.
+  param($g, $x, $y, $cells, $color, $gaps)
+  $cx2 = $x
+  $i = 0
+  while ($i -lt $cells) {
+    $runLen = Get-Random -Minimum 2 -Maximum 9
+    if ($i + $runLen -gt $cells) { $runLen = $cells - $i }
+    $b2 = New-Object System.Drawing.SolidBrush($color)
+    $g.FillRectangle($b2, ($x + $i * $cell), $y, ($runLen * $cell - 5), 12); $b2.Dispose()
+    $i += $runLen + $(if ($gaps) { Get-Random -Minimum 1 -Maximum 3 } else { 1 })
+  }
+}
+
+# header: volume label + directory line
+TextRow $g 120 90 22 $gray $true
+TextRow $g 120 122 18 $gray $true
+TextRow $g 120 170 16 $gray $true
+
+# DIR listing: NAME EXT <DIR>/size DATE TIME columns
+$rowY = 220
+for ($i = 0; $i -lt 20; $i++) {
+  $isDir = $rng.NextDouble() -lt 0.3
+  # name column (8 chars)
+  $b = New-Object System.Drawing.SolidBrush($white)
+  $g.FillRectangle($b, 120, $rowY, ($rng.Next(4, 9) * $cell - 5), 12); $b.Dispose()
+  # extension column (3 chars)
+  if (-not $isDir) {
+    $b = New-Object System.Drawing.SolidBrush($gray)
+    $g.FillRectangle($b, 300, $rowY, (3 * $cell - 5), 12); $b.Dispose()
+  }
+  # <DIR> marker or byte size, right-aligned-ish
+  if ($isDir) {
+    $b = New-Object System.Drawing.SolidBrush($gray)
+    $g.FillRectangle($b, 400, $rowY, (5 * $cell - 5), 12); $b.Dispose()
+  } else {
+    $sw = $rng.Next(3, 8) * $cell - 5
+    $b = New-Object System.Drawing.SolidBrush($gray)
+    $g.FillRectangle($b, (560 - $sw), $rowY, $sw, 12); $b.Dispose()
+  }
+  # date + time columns
+  $b = New-Object System.Drawing.SolidBrush($grayDim)
+  $g.FillRectangle($b, 620, $rowY, (8 * $cell - 5), 12)
+  $g.FillRectangle($b, 810, $rowY, (6 * $cell - 5), 12); $b.Dispose()
+  $rowY += 30
+}
+# summary lines + prompt with block cursor
+TextRow $g 120 ($rowY + 24) 26 $gray $true
+TextRow $g 120 ($rowY + 54) 24 $gray $true
+$b = New-Object System.Drawing.SolidBrush($white)
+$g.FillRectangle($b, 120, ($rowY + 104), (4 * $cell - 5), 12); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush($white)
+$g.FillRectangle($b, (120 + 4 * $cell + 8), ($rowY + 96), 16, 26); $b.Dispose()
+
+# blue TUI panel, right side: double-line border, title, menu, shadow
+$px = 1150; $py = 260; $pw = 660; $ph = 520
+$b = New-Object System.Drawing.SolidBrush((C 160 0 0 0)); $g.FillRectangle($b, ($px + 14), ($py + 16), $pw, $ph); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 255 0 0 168)); $g.FillRectangle($b, $px, $py, $pw, $ph); $b.Dispose()
+# double-line border drawn as two inset rectangles
+$pen = New-Object System.Drawing.Pen((C 255 200 200 200), 3); $g.DrawRectangle($pen, ($px + 10), ($py + 10), ($pw - 20), ($ph - 20)); $pen.Dispose()
+$pen = New-Object System.Drawing.Pen((C 255 200 200 200), 2); $g.DrawRectangle($pen, ($px + 18), ($py + 18), ($pw - 36), ($ph - 36)); $pen.Dispose()
+# title plate centred on the top border
+$b = New-Object System.Drawing.SolidBrush((C 255 0 0 168)); $g.FillRectangle($b, ($px + 200), ($py + 2), 260, 32); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 255 236 236 236)); $g.FillRectangle($b, ($px + 232), ($py + 12), 196, 13); $b.Dispose()
+# menu rows, one highlighted (inverse: light bar, dark text)
+for ($i = 0; $i -lt 7; $i++) {
+  $my = $py + 80 + $i * 46
+  if ($i -eq 2) {
+    $b = New-Object System.Drawing.SolidBrush((C 255 200 200 200)); $g.FillRectangle($b, ($px + 30), ($my - 8), ($pw - 60), 32); $b.Dispose()
+    $b = New-Object System.Drawing.SolidBrush((C 255 0 0 168)); $g.FillRectangle($b, ($px + 52), $my, ($rng.Next(9, 16) * $cell), 13); $b.Dispose()
+  } else {
+    $b = New-Object System.Drawing.SolidBrush((C 255 96 216 216)); $g.FillRectangle($b, ($px + 52), $my, $cell, 13); $b.Dispose()
+    $b = New-Object System.Drawing.SolidBrush((C 235 200 200 200)); $g.FillRectangle($b, ($px + 52 + $cell + 8), $my, ($rng.Next(8, 18) * $cell), 13); $b.Dispose()
+  }
+}
+# status strip at the panel foot
+$b = New-Object System.Drawing.SolidBrush((C 255 0 168 168)); $g.FillRectangle($b, ($px + 30), ($py + $ph - 60), ($pw - 60), 30); $b.Dispose()
+foreach ($i in 0..3) {
+  $b = New-Object System.Drawing.SolidBrush((C 255 0 0 0)); $g.FillRectangle($b, ($px + 50 + $i * 150), ($py + $ph - 52), 60, 13); $b.Dispose()
+  $b = New-Object System.Drawing.SolidBrush((C 255 236 236 236)); $g.FillRectangle($b, ($px + 118 + $i * 150), ($py + $ph - 52), 40, 13); $b.Dispose()
+}
+# faint CRT scanlines
+for ($y = 0; $y -lt $H; $y += 3) {
+  $pen = New-Object System.Drawing.Pen((C 22 0 0 0), 1); $g.DrawLine($pen, 0, $y, $W, $y); $pen.Dispose()
+}
+EdgeFade $g "top" 100 90; EdgeFade $g "bottom" 110 100; EdgeFade $g "left" 120 90; EdgeFade $g "right" 110 80
+Save $bmp $g "dos.png"
+
 "done -> $out"

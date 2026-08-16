@@ -170,7 +170,7 @@ function applyBackground() {
   // The settings/history wash follows the transparency setting too:
   // fully see-through terminals keep the light 55% wash, a solid
   // terminal makes those pages solid as well.
-  const transp = Math.min(100, Math.max(0, config.bg_transparency ?? 100));
+  const transp = effTransparency();
   const washPct = Math.round(55 + (100 - transp) * 0.45);
   document.documentElement.style.setProperty("--wash-pct", `${washPct}%`);
   const image = resolvedBgCss();
@@ -789,7 +789,18 @@ interface ThemeDef {
   cursorStyle: CursorStyle;
   /// Built-in decorative background in the theme's palette.
   bgArt: string;
+  /// How much of the art shows through the terminal cells, 0-100.
+  /// Busier art gets a lower value so text stays legible; omitted
+  /// means 100 (fully see-through). The user setting overrides it.
+  transparency?: number;
   xterm: ITheme;
+}
+
+/// Effective see-through amount: explicit user setting wins, else the
+/// theme's own default, else fully see-through.
+function effTransparency(): number {
+  const v = config.bg_transparency ?? currentTheme().transparency ?? 100;
+  return Math.min(100, Math.max(0, v));
 }
 
 function mkTheme(
@@ -1605,6 +1616,123 @@ THEMES.speakeasy = mkTheme(
 );
 THEMES.speakeasy.xterm.cursor = "#e0aa50";
 
+THEMES.penguin = mkTheme(
+  "Penguin",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.15, "block"],
+  'linear-gradient(rgba(18,20,26,0.36), rgba(18,20,26,0.52)), url("/backgrounds/penguin.png") center / cover no-repeat, linear-gradient(180deg, #12141a, #0a0b0f)',
+  "#12141a",
+  "#d4dae6",
+  [
+    "#12141a", "#e86f6f", "#7fc86f", "#e8a03c", "#6f9fe8", "#b48ae0", "#5fc4c4", "#ccd2de",
+    "#5a6270", "#ff8f8f", "#a0e08f", "#f5bc63", "#8fbcf5", "#ccaaf0", "#8fdcdc", "#eef2f8",
+  ]
+);
+THEMES.penguin.xterm.cursor = "#e8a03c";
+
+THEMES.cupertino = mkTheme(
+  "Cupertino",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"],
+  'linear-gradient(rgba(26,18,48,0.36), rgba(26,18,48,0.52)), url("/backgrounds/cupertino.png") center / cover no-repeat, linear-gradient(180deg, #1a1230, #100a20)',
+  "#1a1230",
+  "#e6e2f0",
+  [
+    "#1a1230", "#ff6f61", "#5ad880", "#ffcc4d", "#0a84ff", "#bf5af2", "#5ac8d8", "#dcd6ea",
+    "#5e5480", "#ff8f84", "#82e8a4", "#ffdd80", "#5aa8ff", "#d68cf7", "#82dce8", "#f6f2fc",
+  ]
+);
+THEMES.cupertino.xterm.cursor = "#0a84ff";
+
+THEMES.material = mkTheme(
+  "Material",
+  "white",
+  ["Consolas, monospace", 1.15, "bar"],
+  'linear-gradient(rgba(18,20,19,0.36), rgba(18,20,19,0.52)), url("/backgrounds/material.png") center / cover no-repeat, linear-gradient(180deg, #121413, #0a0c0b)',
+  "#121413",
+  "#e0e8e2",
+  [
+    "#121413", "#ef5350", "#3ddc84", "#ffca28", "#42a5f5", "#ab47bc", "#26c6da", "#d6ded8",
+    "#5a6460", "#ff7b78", "#69f0a4", "#ffdd5c", "#6fc0ff", "#ce7ade", "#5ce0ec", "#f2faf4",
+  ]
+);
+THEMES.material.xterm.cursor = "#3ddc84";
+
+THEMES.chicago = mkTheme(
+  "Chicago",
+  "black",
+  ['"Lucida Console", Consolas, monospace', 1.1, "block"],
+  'linear-gradient(rgba(192,192,192,0.3), rgba(192,192,192,0.42)), url("/backgrounds/chicago.png") center / cover no-repeat, linear-gradient(180deg, #c0c0c0, #b4b4b4)',
+  "#c0c0c0",
+  "#000000",
+  [
+    "#000000", "#8a0000", "#006100", "#4a3a00", "#000080", "#6a0068", "#005a5a", "#3f3f3f",
+    "#565656", "#a80000", "#00730d", "#5c4600", "#0000b4", "#7c0078", "#006e6e", "#ffffff",
+  ]
+);
+THEMES.chicago.xterm.cursor = "#000080";
+
+THEMES.aero = mkTheme(
+  "Aero",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"],
+  'linear-gradient(rgba(12,46,96,0.32), rgba(12,46,96,0.46)), url("/backgrounds/aero.png") center / cover no-repeat, linear-gradient(180deg, #0c2e60, #061a3c)',
+  "#0c2e60",
+  "#e2eefc",
+  [
+    "#0c2e60", "#ff8a80", "#7fe0a8", "#ffd782", "#6ab8f0", "#c0a0f0", "#7fdcec", "#d8e4f4",
+    "#5c7aa8", "#ffa8a0", "#a0f0c4", "#ffe4a8", "#96d0ff", "#d8bcff", "#a4ecf8", "#f4f9ff",
+  ]
+);
+THEMES.aero.xterm.cursor = "#6ab8f0";
+
+THEMES.fluent = mkTheme(
+  "Fluent",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.15, "bar"],
+  'linear-gradient(rgba(16,20,26,0.36), rgba(16,20,26,0.52)), url("/backgrounds/fluent.png") center / cover no-repeat, linear-gradient(180deg, #10141a, #090c10)',
+  "#10141a",
+  "#dfe6ee",
+  [
+    "#10141a", "#e8646e", "#4fc98a", "#e8a33c", "#3aa0ee", "#a97ce0", "#3fc8d8", "#d2dae4",
+    "#5a6675", "#ff8288", "#72e0a6", "#f5bf62", "#68bcff", "#c69cf0", "#68e0ec", "#f0f6fc",
+  ]
+);
+THEMES.fluent.xterm.cursor = "#3aa0ee";
+
+// DOS: the 16-colour CGA/EGA palette. Red and blue are lifted off
+// their historical values (#aa0000 / #0000aa) - on black those are
+// famously unreadable and fail the contrast audit.
+THEMES.dos = mkTheme(
+  "DOS",
+  "white",
+  ['"Lucida Console", Consolas, monospace', 1.1, "block"],
+  'linear-gradient(rgba(0,0,0,0.34), rgba(0,0,0,0.5)), url("/backgrounds/dos.png") center / cover no-repeat, linear-gradient(180deg, #000000, #000000)',
+  "#000000",
+  "#aaaaaa",
+  [
+    "#000000", "#d43535", "#00aa00", "#aa5500", "#5878e8", "#aa00aa", "#00aaaa", "#aaaaaa",
+    "#555555", "#ff5555", "#55ff55", "#ffff55", "#5555ff", "#ff55ff", "#55ffff", "#ffffff",
+  ]
+);
+THEMES.dos.xterm.cursor = "#aaaaaa";
+
+// Per-theme see-through defaults. Busy or bright backdrops (dense text,
+// white UI panels, lit floors) veil themselves more so the terminal
+// stays legible; sparse dark art keeps the full 100.
+for (const [k, v] of Object.entries({
+  chicago: 50, macintosh: 55, fluent: 55, aero: 58, library: 58, dos: 60,
+  nightclub: 60, cupertino: 62, material: 62, cartridge: 62, penguin: 65,
+  rave: 65, valorant: 68, backrooms: 68, lumon: 70, nostromo: 70,
+  redacted: 70, nier: 72, "solarized-light": 75, blueprint: 75, swordfish: 75,
+  hackers: 75, speakeasy: 75, sakura: 78, matrix: 80, pride: 80,
+  skicabin: 80, gameboy: 80, pipboy: 82, csgo: 85, wargames: 85,
+  galactica: 85, polygon: 85, bebop: 85, akira: 88, scouter: 88,
+  aperture: 88, c64: 88,
+})) {
+  if (THEMES[k]) THEMES[k].transparency = v;
+}
+
 let themeKey = "one-dark";
 function currentTheme(): ThemeDef {
   return THEMES[themeKey] ?? THEMES["one-dark"];
@@ -1682,7 +1810,7 @@ function effXtermTheme(): ITheme {
   // See-through terminal cells: the theme background at reduced alpha
   // veils the art. 100 = art fully visible (hex8 form: xterm's color
   // parser handles it reliably everywhere).
-  const transp = Math.min(100, Math.max(0, config.bg_transparency ?? 100));
+  const transp = effTransparency();
   const alpha = Math.round(((100 - transp) / 100) * 255)
     .toString(16)
     .padStart(2, "0");
@@ -3523,7 +3651,8 @@ async function renderRestoreMenu() {
 // land in their own groups, so nothing can silently vanish.
 const THEME_GROUPS: Array<[string, string[]]> = [
   ["Classics", ["one-dark", "dracula", "nord", "gruvbox", "tokyo-night", "catppuccin", "solarized-dark", "solarized-light", "monokai", "everforest"]],
-  ["Retro hardware", ["amber-crt", "gameboy", "c64", "macintosh"]],
+  ["Retro hardware", ["amber-crt", "gameboy", "c64"]],
+  ["Operating systems", ["dos", "penguin", "cupertino", "material", "macintosh", "chicago", "aero", "fluent"]],
   ["Film & TV", ["matrix", "bladerunner", "tron", "lcars", "dune", "umbrella", "nostromo", "wargames", "lumon", "swordfish", "hackers", "galactica"]],
   ["Games", ["cyberpunk", "deus-ex", "pipboy", "nier", "sheikah", "aperture", "persona", "valorant", "csgo", "dbd"]],
   ["Consoles", ["library", "blade", "cartridge", "polygon"]],
@@ -3909,11 +4038,12 @@ function buildSettingsPage() {
     );
   }
   if (bgStyle !== "none") {
+    const themeDefault = currentTheme().transparency ?? 100;
     settingRow(
       "Background transparency (%)",
-      "How much the background shows through the terminal itself. 100 = fully see-through cells, 0 = solid terminal background.",
-      mkNumber(config.bg_transparency ?? 100, 0, 100, (v) => {
-        config.bg_transparency = v === 100 ? undefined : v;
+      `How much the background shows through the terminal itself. 100 = fully see-through cells, 0 = solid terminal background. Each theme sets its own default (${themeDefault}% here) — busier art veils itself more; set it back to that value to follow the theme again.`,
+      mkNumber(effTransparency(), 0, 100, (v) => {
+        config.bg_transparency = v === themeDefault ? undefined : v;
         changed();
       })
     );
