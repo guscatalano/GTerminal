@@ -36,6 +36,12 @@ Seeded GDI+ renders — re-running the script reproduces them exactly.
 - `blueprint.png` — cyanotype drafting sheet: part, dimensions, title block
 - `redacted.png` — typewritten dossier with redaction bars and stamps
 - `persona.png` — jagged star collage with halftone wedge
+- `akira.png` — taillight trail ribbons, neon kanji sign column
+- `bebop.png` — bounty card with starburst, dotted star-chart route
+- `scouter.png` — green lens HUD: reticle, power digits, segment bar
+- `backrooms.png` — liminal yellow room, fluorescent panels, far doorway
+- `swordfish.png` — cipher-cascade windows, ghosted wireframe polyhedron
+- `hackers.png` — data-city towers with beacons on a perspective grid
 
 ## NASA imagery (public domain)
 

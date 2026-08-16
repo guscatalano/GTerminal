@@ -1308,6 +1308,92 @@ THEMES.persona = mkTheme(
 THEMES.persona.xterm.cursor = "#e8283c";
 THEMES.persona.xterm.selectionBackground = "#e8283c40";
 
+THEMES.akira = mkTheme(
+  "Akira",
+  "white",
+  ['"Cascadia Code", "Cascadia Mono", monospace', 1.1, "block"],
+  'linear-gradient(rgba(14,6,10,0.4), rgba(14,6,10,0.55)), url("/backgrounds/akira.png") center / cover no-repeat, linear-gradient(180deg, #0e060a, #070204)',
+  "#0e060a",
+  "#f0dcd8",
+  [
+    "#0e060a", "#ff5c50", "#8fd08a", "#ffca7a", "#ff4d5e", "#e08ab8", "#7fc8d8", "#e6d4d8",
+    "#7a525c", "#ff7d70", "#aae8a0", "#ffdc9a", "#ff7382", "#f0a8cc", "#a0e0ec", "#fbf0f2",
+  ]
+);
+THEMES.akira.xterm.cursor = "#ff4d5e";
+THEMES.akira.xterm.selectionBackground = "#ff4d5e40";
+
+THEMES.bebop = mkTheme(
+  "Bebop",
+  "white",
+  ["Consolas, monospace", 1.2, "bar"],
+  'linear-gradient(rgba(10,15,28,0.38), rgba(10,15,28,0.54)), url("/backgrounds/bebop.png") center / cover no-repeat, linear-gradient(180deg, #0a0f1c, #060a14)',
+  "#0a0f1c",
+  "#e8dcc0",
+  [
+    "#0a0f1c", "#ff7a6b", "#8fd0a0", "#ffce6b", "#e8a83c", "#c08ad0", "#7fc8d0", "#dcd2b8",
+    "#4c5670", "#ff9c90", "#aae8bc", "#ffe094", "#f0c068", "#d8aae0", "#a0e0e8", "#f6efe0",
+  ]
+);
+THEMES.bebop.xterm.cursor = "#e8a83c";
+
+THEMES.scouter = mkTheme(
+  "Scouter",
+  "white",
+  ['"Lucida Console", Consolas, monospace', 1.1, "block"],
+  'linear-gradient(rgba(8,18,8,0.4), rgba(8,18,8,0.56)), url("/backgrounds/scouter.png") center / cover no-repeat, linear-gradient(180deg, #081208, #040a04)',
+  "#081208",
+  "#9df08f",
+  [
+    "#081208", "#ff6b5e", "#6fe060", "#d8e87a", "#55d848", "#a0d890", "#8ff0c0", "#c8f0c0",
+    "#3f7a3c", "#ff8d80", "#8ff080", "#ecf89a", "#7de86e", "#c0e8b0", "#b0f8d8", "#eafce8",
+  ]
+);
+THEMES.scouter.xterm.cursor = "#6fe060";
+THEMES.scouter.xterm.selectionBackground = "#55d84840";
+
+THEMES.backrooms = mkTheme(
+  "Backrooms",
+  "black",
+  ['"Lucida Console", Consolas, monospace', 1.2, "block"],
+  'linear-gradient(rgba(213,201,138,0.28), rgba(213,201,138,0.4)), url("/backgrounds/backrooms.png") center / cover no-repeat, linear-gradient(180deg, #d5c98a, #c4b878)',
+  "#d5c98a",
+  "#3a3418",
+  [
+    "#3a3418", "#9c3a28", "#4f6626", "#7a5c14", "#6b5e1e", "#7a4a58", "#3f6858", "#c2b678",
+    "#5f5738", "#86301f", "#425420", "#5c4a0e", "#4c4a22", "#663d4a", "#335548", "#e8dfae",
+  ]
+);
+
+THEMES.swordfish = mkTheme(
+  "Swordfish",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.15, "bar"],
+  'linear-gradient(rgba(5,11,20,0.38), rgba(5,11,20,0.54)), url("/backgrounds/swordfish.png") center / cover no-repeat, linear-gradient(180deg, #050b14, #03060c)',
+  "#050b14",
+  "#c8e8f8",
+  [
+    "#050b14", "#ff6e7a", "#5ee8b0", "#ffd47f", "#4fd8ff", "#b48aff", "#7fe8ff", "#cfe0ee",
+    "#3c5a72", "#ff93a0", "#88f0c8", "#ffe4a8", "#7fe0ff", "#cbaaff", "#a8f0ff", "#ecf6fc",
+  ]
+);
+THEMES.swordfish.xterm.cursor = "#4fd8ff";
+
+THEMES.hackers = mkTheme(
+  "Hackers",
+  "white",
+  ['"Cascadia Code", "Cascadia Mono", monospace', 1.1, "block"],
+  'linear-gradient(rgba(10,6,18,0.4), rgba(10,6,18,0.55)), url("/backgrounds/hackers.png") center / cover no-repeat, linear-gradient(180deg, #0a0612, #05030a)',
+  "#0a0612",
+  "#c0f0d0",
+  [
+    "#0a0612", "#ff5c74", "#39e878", "#e8e060", "#ff4dd8", "#c86aff", "#5ee8e8", "#d0e8d8",
+    "#5a4a6e", "#ff85a0", "#66ff9d", "#f0ec8a", "#ff7de4", "#d898ff", "#8af0f0", "#f0fcf4",
+  ]
+);
+THEMES.hackers.xterm.cursor = "#39e878";
+THEMES.hackers.xterm.selectionBackground = "#ff4dd840";
+
 let themeKey = "one-dark";
 function currentTheme(): ThemeDef {
   return THEMES[themeKey] ?? THEMES["one-dark"];
@@ -3222,6 +3308,46 @@ async function renderRestoreMenu() {
   }
 }
 
+// Theme picker categories: keys not listed here (and custom themes)
+// land in their own groups, so nothing can silently vanish.
+const THEME_GROUPS: Array<[string, string[]]> = [
+  ["Classics", ["one-dark", "dracula", "nord", "gruvbox", "tokyo-night", "catppuccin", "solarized-dark", "solarized-light", "monokai", "everforest"]],
+  ["Retro hardware", ["amber-crt", "gameboy", "c64", "macintosh"]],
+  ["Film & TV", ["matrix", "bladerunner", "tron", "lcars", "dune", "umbrella", "nostromo", "wargames", "lumon", "swordfish", "hackers"]],
+  ["Games", ["cyberpunk", "deus-ex", "pipboy", "nier", "sheikah", "aperture", "persona"]],
+  ["Anime", ["akira", "bebop", "scouter", "nerv"]],
+  ["Space", ["hyperspace", "space", "missionctl"]],
+  ["Art & liminal", ["hermes", "nous", "synthwave", "blueprint", "redacted", "backrooms"]],
+];
+
+/// Grouped theme select: optgroups per category, then Custom, then any
+/// keys the taxonomy missed.
+function mkThemeSelect(value: string, onChange: (v: string) => void): HTMLSelectElement {
+  const sel = document.createElement("select");
+  sel.className = "set-control";
+  const listed = new Set<string>();
+  const addGroup = (label: string, keys: string[]) => {
+    const valid = keys.filter((k) => THEMES[k]);
+    if (!valid.length) return;
+    const grp = document.createElement("optgroup");
+    grp.label = label;
+    for (const k of valid) {
+      const o = document.createElement("option");
+      o.value = k;
+      o.textContent = THEMES[k].label;
+      grp.appendChild(o);
+      listed.add(k);
+    }
+    sel.appendChild(grp);
+  };
+  for (const [label, keys] of THEME_GROUPS) addGroup(label, keys);
+  addGroup("Custom", Object.keys(THEMES).filter((k) => k.startsWith("custom-")));
+  addGroup("Other", Object.keys(THEMES).filter((k) => !listed.has(k) && !k.startsWith("custom-")));
+  sel.value = value;
+  sel.addEventListener("change", () => onChange(sel.value));
+  return sel;
+}
+
 function mkSelect(
   options: Array<[string, string]>,
   value: string,
@@ -3325,17 +3451,21 @@ function buildSettingsPage() {
   };
 
   settingsSection("Appearance");
+  const themeSel = mkThemeSelect(
+    themeKey,
+    (v) => {
+      applyTheme(v);
+      buildSettingsPage();
+      // The rebuild replaced the select; put keyboard focus back on the
+      // new one so arrow keys keep previewing themes.
+      (settingsList.querySelector('select[data-role="theme"]') as HTMLSelectElement | null)?.focus();
+    }
+  );
+  themeSel.dataset.role = "theme";
   settingRow(
     "Theme",
-    "Colors, plus each theme's default font, spacing, and cursor personality.",
-    mkSelect(
-      Object.entries(THEMES).map(([k, t]) => [k, t.label] as [string, string]),
-      themeKey,
-      (v) => {
-        applyTheme(v);
-        buildSettingsPage();
-      }
-    )
+    "Colors, plus each theme's default font, spacing, and cursor personality. Focus the dropdown and use Up/Down to preview.",
+    themeSel
   );
 
   // Custom themes: base + color/font overrides, editable in place.

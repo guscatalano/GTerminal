@@ -2515,4 +2515,414 @@ JaggedStar $g 1712 172 30 62 10 $red 12
 EdgeFade $g "top" 90 120; EdgeFade $g "bottom" 110 140; EdgeFade $g "left" 130 120; EdgeFade $g "right" 90 100
 Save $bmp $g "persona.png"
 
+# ── Akira: Neo-Tokyo night, taillight trails, kanji neon column ──
+$rng = New-Object System.Random(1988)
+Get-Random -SetSeed 1988 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 14 6 10) (C 255 5 2 4)
+# dark city blocks on the horizon with sparse warm windows
+$x = 0
+while ($x -lt $W) {
+  $bw = $rng.Next(90, 240); $h2 = $rng.Next(120, 320)
+  $b = New-Object System.Drawing.SolidBrush((C 255 10 5 8))
+  $g.FillRectangle($b, $x, (620 - $h2), $bw, $h2); $b.Dispose()
+  for ($i = 0; $i -lt [int]($bw * $h2 / 2600); $i++) {
+    $b = New-Object System.Drawing.SolidBrush((C $rng.Next(40, 120) 255 120 90))
+    $g.FillRectangle($b, ($x + $rng.Next(4, $bw - 4)), (620 - $h2 + $rng.Next(6, $h2 - 6)), 2, 3); $b.Dispose()
+  }
+  $x += $bw + $rng.Next(4, 30)
+}
+# taillight trails: sweeping bezier ribbons with layered bloom
+foreach ($trail in @(
+    @(-100, 900, 700, 660, 1300, 820, 2020, 700, 255, 42, 60),
+    @(-100, 980, 800, 840, 1400, 960, 2020, 830, 230, 30, 44),
+    @(-100, 840, 500, 700, 1100, 700, 2020, 610, 160, 16, 26))) {
+  $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $path.AddBezier($trail[0], $trail[1], $trail[2], $trail[3], $trail[4], $trail[5], $trail[6], $trail[7])
+  foreach ($pass in @(@(30, 30), @(80, 14), @(200, 6), @(255, 2))) {
+    $pen = New-Object System.Drawing.Pen((C ([math]::Min($pass[0], $trail[8])) 255 $trail[9] $trail[10]), $pass[1])
+    $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+    $pen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+    $g.DrawPath($pen, $path); $pen.Dispose()
+  }
+  $path.Dispose()
+}
+# white core streak on the main trail
+$path = New-Object System.Drawing.Drawing2D.GraphicsPath
+$path.AddBezier(-100, 900, 700, 660, 1300, 820, 2020, 700)
+$pen = New-Object System.Drawing.Pen((C 200 255 235 225), 1); $g.DrawPath($pen, $path); $pen.Dispose(); $path.Dispose()
+# neon sign column, right: vertical CJK glyphs on a dark sign board
+$b = New-Object System.Drawing.SolidBrush((C 240 16 6 8)); $g.FillRectangle($b, 1700, 110, 90, 460); $b.Dispose()
+$pen = New-Object System.Drawing.Pen((C 200 255 60 70), 3); $g.DrawRectangle($pen, 1700, 110, 90, 460); $pen.Dispose()
+Glow $g 1745 340 190 (C 46 255 60 70)
+$font = New-Object System.Drawing.Font("Consolas", 34, [System.Drawing.FontStyle]::Bold)
+for ($i = 0; $i -lt 6; $i++) {
+  $ch = [char](0x4E00 + $rng.Next(0, 0x9FA5 - 0x4E00))
+  $b = New-Object System.Drawing.SolidBrush((C $(if ($i -eq 2) { 255 } else { 200 }) 255 84 92))
+  $g.DrawString($ch, $font, $b, 1716, (128 + $i * 72)); $b.Dispose()
+}
+$font.Dispose()
+# road glow + grain
+Glow $g 960 980 700 (C 26 255 60 70)
+for ($i = 0; $i -lt 1500; $i++) {
+  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(6, 16) 255 200 190))
+  $g.FillRectangle($b, $rng.Next(0, $W), $rng.Next(0, $H), 1, 1); $b.Dispose()
+}
+EdgeFade $g "top" 130 140; EdgeFade $g "bottom" 110 120; EdgeFade $g "left" 140 120; EdgeFade $g "right" 110 100
+Save $bmp $g "akira.png"
+
+# ── Bebop: bounty-card space noir, star chart, tracking lines ──
+$rng = New-Object System.Random(1998)
+Get-Random -SetSeed 1998 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 10 15 28) (C 255 5 8 16)
+Glow $g 500 900 600 (C 26 232 168 60)      # warm jazz glow bottom-left
+# star field
+for ($i = 0; $i -lt 420; $i++) {
+  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(30, 140) 220 226 240))
+  $sz = if ($rng.NextDouble() -lt 0.08) { 2 } else { 1 }
+  $g.FillRectangle($b, $rng.Next(0, $W), $rng.Next(0, $H), $sz, $sz); $b.Dispose()
+}
+$amber = C 230 232 168 60
+$amberDim = C 120 200 150 60
+$cream = C 220 232 217 176
+# dotted route across a faint chart grid, left half
+for ($i = 0; $i -le 6; $i++) {
+  $pen = New-Object System.Drawing.Pen((C 22 150 170 210), 1)
+  $g.DrawLine($pen, 140, (520 + $i * 78), 900, (520 + $i * 78)); $pen.Dispose()
+}
+for ($i = 0; $i -le 8; $i++) {
+  $pen = New-Object System.Drawing.Pen((C 22 150 170 210), 1)
+  $g.DrawLine($pen, (140 + $i * 95), 520, (140 + $i * 95), 988); $pen.Dispose()
+}
+$route = @(@(200, 940), @(360, 830), @(520, 870), @(660, 700), @(820, 640))
+for ($i = 0; $i -lt $route.Count - 1; $i++) {
+  $x1 = $route[$i][0]; $y1 = $route[$i][1]; $x2 = $route[$i + 1][0]; $y2 = $route[$i + 1][1]
+  $steps = 12
+  for ($s = 0; $s -lt $steps; $s += 2) {
+    $sx = $x1 + ($x2 - $x1) * $s / $steps; $sy = $y1 + ($y2 - $y1) * $s / $steps
+    $ex = $x1 + ($x2 - $x1) * ($s + 1) / $steps; $ey = $y1 + ($y2 - $y1) * ($s + 1) / $steps
+    $pen = New-Object System.Drawing.Pen($amberDim, 2)
+    $g.DrawLine($pen, [int]$sx, [int]$sy, [int]$ex, [int]$ey); $pen.Dispose()
+  }
+  $pen = New-Object System.Drawing.Pen($amber, 2); $g.DrawEllipse($pen, ($x1 - 5), ($y1 - 5), 10, 10); $pen.Dispose()
+}
+# ship marker: small triangle at route end
+$tri = New-Object 'System.Drawing.Point[]' 3
+$tri[0] = New-Object System.Drawing.Point(820, 626)
+$tri[1] = New-Object System.Drawing.Point(836, 652)
+$tri[2] = New-Object System.Drawing.Point(804, 652)
+$b = New-Object System.Drawing.SolidBrush($amber); $g.FillPolygon($b, $tri); $b.Dispose()
+# bounty card: rounded TV frame, right side, with starburst behind
+$bx = 1150; $by = 240; $bw2 = 560; $bh2 = 480
+$star = New-Object 'System.Drawing.Point[]' 16
+for ($k = 0; $k -lt 16; $k++) {
+  $ang = ($k / 16.0) * 2 * [math]::PI
+  $rr = if ($k % 2 -eq 0) { 380 } else { 210 }
+  $star[$k] = New-Object System.Drawing.Point([int](1430 + $rr * [math]::Cos($ang)), [int](480 + $rr * 0.72 * [math]::Sin($ang)))
+}
+$b = New-Object System.Drawing.SolidBrush((C 46 232 168 60)); $g.FillPolygon($b, $star); $b.Dispose()
+$path = New-Object System.Drawing.Drawing2D.GraphicsPath
+$path.AddArc($bx, $by, 60, 60, 180, 90); $path.AddArc(($bx + $bw2 - 60), $by, 60, 60, 270, 90)
+$path.AddArc(($bx + $bw2 - 60), ($by + $bh2 - 60), 60, 60, 0, 90); $path.AddArc($bx, ($by + $bh2 - 60), 60, 60, 90, 90)
+$path.CloseFigure()
+$b = New-Object System.Drawing.SolidBrush((C 235 12 17 30)); $g.FillPath($b, $path); $b.Dispose()
+$pen = New-Object System.Drawing.Pen($amber, 4); $g.DrawPath($pen, $path); $pen.Dispose(); $path.Dispose()
+# mugshot box with crosshatch + info dashes
+$pen = New-Object System.Drawing.Pen($cream, 2); $g.DrawRectangle($pen, ($bx + 40), ($by + 50), 200, 240); $pen.Dispose()
+$clip = New-Object System.Drawing.Rectangle(($bx + 41), ($by + 51), 199, 239)
+$g.SetClip($clip)
+for ($x = $bx - 220; $x -lt $bx + 260; $x += 16) {
+  $pen = New-Object System.Drawing.Pen((C 60 232 217 176), 1)
+  $g.DrawLine($pen, $x, ($by + 300), ($x + 240), ($by + 40)); $pen.Dispose()
+}
+$g.ResetClip()
+DashRow $g ($bx + 280) ($by + 70) 230 $cream 12
+DashRow $g ($bx + 280) ($by + 120) 200 $amberDim 9
+DashRow $g ($bx + 280) ($by + 160) 230 $amberDim 9
+DashRow $g ($bx + 280) ($by + 200) 170 $amberDim 9
+# big reward figure stand-in
+$b = New-Object System.Drawing.SolidBrush($amber); $g.FillRectangle($b, ($bx + 60), ($by + 360), 420, 26); $b.Dispose()
+DashRow $g ($bx + 60) ($by + 412) 380 $amberDim 10
+# VHS tracking lines
+foreach ($ty in @(180, 760)) {
+  $b = New-Object System.Drawing.SolidBrush((C 26 232 217 176)); $g.FillRectangle($b, 0, $ty, $W, 5); $b.Dispose()
+  $b = New-Object System.Drawing.SolidBrush((C 14 232 217 176)); $g.FillRectangle($b, 0, ($ty + 9), $W, 2); $b.Dispose()
+}
+EdgeFade $g "top" 120 130; EdgeFade $g "bottom" 120 130; EdgeFade $g "left" 130 110; EdgeFade $g "right" 110 100
+Save $bmp $g "bebop.png"
+
+# ── Scouter: green lens HUD, reticle, power readout ──
+$rng = New-Object System.Random(1989)
+Get-Random -SetSeed 1989 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 6 14 8) (C 255 3 7 4)
+$grn = C 225 110 240 110
+$grnDim = C 100 80 190 85
+# lens ring, right side, with heavy glow
+$cx = 1360; $cy = 560
+Glow $g $cx $cy 560 (C 34 90 255 100)
+$pen = New-Object System.Drawing.Pen($grn, 5); $g.DrawEllipse($pen, ($cx - 380), ($cy - 380), 760, 760); $pen.Dispose()
+$pen = New-Object System.Drawing.Pen($grnDim, 2); $g.DrawEllipse($pen, ($cx - 330), ($cy - 330), 660, 660); $pen.Dispose()
+# arc tick scales inside the lens
+foreach ($arc in @(@(300, 140, 80), @(260, 200, 60))) {
+  for ($i = 0; $i -le 10; $i++) {
+    $ang = ($arc[1] + $i * $arc[2] / 10) * [math]::PI / 180
+    $x1 = $cx + ($arc[0] - 14) * [math]::Cos($ang); $y1 = $cy + ($arc[0] - 14) * [math]::Sin($ang)
+    $x2 = $cx + $arc[0] * [math]::Cos($ang); $y2 = $cy + $arc[0] * [math]::Sin($ang)
+    $pen = New-Object System.Drawing.Pen($(if ($i % 5 -eq 0) { $grn } else { $grnDim }), 2)
+    $g.DrawLine($pen, [int]$x1, [int]$y1, [int]$x2, [int]$y2); $pen.Dispose()
+  }
+}
+# diamond reticle on a target point, with bracket ticks
+$tx = $cx - 90; $ty = $cy + 60
+$dia = New-Object 'System.Drawing.Point[]' 4
+$dia[0] = New-Object System.Drawing.Point($tx, ($ty - 46))
+$dia[1] = New-Object System.Drawing.Point(($tx + 46), $ty)
+$dia[2] = New-Object System.Drawing.Point($tx, ($ty + 46))
+$dia[3] = New-Object System.Drawing.Point(($tx - 46), $ty)
+$pen = New-Object System.Drawing.Pen($grn, 3); $g.DrawPolygon($pen, $dia); $pen.Dispose()
+Glow $g $tx $ty 80 (C 70 110 255 120)
+$pen = New-Object System.Drawing.Pen($grn, 3)
+$g.DrawLine($pen, ($tx - 90), $ty, ($tx - 58), $ty); $g.DrawLine($pen, ($tx + 58), $ty, ($tx + 90), $ty)
+$g.DrawLine($pen, $tx, ($ty - 90), $tx, ($ty - 58)); $g.DrawLine($pen, $tx, ($ty + 58), $tx, ($ty + 90))
+$pen.Dispose()
+# climbing digit readout next to the reticle
+$font = New-Object System.Drawing.Font("Consolas", 24, [System.Drawing.FontStyle]::Bold)
+$fontSm = New-Object System.Drawing.Font("Consolas", 14)
+$b = New-Object System.Drawing.SolidBrush($grn)
+$g.DrawString([string]$rng.Next(7000, 9999), $font, $b, ($tx + 110), ($ty - 90)); $b.Dispose()
+foreach ($i in 0..3) {
+  $b = New-Object System.Drawing.SolidBrush((C $(180 - $i * 40) 110 240 110))
+  $g.DrawString([string]$rng.Next(1000, 9999), $fontSm, $b, ($tx + 116), ($ty - 46 + $i * 26)); $b.Dispose()
+}
+$font.Dispose(); $fontSm.Dispose()
+# left data column: small frames + dashes
+foreach ($i in 0..2) {
+  $fy = 620 + $i * 130
+  $pen = New-Object System.Drawing.Pen($grnDim, 2); $g.DrawRectangle($pen, 150, $fy, 300, 92); $pen.Dispose()
+  DashRow $g 172 ($fy + 22) 250 $grnDim 8
+  DashRow $g 172 ($fy + 52) 220 $(if ($i -eq 0) { $grn } else { $grnDim }) 8
+}
+# segmented power bar bottom, mostly lit
+for ($i = 0; $i -lt 22; $i++) {
+  $alpha = if ($i -lt 16) { 220 } else { 60 }
+  $b = New-Object System.Drawing.SolidBrush((C $alpha 110 240 110))
+  $g.FillRectangle($b, (520 + $i * 40), 960, 30, 22); $b.Dispose()
+}
+$pen = New-Object System.Drawing.Pen($grnDim, 2); $g.DrawRectangle($pen, 510, 950, 900, 42); $pen.Dispose()
+# scanlines
+$row = 0
+for ($y = 0; $y -lt $H; $y += 3) {
+  $pen = New-Object System.Drawing.Pen((C $(if ($row % 2 -eq 0) { 24 } else { 10 }) 0 0 0), 1)
+  $g.DrawLine($pen, 0, $y, $W, $y); $pen.Dispose()
+  $row++
+}
+EdgeFade $g "top" 110 120; EdgeFade $g "bottom" 110 120; EdgeFade $g "left" 130 110; EdgeFade $g "right" 100 90
+Save $bmp $g "scouter.png"
+
+# ── Backrooms: liminal yellow hallway, fluorescent panels ──
+$rng = New-Object System.Random(2019)
+Get-Random -SetSeed 2019 | Out-Null
+$bmp, $g = New-Canvas
+$vpx = 1230; $vpy = 500   # vanishing point
+# ceiling / walls / carpet as converging planes
+$b = New-Object System.Drawing.SolidBrush((C 255 216 205 138)); $g.FillRectangle($b, 0, 0, $W, $H); $b.Dispose()
+# carpet
+$carpet = New-Object 'System.Drawing.Point[]' 4
+$carpet[0] = New-Object System.Drawing.Point(0, $H)
+$carpet[1] = New-Object System.Drawing.Point($W, $H)
+$carpet[2] = New-Object System.Drawing.Point(($vpx + 260), ($vpy + 90))
+$carpet[3] = New-Object System.Drawing.Point(($vpx - 420), ($vpy + 90))
+$b = New-Object System.Drawing.SolidBrush((C 255 148 136 82)); $g.FillPolygon($b, $carpet); $b.Dispose()
+# ceiling
+$ceil = New-Object 'System.Drawing.Point[]' 4
+$ceil[0] = New-Object System.Drawing.Point(0, 0)
+$ceil[1] = New-Object System.Drawing.Point($W, 0)
+$ceil[2] = New-Object System.Drawing.Point(($vpx + 260), ($vpy - 170))
+$ceil[3] = New-Object System.Drawing.Point(($vpx - 420), ($vpy - 170))
+$b = New-Object System.Drawing.SolidBrush((C 255 228 219 158)); $g.FillPolygon($b, $ceil); $b.Dispose()
+# end wall
+$b = New-Object System.Drawing.SolidBrush((C 255 205 193 122))
+$g.FillRectangle($b, ($vpx - 420), ($vpy - 170), 680, 260); $b.Dispose()
+# wall seams converging to the vanishing point
+foreach ($sx in @(60, 420, 800)) {
+  $pen = New-Object System.Drawing.Pen((C 60 120 108 60), 2)
+  $g.DrawLine($pen, $sx, 0, ($vpx - 420 + [int]($sx * 0.18)), ($vpy - 170)); $pen.Dispose()
+  $pen = New-Object System.Drawing.Pen((C 60 120 108 60), 2)
+  $g.DrawLine($pen, $sx, $H, ($vpx - 420 + [int]($sx * 0.18)), ($vpy + 90)); $pen.Dispose()
+}
+foreach ($sx in @(1640, 1820)) {
+  $pen = New-Object System.Drawing.Pen((C 50 120 108 60), 2)
+  $g.DrawLine($pen, $sx, 0, ($vpx + 260 - [int](($W - $sx) * 0.2)), ($vpy - 170)); $pen.Dispose()
+  $pen = New-Object System.Drawing.Pen((C 50 120 108 60), 2)
+  $g.DrawLine($pen, $sx, $H, ($vpx + 260 - [int](($W - $sx) * 0.2)), ($vpy + 90)); $pen.Dispose()
+}
+# baseboards
+$pen = New-Object System.Drawing.Pen((C 150 110 100 58), 5)
+$g.DrawLine($pen, 0, $H, ($vpx - 420), ($vpy + 90))
+$g.DrawLine($pen, $W, $H, ($vpx + 260), ($vpy + 90))
+$g.DrawLine($pen, ($vpx - 420), ($vpy + 90), ($vpx + 260), ($vpy + 90))
+$pen.Dispose()
+# fluorescent ceiling panels shrinking toward the VP, humming glow
+foreach ($panel in @(@(240, 40, 420, 110), @(700, 130, 300, 74), @(1010, 230, 210, 48), @(1210, 300, 150, 32))) {
+  $px4 = $panel[0]; $py4 = $panel[1]; $pw4 = $panel[2]; $ph4 = $panel[3]
+  Glow $g ($px4 + $pw4 / 2) ($py4 + $ph4 / 2) ([int]($pw4 * 0.9)) (C 60 255 250 210)
+  $b = New-Object System.Drawing.SolidBrush((C 245 252 248 214)); $g.FillRectangle($b, $px4, $py4, $pw4, $ph4); $b.Dispose()
+  $pen = New-Object System.Drawing.Pen((C 120 170 158 96), 2); $g.DrawRectangle($pen, $px4, $py4, $pw4, $ph4); $pen.Dispose()
+}
+# far dark doorway, unsettling
+$b = New-Object System.Drawing.SolidBrush((C 255 52 46 26)); $g.FillRectangle($b, ($vpx + 120), ($vpy - 60), 66, 150); $b.Dispose()
+# carpet mottle + wall grain
+for ($i = 0; $i -lt 2600; $i++) {
+  $gy = $rng.Next(0, $H)
+  $alpha = if ($gy -gt $vpy + 90) { $rng.Next(10, 26) } else { $rng.Next(5, 14) }
+  $b = New-Object System.Drawing.SolidBrush((C $alpha 80 72 40))
+  $g.FillRectangle($b, $rng.Next(0, $W), $gy, 2, 1); $b.Dispose()
+}
+# sickly vignette
+EdgeFade $g "top" 140 90; EdgeFade $g "bottom" 160 110; EdgeFade $g "left" 180 100; EdgeFade $g "right" 160 90
+Save $bmp $g "backrooms.png"
+
+# ── Swordfish: multi-window crack den, cyan cascades, wireframe core ──
+$rng = New-Object System.Random(2001)
+Get-Random -SetSeed 2001 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 5 11 20) (C 255 2 5 10)
+Glow $g 1250 520 700 (C 26 60 200 255)
+$cyan = C 210 100 220 255
+$cyanDim = C 90 70 170 220
+$font = New-Object System.Drawing.Font("Consolas", 13)
+# translucent window panes behind everything
+foreach ($win in @(@(1040, 130, 560, 380), @(1330, 330, 470, 420), @(120, 560, 420, 380))) {
+  $b = New-Object System.Drawing.SolidBrush((C 120 8 16 30)); $g.FillRectangle($b, $win[0], $win[1], $win[2], $win[3]); $b.Dispose()
+  $pen = New-Object System.Drawing.Pen($cyanDim, 2); $g.DrawRectangle($pen, $win[0], $win[1], $win[2], $win[3]); $pen.Dispose()
+  $b = New-Object System.Drawing.SolidBrush((C 170 10 22 40)); $g.FillRectangle($b, $win[0], $win[1], $win[2], 30); $b.Dispose()
+  DashRow $g ($win[0] + 14) ($win[1] + 10) ([int]($win[2] * 0.5)) $cyanDim 8
+}
+# cascading cipher columns inside the left window and right pane
+foreach ($zone in @(@(150, 600, 360, 320), @(1360, 380, 400, 340))) {
+  for ($col = 0; $col -lt [int]($zone[2] / 26); $col++) {
+    $colX = $zone[0] + $col * 26
+    $drop = $rng.Next(3, 12)
+    for ($row = 0; $row -lt $drop; $row++) {
+      $ch = [char](0x21 + $rng.Next(0, 93))
+      $alpha = [int](40 + 180 * ($row / [double]$drop))
+      $b = New-Object System.Drawing.SolidBrush((C $alpha 100 220 255))
+      $g.DrawString($ch, $font, $b, $colX, ($zone[1] + $row * 24)); $b.Dispose()
+    }
+  }
+}
+$font.Dispose()
+# central wireframe polyhedron with rotation ghosts
+$cx = 1180; $cy = 640
+Glow $g $cx $cy 260 (C 46 100 220 255)
+foreach ($ghost in @(@(0, 40), @(14, 90), @(28, 210))) {
+  $pts = New-Object 'System.Drawing.Point[]' 6
+  for ($k = 0; $k -lt 6; $k++) {
+    $ang = ($k * 60 + $ghost[0]) * [math]::PI / 180
+    $pts[$k] = New-Object System.Drawing.Point([int]($cx + 170 * [math]::Cos($ang)), [int]($cy + 170 * [math]::Sin($ang)))
+  }
+  $pen = New-Object System.Drawing.Pen((C $ghost[1] 100 220 255), 2)
+  $g.DrawPolygon($pen, $pts)
+  for ($k = 0; $k -lt 6; $k++) {
+    for ($j = $k + 1; $j -lt 6; $j++) { $g.DrawLine($pen, $pts[$k], $pts[$j]) }
+  }
+  $pen.Dispose()
+}
+$pen = New-Object System.Drawing.Pen($cyan, 2); $g.DrawEllipse($pen, ($cx - 210), ($cy - 210), 420, 420); $pen.Dispose()
+# tick ring
+for ($i = 0; $i -lt 36; $i++) {
+  $ang = ($i / 36.0) * 2 * [math]::PI
+  $x1 = $cx + 218 * [math]::Cos($ang); $y1 = $cy + 218 * [math]::Sin($ang)
+  $x2 = $cx + 232 * [math]::Cos($ang); $y2 = $cy + 232 * [math]::Sin($ang)
+  $pen = New-Object System.Drawing.Pen($(if ($i % 6 -eq 0) { $cyan } else { $cyanDim }), 2)
+  $g.DrawLine($pen, [int]$x1, [int]$y1, [int]$x2, [int]$y2); $pen.Dispose()
+}
+# progress strip bottom: mostly-lit segments
+for ($i = 0; $i -lt 26; $i++) {
+  $alpha = if ($i -lt 19) { 210 } else { 50 }
+  $b = New-Object System.Drawing.SolidBrush((C $alpha 100 220 255))
+  $g.FillRectangle($b, (560 + $i * 32), 968, 24, 16); $b.Dispose()
+}
+# scanlines
+$row = 0
+for ($y = 0; $y -lt $H; $y += 3) {
+  $pen = New-Object System.Drawing.Pen((C $(if ($row % 2 -eq 0) { 22 } else { 9 }) 0 0 0), 1)
+  $g.DrawLine($pen, 0, $y, $W, $y); $pen.Dispose()
+  $row++
+}
+EdgeFade $g "top" 110 120; EdgeFade $g "bottom" 110 120; EdgeFade $g "left" 130 110; EdgeFade $g "right" 110 100
+Save $bmp $g "swordfish.png"
+
+# ── Hackers: the data-city — glowing towers on a perspective grid ──
+$rng = New-Object System.Random(1995)
+Get-Random -SetSeed 1995 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 10 6 18) (C 255 4 2 8)
+$vpy = 600
+# perspective grid floor
+for ($i = 0; $i -lt 26; $i++) {
+  $gx2 = -400 + $i * 110
+  $pen = New-Object System.Drawing.Pen((C 46 90 240 170), 1)
+  $g.DrawLine($pen, $gx2, $H, (960 + [int](($gx2 - 960) * 0.12)), $vpy); $pen.Dispose()
+}
+$gy = $vpy
+$step = 6
+while ($gy -lt $H) {
+  $pen = New-Object System.Drawing.Pen((C $([int](20 + 40 * ($gy - $vpy) / 480)) 90 240 170), 1)
+  $g.DrawLine($pen, 0, $gy, $W, $gy); $pen.Dispose()
+  $step = [int]($step * 1.35) + 2
+  $gy += $step
+}
+# horizon glow
+Glow $g 960 $vpy 500 (C 30 120 255 190)
+# data towers: colored columns with window ticks, back row then front
+$towers = @(
+  @(300, 340, 66, 57, 232, 120),     # x, height, width, r, g, b (teal)
+  @(520, 500, 84, 255, 77, 216),     # magenta
+  @(760, 280, 56, 57, 232, 120),
+  @(1050, 560, 96, 255, 150, 40),    # orange
+  @(1330, 420, 74, 57, 232, 120),
+  @(1560, 620, 100, 255, 77, 216),
+  @(1760, 300, 60, 120, 240, 255)    # cyan
+)
+foreach ($tw in $towers) {
+  $tx = $tw[0]; $th2 = $tw[1]; $twd = $tw[2]
+  $baseY = 900 + $rng.Next(-30, 40)
+  Glow $g ($tx + $twd / 2) $baseY ([int]($twd * 2.2)) (C 60 $tw[3] $tw[4] $tw[5])
+  # column: vertical gradient bright at base
+  $rect = New-Object System.Drawing.Rectangle($tx, ($baseY - $th2), $twd, $th2)
+  $br = New-Object System.Drawing.Drawing2D.LinearGradientBrush($rect, (C 60 $tw[3] $tw[4] $tw[5]), (C 235 $tw[3] $tw[4] $tw[5]), 90.0)
+  $g.FillRectangle($br, $rect); $br.Dispose()
+  $pen = New-Object System.Drawing.Pen((C 200 $tw[3] $tw[4] $tw[5]), 2)
+  $g.DrawRectangle($pen, $tx, ($baseY - $th2), $twd, $th2); $pen.Dispose()
+  # window tick rows in dark
+  for ($wy = $baseY - $th2 + 12; $wy -lt $baseY - 10; $wy += 18) {
+    $b = New-Object System.Drawing.SolidBrush((C 130 6 3 10))
+    $g.FillRectangle($b, ($tx + 8), $wy, ($twd - 16), 5); $b.Dispose()
+  }
+  # beacon on top
+  $b = New-Object System.Drawing.SolidBrush((C 255 $tw[3] $tw[4] $tw[5]))
+  $g.FillEllipse($b, ($tx + $twd / 2 - 4), ($baseY - $th2 - 8), 8, 8); $b.Dispose()
+  Glow $g ($tx + $twd / 2) ($baseY - $th2 - 4) 26 (C 120 $tw[3] $tw[4] $tw[5])
+}
+# circuit trace running across the floor between towers
+$trace = @(@(120, 1020), @(430, 980), @(700, 1000), @(980, 940), @(1300, 990), @(1700, 950))
+for ($i = 0; $i -lt $trace.Count - 1; $i++) {
+  $pen = New-Object System.Drawing.Pen((C 170 57 232 120), 3)
+  $g.DrawLine($pen, $trace[$i][0], $trace[$i][1], $trace[$i + 1][0], $trace[$i + 1][1]); $pen.Dispose()
+  $b = New-Object System.Drawing.SolidBrush((C 230 57 232 120))
+  $g.FillEllipse($b, ($trace[$i + 1][0] - 4), ($trace[$i + 1][1] - 4), 8, 8); $b.Dispose()
+}
+# particles above the city
+for ($i = 0; $i -lt 260; $i++) {
+  $colors = @(@(57, 232, 120), @(255, 77, 216), @(120, 240, 255))
+  $cc = $colors[$rng.Next(0, 3)]
+  $b = New-Object System.Drawing.SolidBrush((C $rng.Next(30, 120) $cc[0] $cc[1] $cc[2]))
+  $g.FillRectangle($b, $rng.Next(0, $W), $rng.Next(0, $vpy), 2, 2); $b.Dispose()
+}
+EdgeFade $g "top" 120 130; EdgeFade $g "bottom" 100 110; EdgeFade $g "left" 130 110; EdgeFade $g "right" 110 100
+Save $bmp $g "hackers.png"
+
 "done -> $out"
