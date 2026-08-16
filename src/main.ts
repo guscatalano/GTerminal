@@ -1465,6 +1465,146 @@ THEMES.sakura = mkTheme(
 );
 THEMES.sakura.xterm.cursor = "#c25d84";
 
+THEMES.pride = mkTheme(
+  "Pride",
+  "white",
+  ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "bar"],
+  'linear-gradient(rgba(18,16,26,0.4), rgba(18,16,26,0.55)), url("/backgrounds/pride.png") center / cover no-repeat, linear-gradient(180deg, #12101a, #09080e)',
+  "#12101a",
+  "#eae4f0",
+  [
+    "#12101a", "#e43c3c", "#46c85a", "#fad23c", "#4682f0", "#9646d2", "#3cc8c8", "#ded6e8",
+    "#5a5270", "#ff6b6b", "#6ee87f", "#ffe470", "#79a8ff", "#c07ae8", "#70e8e8", "#f8f2fc",
+  ]
+);
+THEMES.pride.xterm.cursor = "#fad23c";
+
+THEMES.valorant = mkTheme(
+  "Valorant",
+  "black",
+  ['"Cascadia Mono", Consolas, monospace', 1.15, "block"],
+  'linear-gradient(rgba(236,232,225,0.3), rgba(236,232,225,0.42)), url("/backgrounds/valorant.png") center / cover no-repeat, linear-gradient(180deg, #ece8e1, #e2ddd4)',
+  "#ece8e1",
+  "#1f2326",
+  [
+    "#1f2326", "#c22638", "#3f6b3a", "#7a5a10", "#2f5f96", "#7a3f6b", "#26686b", "#d8d4cc",
+    "#55595c", "#a81e2e", "#33582f", "#61480a", "#264e7c", "#653257", "#1d5457", "#fbf9f5",
+  ]
+);
+
+THEMES.csgo = mkTheme(
+  "Counter-Strike",
+  "white",
+  ["Consolas, monospace", 1.15, "bar"],
+  'linear-gradient(rgba(16,20,27,0.38), rgba(16,20,27,0.54)), url("/backgrounds/csgo.png") center / cover no-repeat, linear-gradient(180deg, #10141b, #080b10)',
+  "#10141b",
+  "#d6dde5",
+  [
+    "#10141b", "#ff6f61", "#5ae06f", "#de9b35", "#78aaf0", "#b48ae0", "#6fd0d8", "#ccd4dc",
+    "#5c6d80", "#ff9084", "#84f095", "#ffc35e", "#9cc4f8", "#ccaaf0", "#96e4ea", "#eef3f8",
+  ]
+);
+THEMES.csgo.xterm.cursor = "#de9b35";
+
+THEMES.dbd = mkTheme(
+  "Dead by Daylight",
+  "white",
+  ['"Lucida Console", Consolas, monospace', 1.2, "block"],
+  'linear-gradient(rgba(12,10,14,0.4), rgba(12,10,14,0.55)), url("/backgrounds/dbd.png") center / cover no-repeat, linear-gradient(180deg, #0c0a0e, #060508)',
+  "#0c0a0e",
+  "#d4ccd2",
+  [
+    "#0c0a0e", "#c8404a", "#6f9c72", "#c89a4a", "#5f7f9c", "#8f6f9c", "#5f9c96", "#cac2c8",
+    "#635b68", "#e25c66", "#8fbc92", "#e8bc6c", "#82a4c2", "#b092c2", "#84c2bc", "#efe9ee",
+  ]
+);
+THEMES.dbd.xterm.cursor = "#c8404a";
+THEMES.dbd.xterm.selectionBackground = "#c8404a40";
+
+THEMES.library = mkTheme(
+  "Library",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.15, "bar"],
+  'linear-gradient(rgba(27,40,56,0.36), rgba(27,40,56,0.52)), url("/backgrounds/library.png") center / cover no-repeat, linear-gradient(180deg, #1b2838, #101720)',
+  "#1b2838",
+  "#c7d5e0",
+  [
+    "#1b2838", "#e07a72", "#6cc290", "#e0b568", "#66c0f4", "#a88ae0", "#6fc4d0", "#c0cdd8",
+    "#516b82", "#f0968e", "#8ee0ac", "#f5d086", "#8ad4ff", "#c4a8f0", "#92e0ea", "#e8f0f6",
+  ]
+);
+THEMES.library.xterm.cursor = "#66c0f4";
+
+THEMES.blade = mkTheme(
+  "Blade",
+  "white",
+  ["Consolas, monospace", 1.15, "block"],
+  'linear-gradient(rgba(8,22,16,0.4), rgba(8,22,16,0.56)), url("/backgrounds/blade.png") center / cover no-repeat, linear-gradient(180deg, #081610, #040c08)',
+  "#081610",
+  "#cfe8bc",
+  [
+    "#081610", "#ff7a6b", "#76e03c", "#d0e05a", "#5ad07f", "#a8d86f", "#6fd8b0", "#c6dcb6",
+    "#3f6b3c", "#ff9a8c", "#9bf00b", "#e4f07a", "#7fe8a0", "#c8f090", "#96ecd0", "#eefae0",
+  ]
+);
+THEMES.blade.xterm.cursor = "#9bf00b";
+
+THEMES.cartridge = mkTheme(
+  "Cartridge",
+  "black",
+  ['"Lucida Console", Consolas, monospace', 1.15, "block"],
+  'linear-gradient(rgba(246,240,232,0.3), rgba(246,240,232,0.42)), url("/backgrounds/cartridge.png") center / cover no-repeat, linear-gradient(180deg, #f6f0e8, #ece4da)',
+  "#f6f0e8",
+  "#2c282c",
+  [
+    "#2c282c", "#c0182a", "#3f6b2a", "#7a5a0a", "#2a5c9c", "#77367f", "#1f6a68", "#dcd4ca",
+    "#5c565c", "#a61020", "#345824", "#614707", "#204b80", "#622b68", "#175552", "#fdfaf6",
+  ]
+);
+
+THEMES.polygon = mkTheme(
+  "Polygon",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"],
+  'linear-gradient(rgba(6,18,54,0.36), rgba(6,18,54,0.52)), url("/backgrounds/polygon.png") center / cover no-repeat, linear-gradient(180deg, #061236, #030a20)',
+  "#061236",
+  "#d0e0f8",
+  [
+    "#061236", "#ff7d8a", "#5ad8a0", "#ffd07a", "#6aa8ff", "#b48af0", "#6fd8ea", "#c8d8f0",
+    "#556da0", "#ff9ba6", "#82e8ba", "#ffe0a2", "#8cc0ff", "#ccaaf8", "#96e8f4", "#eef4fd",
+  ]
+);
+THEMES.polygon.xterm.cursor = "#6aa8ff";
+
+THEMES.nightclub = mkTheme(
+  "Nightclub",
+  "white",
+  ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "bar"],
+  'linear-gradient(rgba(16,6,26,0.4), rgba(16,6,26,0.55)), url("/backgrounds/nightclub.png") center / cover no-repeat, linear-gradient(180deg, #10061a, #08030f)',
+  "#10061a",
+  "#ecdcf4",
+  [
+    "#10061a", "#ff5c8a", "#5ad8b0", "#ffb43c", "#ff46b4", "#785aff", "#3cdcdc", "#dccae8",
+    "#70558c", "#ff85a8", "#82e8c8", "#ffcc70", "#ff7ccc", "#a08cff", "#70e8e8", "#f8effc",
+  ]
+);
+THEMES.nightclub.xterm.cursor = "#ff46b4";
+THEMES.nightclub.xterm.selectionBackground = "#ff46b440";
+
+THEMES.speakeasy = mkTheme(
+  "Speakeasy",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"],
+  'linear-gradient(rgba(34,22,16,0.4), rgba(34,22,16,0.55)), url("/backgrounds/speakeasy.png") center / cover no-repeat, linear-gradient(180deg, #221610, #150d09)',
+  "#221610",
+  "#f0dcc0",
+  [
+    "#221610", "#e0705c", "#9cb86a", "#e0aa50", "#c68a3c", "#c08a9c", "#7fb8ac", "#e2d2ba",
+    "#6e5442", "#f0907c", "#bcd88a", "#f5c878", "#e0a860", "#d8a8b8", "#a0d8cc", "#faf0e0",
+  ]
+);
+THEMES.speakeasy.xterm.cursor = "#e0aa50";
+
 let themeKey = "one-dark";
 function currentTheme(): ThemeDef {
   return THEMES[themeKey] ?? THEMES["one-dark"];
@@ -3385,11 +3525,12 @@ const THEME_GROUPS: Array<[string, string[]]> = [
   ["Classics", ["one-dark", "dracula", "nord", "gruvbox", "tokyo-night", "catppuccin", "solarized-dark", "solarized-light", "monokai", "everforest"]],
   ["Retro hardware", ["amber-crt", "gameboy", "c64", "macintosh"]],
   ["Film & TV", ["matrix", "bladerunner", "tron", "lcars", "dune", "umbrella", "nostromo", "wargames", "lumon", "swordfish", "hackers", "galactica"]],
-  ["Games", ["cyberpunk", "deus-ex", "pipboy", "nier", "sheikah", "aperture", "persona"]],
+  ["Games", ["cyberpunk", "deus-ex", "pipboy", "nier", "sheikah", "aperture", "persona", "valorant", "csgo", "dbd"]],
+  ["Consoles", ["library", "blade", "cartridge", "polygon"]],
   ["Anime", ["akira", "bebop", "scouter", "nerv"]],
   ["Space", ["hyperspace", "space", "missionctl"]],
-  ["Places & vibes", ["skicabin", "rave", "datacenter", "backrooms"]],
-  ["Art & liminal", ["hermes", "nous", "synthwave", "blueprint", "redacted", "sakura"]],
+  ["Places & vibes", ["skicabin", "rave", "nightclub", "speakeasy", "datacenter", "backrooms"]],
+  ["Art & liminal", ["hermes", "nous", "synthwave", "blueprint", "redacted", "sakura", "pride"]],
 ];
 
 /// Grouped theme select: optgroups per category, then Custom, then any

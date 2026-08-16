@@ -47,6 +47,16 @@ Seeded GDI+ renders — re-running the script reproduces them exactly.
 - `rave.png` — laser fans, strobe horizon, speaker stack, haze
 - `datacenter.png` — LED-studded rack walls under a cold ceiling strip
 - `sakura.png` — blossom branch and drifting petals on a blush sky
+- `pride.png` — six-band rainbow ribbon with confetti
+- `valorant.png` — cream field cut by slate shards and red slashes
+- `csgo.png` — sweep radar, killfeed rows, crosshair, HUD bars
+- `dbd.png` — fog, bare trees, campfire, skill-check ring, claw marks
+- `library.png` — game-library shelf: nav column, capsule cards, download bar
+- `blade.png` — energy orb with radial burst and angled blade panels
+- `cartridge.png` — console cartridge with pixel-sprite label, d-pad, buttons
+- `polygon.png` — low-poly wireframe terrain under geometric glyphs
+- `nightclub.png` — disco ball, light cones, lit dance floor, bottle shelf
+- `speakeasy.png` — backlit bottle shelves, pendant lamps, bar top, tumbler
 
 ## NASA imagery (public domain)
 
