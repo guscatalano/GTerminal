@@ -2051,8 +2051,9 @@ function applyAppearance() {
   document.documentElement.style.setProperty("--ui-font", effFont());
   document.documentElement.style.setProperty("--tab-w", `${config.tab_width ?? 220}px`);
   // A different UI font means different text widths, so the status bar's
-  // reserved slot widths no longer mean anything.
+  // reserved sizes no longer mean anything.
   statusWidths.clear();
+  statusDetailSizes.clear();
   const t = { xterm: effXtermTheme() };
   const bg = bgActive();
   for (const tab of tabs.values()) {
@@ -5415,6 +5416,9 @@ async function sampleStatus() {
 /// width so a counter that swings between 1 and 5 digits stops shoving
 /// everything beside it around; the mark resets when the bar is rebuilt.
 const statusWidths = new Map<string, number>();
+/// The same idea for the expanded panels, which re-render on every tick
+/// while open: hold each at the largest size it has needed.
+const statusDetailSizes = new Map<string, { w: number; h: number }>();
 
 function renderStatusBar() {
   if (!config.status_bar) return;
@@ -5433,11 +5437,12 @@ function renderStatusBar() {
     btn.className = "status-item" + (statusOpenId === id ? " open" : "");
     btn.textContent = def.render(statusCtx);
     btn.title = `${def.label} — click for detail`;
+    btn.dataset.item = id; // so the open detail panel can re-anchor to it
     const held = statusWidths.get(id);
     if (held) btn.style.minWidth = `${held}px`;
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      toggleStatusDetail(id, btn);
+      toggleStatusDetail(id);
     });
     statusbarEl.appendChild(btn);
     rendered.push([id, btn]);
@@ -5453,22 +5458,29 @@ function renderStatusBar() {
   }
 }
 
-function toggleStatusDetail(id: string, anchor: HTMLElement) {
+function toggleStatusDetail(id: string) {
   if (statusOpenId === id) {
     closeStatusDetail();
     return;
   }
   statusOpenId = id;
+  statusDetailEl.classList.add("open"); // must be laid out before measuring
   renderStatusDetail(id);
-  // Centre on the item and sit just above the bar, clamped to the window.
+  renderStatusBar();
+}
+
+/// Centre the panel on its bar item and sit it just above the bar,
+/// clamped inside the window. Re-run on every refresh so a panel that
+/// grows stays anchored instead of drifting off its item.
+function placeStatusDetail(id: string) {
+  const anchor = statusbarEl.querySelector<HTMLElement>(`[data-item="${CSS.escape(id)}"]`);
+  if (!anchor) return;
   const r = anchor.getBoundingClientRect();
-  statusDetailEl.classList.add("open");
   placeFloating(
     statusDetailEl,
     r.left + r.width / 2 - statusDetailEl.offsetWidth / 2,
     r.top - statusDetailEl.offsetHeight - 6
   );
-  renderStatusBar();
 }
 
 function closeStatusDetail() {
@@ -5520,6 +5532,26 @@ function renderStatusDetail(id: string) {
     }
     statusDetailEl.appendChild(bar);
   }
+  // Same treatment as the bar itself: hold the panel at the largest size
+  // it has needed so live values can't resize it under the pointer. The
+  // marks are per item, so each panel settles after a tick or two.
+  const held = statusDetailSizes.get(id);
+  if (held) {
+    statusDetailEl.style.minWidth = `${held.w}px`;
+    statusDetailEl.style.minHeight = `${held.h}px`;
+  } else {
+    statusDetailEl.style.minWidth = "";
+    statusDetailEl.style.minHeight = "";
+  }
+  const w = statusDetailEl.offsetWidth;
+  const h = statusDetailEl.offsetHeight;
+  if (w > (held?.w ?? 0) || h > (held?.h ?? 0)) {
+    const next = { w: Math.max(w, held?.w ?? 0), h: Math.max(h, held?.h ?? 0) };
+    statusDetailSizes.set(id, next);
+    statusDetailEl.style.minWidth = `${next.w}px`;
+    statusDetailEl.style.minHeight = `${next.h}px`;
+  }
+  placeStatusDetail(id);
 }
 
 /// Pick any PDH counter on this machine: object → instance → counter.
@@ -5647,8 +5679,9 @@ function toggleStatusBar() {
 function applyStatusBar() {
   const on = config.status_bar ?? true;
   config.status_bar = on;
-  // Item set or order may have changed; re-earn the width marks.
+  // Item set or order may have changed; re-earn the size marks.
   statusWidths.clear();
+  statusDetailSizes.clear();
   app.classList.toggle("status-on", on);
   if (!on) closeStatusDetail();
   window.clearInterval(statusTimer);
