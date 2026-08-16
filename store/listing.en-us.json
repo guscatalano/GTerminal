@@ -32,7 +32,7 @@
     "Lightweight Tauri + xterm.js WebGL stack — far lighter than Electron",
     "Typing latency regression-tested: p50 echo latency around 1-2 ms"
   ],
-  "ReleaseNotes": "0.2.7 — Two new themes: Pip-Boy, a phosphor-green console screen complete with a thumbs-up mascot, radiation gauge, radio graph, and CRT scanlines; and NieR, the beige menu look with drop-shadowed UI bars and dithered paper. Plus custom themes: build your own from any built-in base and override its background, text, and accent colors with color pickers in Settings. Previous release added workspaces (launch a preconfigured set of sessions from one desktop shortcut) and fixed the white flash on window open.",
+  "ReleaseNotes": "0.2.8 — The theme drop: 23 new themes bring the total to 50, including Nostromo, Commodore 64, WOPR, Macintosh, Lumon, NERV, Aperture, Sheikah, Blueprint, Mission Control (a real Apollo 8 control-room photo), Redacted, Phantom, Akira, Bebop, Scouter, Backrooms, Swordfish, Hackers, Galactica, Ski Cabin, Rave, Datacenter, and Sakura. The theme picker is organized into categories and keeps keyboard focus, so Up/Down previews themes live. Settings got a UX pass: native file and folder pickers, full-width layout, rows that appear only when relevant, and a background transparency setting that also drives the settings and history pages.",
   "CopyrightAndTrademarkInfo": "© 2026 Gus Catalano",
   "LicenseTerms": "",
   "DevStudio": "Gus Catalano",
