@@ -81,6 +81,23 @@ interface Workspace {
   templates: string[];
 }
 
+/// A status-bar item reading one Windows performance counter by PDH path.
+interface PerfStatusItem {
+  id: string;
+  label: string;
+  path: string;
+  format?: string; // raw | int | bytes | rate | pct
+}
+
+/// A status-bar item showing the first line of a shell command.
+interface CmdStatusItem {
+  id: string;
+  label: string;
+  command: string;
+  interval_s?: number;
+  cwd_from_tab?: boolean;
+}
+
 interface LaunchInfo {
   args: string[];
   exe: string;
@@ -124,6 +141,11 @@ interface AppConfig {
   bg_image?: string;
   bg_dim?: number;
   bg_transparency?: number;
+  status_bar?: boolean;
+  status_items?: string[];
+  status_interval_ms?: number;
+  status_perf?: PerfStatusItem[];
+  status_custom?: CmdStatusItem[];
 }
 
 // Built-in decorative backgrounds — pure CSS, no assets.
@@ -3982,6 +4004,16 @@ function buildSettingsPage() {
       input.dispatchEvent(new Event("change"));
     }
   };
+  // Compact text input used by every multi-column row block below.
+  const mkTplInput = (ph: string, value: string, onChange: (v: string) => void) => {
+    const input = document.createElement("input");
+    input.className = "set-control";
+    input.type = "text";
+    input.placeholder = ph;
+    input.value = value;
+    input.addEventListener("change", () => onChange(input.value.trim()));
+    return input;
+  };
   const withBrowse = (
     input: HTMLInputElement,
     folder: boolean,
@@ -4254,6 +4286,193 @@ function buildSettingsPage() {
     );
   }
 
+  settingsSection("Status bar");
+  settingRow(
+    "Status bar",
+    "A thin strip of counters along the bottom. Ctrl+Shift+S toggles it; it stays visible in full screen. Click any item for detail.",
+    mkSelect([["on", "On"], ["off", "Off"]], (config.status_bar ?? true) ? "on" : "off", (v) => {
+      config.status_bar = v === "on";
+      saveConfig();
+      applyStatusBar();
+    })
+  );
+  if (config.status_bar ?? true) {
+    settingRow(
+      "Refresh (ms)",
+      "How often the counters resample. Command items keep their own slower cadence.",
+      mkNumber(config.status_interval_ms ?? 2000, 250, 60000, (v) => {
+        config.status_interval_ms = v;
+        saveConfig();
+        applyStatusBar();
+      })
+    );
+
+    // Items: an ordered list; the select offers built-ins plus anything
+    // defined below, so a new counter or command shows up here at once.
+    const itemChoices = (): Array<[string, string]> => [
+      ...Object.entries(STATUS_BUILTINS).map(([k, v]) => [k, v.label] as [string, string]),
+      ...(config.status_perf ?? []).map((p) => [p.id, `${p.label || p.path} (counter)`] as [string, string]),
+      ...(config.status_custom ?? []).map((c) => [c.id, `${c.label || c.command} (command)`] as [string, string]),
+    ];
+    const itemsBlock = document.createElement("div");
+    itemsBlock.className = "tpl-list";
+    const renderItems = () => {
+      itemsBlock.innerHTML = "";
+      const ids = statusItemIds();
+      ids.forEach((id, i) => {
+        const row = document.createElement("div");
+        row.className = "tpl-row sb-row";
+        const sel = mkSelect(itemChoices(), id, (v) => {
+          const next = [...statusItemIds()];
+          next[i] = v;
+          config.status_items = next;
+          saveConfig();
+          applyStatusBar();
+          renderItems();
+        });
+        const del = document.createElement("button");
+        del.className = "tpl-del";
+        del.textContent = "✕";
+        del.title = "Remove from the bar";
+        del.addEventListener("click", () => {
+          config.status_items = statusItemIds().filter((_, j) => j !== i);
+          saveConfig();
+          applyStatusBar();
+          renderItems();
+        });
+        row.append(sel, del);
+        itemsBlock.appendChild(row);
+      });
+      const add = document.createElement("button");
+      add.className = "set-btn";
+      add.textContent = "+ Add item";
+      add.addEventListener("click", () => {
+        const first = itemChoices()[0]?.[0];
+        if (!first) return;
+        config.status_items = [...statusItemIds(), first];
+        saveConfig();
+        applyStatusBar();
+        renderItems();
+      });
+      itemsBlock.appendChild(add);
+    };
+    renderItems();
+    settingRow("Items", "Shown left to right; the list splits around the middle.", itemsBlock);
+
+    // Performance counters: any PDH path this machine exposes.
+    const perfBlock = document.createElement("div");
+    perfBlock.className = "tpl-list";
+    const renderPerf = () => {
+      perfBlock.innerHTML = "";
+      (config.status_perf ?? []).forEach((p, i) => {
+        const row = document.createElement("div");
+        row.className = "tpl-row perf-row";
+        const label = mkTplInput("Label", p.label, (v) => {
+          p.label = v;
+          saveConfig();
+          applyStatusBar();
+        });
+        const path = mkTplInput("\\Object(Instance)\\Counter", p.path, (v) => {
+          p.path = v;
+          saveConfig();
+          applyStatusBar();
+        });
+        const fmt = mkSelect(
+          [["raw", "Number"], ["int", "Integer"], ["pct", "Percent"], ["bytes", "Bytes"], ["rate", "Bytes/s"]],
+          p.format ?? "raw",
+          (v) => {
+            p.format = v;
+            saveConfig();
+            applyStatusBar();
+          }
+        );
+        const del = document.createElement("button");
+        del.className = "tpl-del";
+        del.textContent = "✕";
+        del.addEventListener("click", () => {
+          config.status_perf = (config.status_perf ?? []).filter((_, j) => j !== i);
+          config.status_items = statusItemIds().filter((x) => x !== p.id);
+          if (!config.status_perf.length) config.status_perf = undefined;
+          saveConfig();
+          applyStatusBar();
+          buildSettingsPage();
+        });
+        row.append(label, path, fmt, del);
+        perfBlock.appendChild(row);
+      });
+      const browse = document.createElement("button");
+      browse.className = "set-btn";
+      browse.textContent = "Browse counters…";
+      browse.addEventListener("click", () => void openPerfBrowser());
+      perfBlock.appendChild(browse);
+    };
+    renderPerf();
+    settingRow(
+      "Performance counters",
+      "Any counter Windows exposes, read through PDH — the same source as Performance Monitor. Browse picks the object, instance, and counter for you.",
+      perfBlock
+    );
+
+    // Command items: the no-rebuild escape hatch.
+    const cmdBlock = document.createElement("div");
+    cmdBlock.className = "tpl-list";
+    const renderCmds = () => {
+      cmdBlock.innerHTML = "";
+      (config.status_custom ?? []).forEach((c, i) => {
+        const row = document.createElement("div");
+        row.className = "tpl-row cmd-row";
+        const label = mkTplInput("Label", c.label, (v) => {
+          c.label = v;
+          saveConfig();
+          applyStatusBar();
+        });
+        const command = mkTplInput("PowerShell command", c.command, (v) => {
+          c.command = v;
+          saveConfig();
+          applyStatusBar();
+        });
+        const every = mkNumber(c.interval_s ?? 10, 2, 3600, (v) => {
+          c.interval_s = v;
+          saveConfig();
+        });
+        const del = document.createElement("button");
+        del.className = "tpl-del";
+        del.textContent = "✕";
+        del.addEventListener("click", () => {
+          config.status_custom = (config.status_custom ?? []).filter((_, j) => j !== i);
+          config.status_items = statusItemIds().filter((x) => x !== c.id);
+          if (!config.status_custom.length) config.status_custom = undefined;
+          saveConfig();
+          applyStatusBar();
+          buildSettingsPage();
+        });
+        row.append(label, command, every, del);
+        cmdBlock.appendChild(row);
+      });
+      const add = document.createElement("button");
+      add.className = "set-btn";
+      add.textContent = "+ Add command";
+      add.addEventListener("click", () => {
+        const id = `cmd-${Date.now().toString(36)}`;
+        config.status_custom = [
+          ...(config.status_custom ?? []),
+          { id, label: "branch", command: "git branch --show-current", interval_s: 10, cwd_from_tab: true },
+        ];
+        config.status_items = [...statusItemIds(), id];
+        saveConfig();
+        applyStatusBar();
+        buildSettingsPage();
+      });
+      cmdBlock.appendChild(add);
+    };
+    renderCmds();
+    settingRow(
+      "Command items",
+      "First line of a PowerShell command, on its own timer. New items default to the git branch of the active tab's folder.",
+      cmdBlock
+    );
+  }
+
   settingsSection("Tab titles");
   settingRow(
     "Title style",
@@ -4317,15 +4536,6 @@ function buildSettingsPage() {
     withBrowse(cwdInput, true)
   );
   // Session templates: named presets combining shell, folder, and title.
-  const mkTplInput = (ph: string, value: string, onChange: (v: string) => void) => {
-    const input = document.createElement("input");
-    input.className = "set-control";
-    input.type = "text";
-    input.placeholder = ph;
-    input.value = value;
-    input.addEventListener("change", () => onChange(input.value.trim()));
-    return input;
-  };
   const tplBlock = document.createElement("div");
   tplBlock.className = "tpl-list";
   const renderTemplates = () => {
@@ -4614,6 +4824,550 @@ function buildSettingsPage() {
   scroller.scrollTop = scrollAt;
 }
 
+// ── status bar ──────────────────────────────────────────────────────────
+// A thin strip of glanceable counters. Three ways to extend it:
+//   1. add an entry to STATUS_BUILTINS below (needs a rebuild),
+//   2. point a Performance counter item at any PDH path (no rebuild),
+//   3. run a shell command on a timer (no rebuild).
+// Everything the items read arrives in one StatusCtx per tick.
+
+interface SystemStats {
+  cpu_pct: number;
+  mem_used: number;
+  mem_total: number;
+  page_used: number;
+  page_total: number;
+  disk_read_bps: number;
+  disk_write_bps: number;
+  disk_free: number;
+  disk_total: number;
+  battery_pct: number | null;
+  battery_charging: boolean;
+  battery_minutes: number | null;
+  uptime_s: number;
+}
+
+interface StatusCtx {
+  stats: SystemStats;
+  perf: Record<string, number>;
+  custom: Record<string, string>;
+}
+
+interface StatusDetail {
+  rows: Array<[string, string]>;
+  /// Buttons that open a URL in the browser.
+  links?: Array<{ label: string; url: string }>;
+  /// Buttons that run a shell command (fire and forget).
+  actions?: Array<{ label: string; cmd: string }>;
+}
+
+interface StatusItemDef {
+  label: string;
+  render: (c: StatusCtx) => string;
+  detail?: (c: StatusCtx) => StatusDetail;
+}
+
+function fmtBytes(n: number): string {
+  if (!isFinite(n) || n <= 0) return "0B";
+  const u = ["B", "K", "M", "G", "T"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) {
+    n /= 1024;
+    i++;
+  }
+  return `${n >= 100 || i === 0 ? Math.round(n) : n.toFixed(1)}${u[i]}`;
+}
+function fmtRate(n: number): string {
+  return `${fmtBytes(n)}/s`;
+}
+function fmtDuration(s: number): string {
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+function pct(n: number): string {
+  return `${Math.round(n)}%`;
+}
+
+const STATUS_BUILTINS: Record<string, StatusItemDef> = {
+  clock: {
+    label: "Clock",
+    render: () => new Date().toLocaleTimeString(),
+    detail: () => {
+      const d = new Date();
+      return {
+        rows: [
+          ["Local", d.toLocaleString()],
+          ["UTC", d.toUTCString()],
+          ["ISO 8601", d.toISOString()],
+          ["Epoch (s)", String(Math.floor(d.getTime() / 1000))],
+          ["Time zone", Intl.DateTimeFormat().resolvedOptions().timeZone],
+          ["Week day", d.toLocaleDateString(undefined, { weekday: "long" })],
+        ],
+      };
+    },
+  },
+  cpu: {
+    label: "CPU",
+    render: (c) => `CPU ${pct(c.stats.cpu_pct)}`,
+    detail: (c) => ({
+      rows: [
+        ["Usage", pct(c.stats.cpu_pct)],
+        ["Logical cores", String(navigator.hardwareConcurrency || "?")],
+        ["Uptime", fmtDuration(c.stats.uptime_s)],
+      ],
+      actions: [
+        { label: "Task Manager", cmd: "Start-Process taskmgr" },
+        { label: "Resource Monitor", cmd: "Start-Process resmon" },
+      ],
+    }),
+  },
+  mem: {
+    label: "Memory",
+    render: (c) =>
+      `MEM ${fmtBytes(c.stats.mem_used)}/${fmtBytes(c.stats.mem_total)}`,
+    detail: (c) => {
+      const s = c.stats;
+      return {
+        rows: [
+          ["Used", fmtBytes(s.mem_used)],
+          ["Free", fmtBytes(s.mem_total - s.mem_used)],
+          ["Total", fmtBytes(s.mem_total)],
+          ["In use", s.mem_total ? pct((s.mem_used / s.mem_total) * 100) : "—"],
+          ["Commit", `${fmtBytes(s.page_used)} / ${fmtBytes(s.page_total)}`],
+        ],
+        actions: [{ label: "Task Manager", cmd: "Start-Process taskmgr" }],
+      };
+    },
+  },
+  diskio: {
+    label: "Disk I/O",
+    render: (c) =>
+      `D ↓${fmtRate(c.stats.disk_read_bps)} ↑${fmtRate(c.stats.disk_write_bps)}`,
+    detail: (c) => ({
+      rows: [
+        ["Read", fmtRate(c.stats.disk_read_bps)],
+        ["Write", fmtRate(c.stats.disk_write_bps)],
+        ["Total", fmtRate(c.stats.disk_read_bps + c.stats.disk_write_bps)],
+        ["Source", "PDH \\PhysicalDisk(_Total)"],
+      ],
+      actions: [{ label: "Resource Monitor", cmd: "Start-Process resmon" }],
+    }),
+  },
+  disk: {
+    label: "Disk free",
+    render: (c) => `C: ${fmtBytes(c.stats.disk_free)}`,
+    detail: (c) => {
+      const s = c.stats;
+      const used = s.disk_total - s.disk_free;
+      return {
+        rows: [
+          ["Free", fmtBytes(s.disk_free)],
+          ["Used", fmtBytes(used)],
+          ["Total", fmtBytes(s.disk_total)],
+          ["In use", s.disk_total ? pct((used / s.disk_total) * 100) : "—"],
+        ],
+        actions: [
+          { label: "Disk Cleanup", cmd: "Start-Process cleanmgr" },
+          { label: "Open C:\\", cmd: "Start-Process explorer C:\\" },
+        ],
+      };
+    },
+  },
+  battery: {
+    label: "Battery",
+    render: (c) => {
+      const s = c.stats;
+      if (s.battery_pct === null) return s.battery_charging ? "AC" : "BAT —";
+      return `BAT ${s.battery_pct}%${s.battery_charging ? "⚡" : ""}`;
+    },
+    detail: (c) => {
+      const s = c.stats;
+      return {
+        rows: [
+          ["Charge", s.battery_pct === null ? "no battery" : `${s.battery_pct}%`],
+          ["Power", s.battery_charging ? "AC connected" : "on battery"],
+          [
+            "Remaining",
+            s.battery_minutes === null ? "—" : fmtDuration(s.battery_minutes * 60),
+          ],
+        ],
+        actions: [
+          { label: "Power settings", cmd: "Start-Process ms-settings:powersleep" },
+        ],
+      };
+    },
+  },
+  uptime: {
+    label: "Uptime",
+    render: (c) => `UP ${fmtDuration(c.stats.uptime_s)}`,
+    detail: (c) => ({
+      rows: [
+        ["Uptime", fmtDuration(c.stats.uptime_s)],
+        ["Booted", new Date(Date.now() - c.stats.uptime_s * 1000).toLocaleString()],
+      ],
+    }),
+  },
+  sessions: {
+    label: "Sessions",
+    render: () => `S ${tabs.size}${hidden.size ? `+${hidden.size}` : ""}`,
+    detail: () => {
+      const cold = [...lastInfo.values()].filter((s) => !s.attached && !s.expires_ms);
+      const doomed = [...lastInfo.values()].filter((s) => s.expires_ms);
+      return {
+        rows: [
+          ["Open tabs", String(tabs.size)],
+          ["Hidden", String(hidden.size)],
+          ["Detached", String(cold.length)],
+          ["Closing soon", String(doomed.length)],
+          ["Known to daemon", String(lastInfo.size)],
+        ],
+        links: [
+          { label: "GTerminal on GitHub", url: "https://github.com/guscatalano/GTerminal" },
+        ],
+      };
+    },
+  },
+};
+
+const statusbarEl = document.getElementById("statusbar")!;
+const statusDetailEl = document.getElementById("status-detail")!;
+let statusCtx: StatusCtx = {
+  stats: {
+    cpu_pct: 0, mem_used: 0, mem_total: 0, page_used: 0, page_total: 0,
+    disk_read_bps: 0, disk_write_bps: 0, disk_free: 0, disk_total: 0,
+    battery_pct: null, battery_charging: false, battery_minutes: null, uptime_s: 0,
+  },
+  perf: {},
+  custom: {},
+};
+let statusOpenId: string | null = null;
+let statusTimer: number | undefined;
+const customLastRun = new Map<string, number>();
+
+function statusItemIds(): string[] {
+  return config.status_items ?? ["clock", "cpu", "mem", "diskio"];
+}
+
+/// Resolve an id to a renderable item: built-in, then user perf counter,
+/// then user command. Unknown ids are dropped rather than rendered blank.
+function statusItemDef(id: string): StatusItemDef | undefined {
+  if (STATUS_BUILTINS[id]) return STATUS_BUILTINS[id];
+  const p = (config.status_perf ?? []).find((x) => x.id === id);
+  if (p) {
+    return {
+      label: p.label || p.path,
+      render: (c) => {
+        const v = c.perf[p.path];
+        if (v === undefined) return `${p.label} …`;
+        return `${p.label} ${formatPerf(v, p.format)}`;
+      },
+      detail: (c) => ({
+        rows: [
+          ["Value", c.perf[p.path] === undefined ? "sampling…" : formatPerf(c.perf[p.path], p.format)],
+          ["Raw", c.perf[p.path] === undefined ? "—" : String(c.perf[p.path])],
+          ["Counter", p.path],
+        ],
+        actions: [{ label: "Performance Monitor", cmd: "Start-Process perfmon" }],
+      }),
+    };
+  }
+  const cmd = (config.status_custom ?? []).find((x) => x.id === id);
+  if (cmd) {
+    return {
+      label: cmd.label || cmd.command,
+      render: (c) => {
+        const v = c.custom[cmd.id];
+        return v === undefined ? `${cmd.label} …` : `${cmd.label} ${v}`;
+      },
+      detail: (c) => ({
+        rows: [
+          ["Output", c.custom[cmd.id] ?? "—"],
+          ["Command", cmd.command],
+          ["Every", `${cmd.interval_s ?? 10}s`],
+          ["Runs in", cmd.cwd_from_tab ? "active tab's folder" : "home"],
+        ],
+      }),
+    };
+  }
+  return undefined;
+}
+
+function formatPerf(v: number, fmt?: string): string {
+  switch (fmt) {
+    case "bytes": return fmtBytes(v);
+    case "rate": return fmtRate(v);
+    case "pct": return pct(v);
+    case "int": return String(Math.round(v));
+    default: return v >= 100 ? String(Math.round(v)) : v.toFixed(2);
+  }
+}
+
+/// The active tab's working directory, for command items that want it.
+function activeCwd(): string | undefined {
+  return activeId === null ? undefined : lastInfo.get(activeId)?.cwd;
+}
+
+async function sampleStatus() {
+  if (!config.status_bar) return;
+  const ids = statusItemIds();
+  const needStats = ids.some((i) => STATUS_BUILTINS[i]);
+  if (needStats) {
+    statusCtx.stats = await invoke<SystemStats>("system_stats").catch(() => statusCtx.stats);
+  }
+  const paths = (config.status_perf ?? [])
+    .filter((p) => ids.includes(p.id))
+    .map((p) => p.path);
+  if (paths.length) {
+    const got = await invoke<Record<string, number>>("perf_counters", { paths }).catch(() => ({}));
+    Object.assign(statusCtx.perf, got);
+  }
+  // Command items keep their own cadence — they cost a process each.
+  const now = Date.now();
+  for (const c of config.status_custom ?? []) {
+    if (!ids.includes(c.id)) continue;
+    const every = Math.max(2, c.interval_s ?? 10) * 1000;
+    if (now - (customLastRun.get(c.id) ?? 0) < every) continue;
+    customLastRun.set(c.id, now);
+    invoke<string>("status_command", {
+      command: c.command,
+      cwd: c.cwd_from_tab ? activeCwd() ?? null : null,
+    })
+      .then((out) => {
+        statusCtx.custom[c.id] = out;
+        renderStatusBar();
+      })
+      .catch(() => {});
+  }
+  renderStatusBar();
+  if (statusOpenId) renderStatusDetail(statusOpenId);
+}
+
+function renderStatusBar() {
+  if (!config.status_bar) return;
+  statusbarEl.innerHTML = "";
+  const ids = statusItemIds();
+  ids.forEach((id, i) => {
+    const def = statusItemDef(id);
+    if (!def) return;
+    if (i === Math.floor(ids.length / 2)) {
+      const spacer = document.createElement("div");
+      spacer.className = "status-spacer";
+      statusbarEl.appendChild(spacer);
+    }
+    const btn = document.createElement("button");
+    btn.className = "status-item" + (statusOpenId === id ? " open" : "");
+    btn.textContent = def.render(statusCtx);
+    btn.title = `${def.label} — click for detail`;
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleStatusDetail(id, btn);
+    });
+    statusbarEl.appendChild(btn);
+  });
+}
+
+function toggleStatusDetail(id: string, anchor: HTMLElement) {
+  if (statusOpenId === id) {
+    closeStatusDetail();
+    return;
+  }
+  statusOpenId = id;
+  renderStatusDetail(id);
+  // Anchor to the item, clamped inside the window.
+  const r = anchor.getBoundingClientRect();
+  statusDetailEl.classList.add("open");
+  const w = statusDetailEl.offsetWidth;
+  const left = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), window.innerWidth - w - 8);
+  statusDetailEl.style.left = `${left}px`;
+  renderStatusBar();
+}
+
+function closeStatusDetail() {
+  statusOpenId = null;
+  statusDetailEl.classList.remove("open");
+  renderStatusBar();
+}
+
+function renderStatusDetail(id: string) {
+  const def = statusItemDef(id);
+  if (!def) {
+    closeStatusDetail();
+    return;
+  }
+  const d = def.detail?.(statusCtx) ?? { rows: [["Value", def.render(statusCtx)]] };
+  statusDetailEl.innerHTML = "";
+  const title = document.createElement("div");
+  title.className = "sd-title";
+  title.textContent = def.label;
+  statusDetailEl.appendChild(title);
+  for (const [k, v] of d.rows) {
+    const row = document.createElement("div");
+    row.className = "sd-row";
+    const kk = document.createElement("span");
+    kk.className = "sd-label";
+    kk.textContent = k;
+    const vv = document.createElement("span");
+    vv.className = "sd-value";
+    vv.textContent = v;
+    row.append(kk, vv);
+    statusDetailEl.appendChild(row);
+  }
+  if (d.links?.length || d.actions?.length) {
+    const bar = document.createElement("div");
+    bar.className = "sd-links";
+    for (const l of d.links ?? []) {
+      const b = document.createElement("button");
+      b.textContent = l.label;
+      b.addEventListener("click", () => void openUrl(l.url).catch(() => {}));
+      bar.appendChild(b);
+    }
+    for (const a of d.actions ?? []) {
+      const b = document.createElement("button");
+      b.textContent = a.label;
+      b.addEventListener("click", () => {
+        void invoke("status_command", { command: a.cmd, cwd: null }).catch(() => {});
+      });
+      bar.appendChild(b);
+    }
+    statusDetailEl.appendChild(bar);
+  }
+}
+
+/// Pick any PDH counter on this machine: object → instance → counter.
+/// Enumeration comes straight from PDH, so whatever Performance Monitor
+/// can show, this can too.
+async function openPerfBrowser() {
+  document.getElementById("perf-overlay")?.remove();
+  const ov = document.createElement("div");
+  ov.id = "perf-overlay";
+  ov.className = "overlay";
+  const box = document.createElement("div");
+  box.className = "overlay-box";
+  const title = document.createElement("div");
+  title.className = "settings-h1";
+  const h = document.createElement("span");
+  h.textContent = "Performance counters";
+  const close = document.createElement("button");
+  close.id = "settings-close";
+  close.textContent = "×";
+  close.addEventListener("click", () => ov.remove());
+  title.append(h, close);
+  const note = document.createElement("div");
+  note.className = "setting-desc";
+  note.textContent = "Loading objects…";
+  const grid = document.createElement("div");
+  grid.className = "perf-grid";
+  // size > 1 renders these as scrolling lists rather than dropdowns —
+  // the lists are long and you browse them by eye.
+  const objSel = document.createElement("select");
+  objSel.className = "set-control";
+  objSel.size = 12;
+  const instSel = document.createElement("select");
+  instSel.className = "set-control";
+  instSel.size = 12;
+  const cntSel = document.createElement("select");
+  cntSel.className = "set-control";
+  cntSel.size = 12;
+  const pathOut = document.createElement("input");
+  pathOut.className = "set-control set-wide";
+  pathOut.readOnly = true;
+  const add = document.createElement("button");
+  add.className = "set-btn";
+  add.textContent = "Add to status bar";
+  grid.append(objSel, instSel, cntSel);
+  box.append(title, note, grid, pathOut, add);
+  ov.appendChild(box);
+  ov.addEventListener("mousedown", (e) => {
+    if (e.target === ov) ov.remove();
+  });
+  document.body.appendChild(ov);
+
+  const composePath = () => {
+    const obj = objSel.value;
+    const inst = instSel.value;
+    const cnt = cntSel.value;
+    if (!obj || !cnt) return "";
+    return inst ? `\\${obj}(${inst})\\${cnt}` : `\\${obj}\\${cnt}`;
+  };
+  const refreshPath = () => {
+    pathOut.value = composePath();
+  };
+  const fill = (sel: HTMLSelectElement, values: string[], blankLabel?: string) => {
+    sel.innerHTML = "";
+    if (blankLabel) {
+      const o = document.createElement("option");
+      o.value = "";
+      o.textContent = blankLabel;
+      sel.appendChild(o);
+    }
+    for (const v of values) {
+      const o = document.createElement("option");
+      o.value = v;
+      o.textContent = v;
+      sel.appendChild(o);
+    }
+  };
+
+  const objects = await invoke<string[]>("perf_objects").catch((e) => {
+    note.textContent = `Could not enumerate counters: ${e}`;
+    return [] as string[];
+  });
+  if (!objects.length) return;
+  note.textContent = `${objects.length} objects. Pick an object, then an instance and counter.`;
+  fill(objSel, objects);
+  const loadItems = async () => {
+    const empty: { counters: string[]; instances: string[] } = { counters: [], instances: [] };
+    const items = await invoke<{ counters: string[]; instances: string[] }>("perf_items", {
+      object: objSel.value,
+    }).catch(() => empty);
+    fill(cntSel, items.counters);
+    fill(instSel, items.instances, items.instances.length ? "(pick instance)" : "(no instances)");
+    if (items.instances.includes("_Total")) instSel.value = "_Total";
+    refreshPath();
+  };
+  objSel.value = objects.includes("Processor") ? "Processor" : objects[0];
+  await loadItems();
+  objSel.addEventListener("change", () => void loadItems());
+  instSel.addEventListener("change", refreshPath);
+  cntSel.addEventListener("change", refreshPath);
+  add.addEventListener("click", () => {
+    const path = composePath();
+    if (!path) return;
+    const id = `perf-${Date.now().toString(36)}`;
+    config.status_perf = [
+      ...(config.status_perf ?? []),
+      { id, label: cntSel.value.split("/")[0].trim().slice(0, 18), path, format: "raw" },
+    ];
+    config.status_items = [...statusItemIds(), id];
+    saveConfig();
+    applyStatusBar();
+    ov.remove();
+    buildSettingsPage();
+  });
+}
+
+function applyStatusBar() {
+  const on = config.status_bar ?? true;
+  config.status_bar = on;
+  app.classList.toggle("status-on", on);
+  if (!on) closeStatusDetail();
+  window.clearInterval(statusTimer);
+  if (on) {
+    renderStatusBar();
+    void sampleStatus();
+    statusTimer = window.setInterval(
+      () => void sampleStatus(),
+      Math.max(250, config.status_interval_ms ?? 2000)
+    );
+    // A resized window can leave the detail panel hanging off the edge.
+    if (statusOpenId) closeStatusDetail();
+  }
+}
+
 async function main() {
   config = await invoke<AppConfig>("get_config").catch(() => ({}));
   registerCustomThemes();
@@ -4729,6 +5483,9 @@ async function main() {
         m.classList.remove("open");
       }
     }
+    if (statusOpenId && !statusDetailEl.contains(target) && !statusbarEl.contains(target)) {
+      closeStatusDetail();
+    }
   });
   // Suppress the WebView2 default context menu everywhere ("Send to
   // devices", "Web capture", etc.) — the app provides its own menus.
@@ -4747,6 +5504,11 @@ async function main() {
     if (e.key === "Escape" && app.classList.contains("zen-on")) {
       e.preventDefault();
       void toggleZen();
+      return;
+    }
+    if (e.key === "Escape" && statusOpenId) {
+      e.preventDefault();
+      closeStatusDetail();
       return;
     }
     if (e.key === "Escape") {
@@ -4789,6 +5551,12 @@ async function main() {
       e.preventDefault();
       toggleSidebar();
     }
+    if (e.ctrlKey && e.shiftKey && e.key.toUpperCase() === "S") {
+      e.preventDefault();
+      config.status_bar = !(config.status_bar ?? true);
+      saveConfig();
+      applyStatusBar();
+    }
   });
   // Ctrl+scroll over the tab bar resizes tabs live.
   document.getElementById("tabbar-row")!.addEventListener(
@@ -4804,6 +5572,7 @@ async function main() {
     { passive: false }
   );
   new ResizeObserver(() => refreshChrome()).observe(tabbar);
+  applyStatusBar();
   window.setInterval(updateLiveInfo, 5000);
   window.setInterval(aiAutoTitleTick, 120_000);
 

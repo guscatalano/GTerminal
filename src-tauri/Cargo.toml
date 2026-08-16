@@ -26,7 +26,15 @@ portable-pty = "0.9"
 tauri-plugin-dialog = "2.7.2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp"] }
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_Diagnostics_ToolHelp",
+  # status-bar counters: PDH, power, memory/CPU/uptime, disk free space
+  "Win32_System_Performance",
+  "Win32_System_Power",
+  "Win32_System_SystemInformation",
+  "Win32_Storage_FileSystem",
+] }
 
 # Keep dev builds responsive: the per-keystroke path (IPC, JSON, TCP, PTY)
 # is far too slow at opt-level 0.

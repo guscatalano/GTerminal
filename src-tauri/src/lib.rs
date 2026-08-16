@@ -1,4 +1,5 @@
 mod mux;
+mod stats;
 
 use mux::Request;
 use serde_json::Value;
@@ -323,7 +324,12 @@ pub fn run() {
             history_list,
             history_read,
             launch_info,
-            create_shortcut
+            create_shortcut,
+            stats::system_stats,
+            stats::perf_counters,
+            stats::perf_objects,
+            stats::perf_items,
+            stats::status_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

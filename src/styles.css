@@ -773,6 +773,8 @@ input.set-control {
 
 /* ── zen full-screen: terminal only, floating exit pill ──────────────── */
 
+/* The status bar is deliberately absent here: it is the one piece of
+   chrome worth keeping in zen mode. */
 #app.zen-on #tabbar-row,
 #app.zen-on #sidebar {
   display: none !important;
@@ -1472,6 +1474,191 @@ input.set-control {
 
 .set-btn:hover {
   border-color: var(--accent);
+}
+
+/* ── status bar ──────────────────────────────────────────────────────── */
+
+/* Deliberately thin — it is a glance target, not a panel. Stays visible
+   in zen mode: it is the only chrome worth keeping when everything else
+   is gone. */
+#statusbar {
+  display: none;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  height: 22px;
+  padding: 0 6px;
+  background: color-mix(in srgb, var(--bar) var(--chrome-wash, 100%), transparent);
+  border-top: 1px solid var(--border);
+  font: 11px var(--ui-font, "Segoe UI"), sans-serif;
+  color: var(--muted);
+  user-select: none;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+#app.status-on #statusbar {
+  display: flex;
+}
+
+.status-item {
+  flex: none;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  padding: 2px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.status-item:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.status-item.open {
+  background: var(--panel);
+  color: var(--text);
+}
+
+.status-key {
+  color: var(--muted2);
+  margin-right: 4px;
+}
+
+.status-spacer {
+  flex: 1;
+}
+
+/* expanded detail, anchored just above the bar */
+#status-detail {
+  display: none;
+  position: absolute;
+  bottom: 24px;
+  z-index: 40;
+  min-width: 260px;
+  max-width: 460px;
+  padding: 12px 14px;
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 96%, transparent);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  font: 12px var(--ui-font, "Segoe UI"), sans-serif;
+  color: var(--text);
+}
+
+#status-detail.open {
+  display: block;
+}
+
+.sd-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.sd-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 3px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.sd-row:last-of-type {
+  border-bottom: none;
+}
+
+.sd-label {
+  color: var(--muted);
+}
+
+.sd-value {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.sd-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.sd-links button {
+  border: 1px solid var(--border2);
+  background: var(--panel2);
+  color: var(--text);
+  border-radius: 5px;
+  padding: 3px 9px;
+  font: 11px var(--ui-font, "Segoe UI"), sans-serif;
+  cursor: pointer;
+}
+
+.sd-links button:hover {
+  border-color: var(--accent);
+}
+
+/* modal used by the performance-counter browser */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.overlay-box {
+  width: min(880px, 92vw);
+  max-height: 84vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 22px;
+  border: 1px solid var(--border2);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.perf-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.4fr;
+  gap: 8px;
+}
+
+.perf-grid select {
+  max-width: none;
+  width: 100%;
+  height: 220px;
+}
+
+.overlay-box .set-wide {
+  width: 100%;
+  max-width: none;
+  font-family: Consolas, monospace;
+}
+
+.overlay-box .set-btn {
+  align-self: flex-start;
+}
+
+/* status-bar rows in settings */
+.sb-row {
+  grid-template-columns: 1fr 26px;
+}
+
+.perf-row {
+  grid-template-columns: 1fr 1.6fr 130px 26px;
+}
+
+.cmd-row {
+  grid-template-columns: 1fr 1.6fr 90px 26px;
 }
 
 /* ── terminal panes ──────────────────────────────────────────────────── */
