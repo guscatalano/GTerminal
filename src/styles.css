@@ -1513,6 +1513,13 @@ input.set-control {
   border-radius: 4px;
   cursor: pointer;
   line-height: 1;
+  /* Equal-width digits: without this every 1 vs 8 nudges the whole row.
+     JS additionally holds each slot at its widest seen size, so a value
+     swinging between 1 and 5 digits stops reflowing its neighbours. */
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .status-item:hover {

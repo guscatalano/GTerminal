@@ -2050,6 +2050,9 @@ function applyAppearance() {
   // font, or the user's font-family override).
   document.documentElement.style.setProperty("--ui-font", effFont());
   document.documentElement.style.setProperty("--tab-w", `${config.tab_width ?? 220}px`);
+  // A different UI font means different text widths, so the status bar's
+  // reserved slot widths no longer mean anything.
+  statusWidths.clear();
   const t = { xterm: effXtermTheme() };
   const bg = bgActive();
   for (const tab of tabs.values()) {
@@ -5408,10 +5411,16 @@ async function sampleStatus() {
   if (statusOpenId) renderStatusDetail(statusOpenId);
 }
 
+/// Widest pixel width each item has ever needed. Slots are held at this
+/// width so a counter that swings between 1 and 5 digits stops shoving
+/// everything beside it around; the mark resets when the bar is rebuilt.
+const statusWidths = new Map<string, number>();
+
 function renderStatusBar() {
   if (!config.status_bar) return;
   statusbarEl.innerHTML = "";
   const ids = statusItemIds();
+  const rendered: Array<[string, HTMLElement]> = [];
   ids.forEach((id, i) => {
     const def = statusItemDef(id);
     if (!def) return;
@@ -5424,12 +5433,24 @@ function renderStatusBar() {
     btn.className = "status-item" + (statusOpenId === id ? " open" : "");
     btn.textContent = def.render(statusCtx);
     btn.title = `${def.label} — click for detail`;
+    const held = statusWidths.get(id);
+    if (held) btn.style.minWidth = `${held}px`;
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       toggleStatusDetail(id, btn);
     });
     statusbarEl.appendChild(btn);
+    rendered.push([id, btn]);
   });
+  // Measure after everything is in the DOM: one layout pass per tick
+  // rather than one per item.
+  for (const [id, btn] of rendered) {
+    const w = btn.offsetWidth;
+    if (w > (statusWidths.get(id) ?? 0)) {
+      statusWidths.set(id, w);
+      btn.style.minWidth = `${w}px`;
+    }
+  }
 }
 
 function toggleStatusDetail(id: string, anchor: HTMLElement) {
@@ -5626,6 +5647,8 @@ function toggleStatusBar() {
 function applyStatusBar() {
   const on = config.status_bar ?? true;
   config.status_bar = on;
+  // Item set or order may have changed; re-earn the width marks.
+  statusWidths.clear();
   app.classList.toggle("status-on", on);
   if (!on) closeStatusDetail();
   window.clearInterval(statusTimer);
