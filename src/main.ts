@@ -3401,12 +3401,15 @@ async function createTab(
   grip.textContent = "⠿";
   grip.title = "Drag to move this pane — drop on the tab bar for its own tab";
   grip.addEventListener("pointerdown", (ev) => beginPaneDrag(ev, id));
-  const paneClose = document.createElement("button");
-  paneClose.className = "pane-x";
-  paneClose.textContent = "✕";
-  paneClose.title = "Close this pane";
-  paneClose.addEventListener("click", () => closeTab(id));
-  tools.append(grip, paneClose);
+  // Leaves the split rather than closing: nothing in this app destroys a
+  // session by accident, and popping back out is the undo for having
+  // dragged a tab in. Closing is still Ctrl+Shift+W or the menu.
+  const paneOut = document.createElement("button");
+  paneOut.className = "pane-out";
+  paneOut.textContent = "⧉";
+  paneOut.title = "Take this pane out of the split, back to its own tab";
+  paneOut.addEventListener("click", () => promotePane(id));
+  tools.append(grip, paneOut);
   pane.appendChild(tools);
 
   const backlog = pending.get(id);

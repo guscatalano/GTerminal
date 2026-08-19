@@ -1844,8 +1844,9 @@ input.set-control {
   cursor: grabbing;
 }
 
-.pane-x:hover {
-  color: var(--danger) !important;
+/* Not destructive — no danger colour on hover. */
+.pane-out {
+  font-size: 12px;
 }
 
 /* While a pane is being dragged the terminals must not eat the pointer,
