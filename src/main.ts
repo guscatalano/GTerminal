@@ -681,6 +681,74 @@ function titleOf(id: number): string {
   return labelCache.get(id) ?? baseLabel(id).text;
 }
 
+// ── split tabs are named as groups ──────────────────────────────────────
+
+/// A tab holding several panes is a container, not a terminal, and naming
+/// it after a session was always going to look arbitrary: it showed
+/// whichever pane happened to hold the tab's identity, and jumped to
+/// another the moment that one was popped out. So a split gets a name of
+/// its own, in the same language as tab groups — a colour and a name you
+/// can change — and keeps it however the panes are shuffled.
+interface SplitMeta {
+  name: string;
+  color: string;
+  auto: boolean;
+}
+const splitMeta: Record<string, SplitMeta> = JSON.parse(
+  localStorage.getItem("gterm-split-meta") ?? "{}"
+);
+function saveSplitMeta() {
+  localStorage.setItem("gterm-split-meta", JSON.stringify(splitMeta));
+}
+
+/// Name a tab the first time it holds more than one pane. Numbered past
+/// whatever is already in use so two splits never collide.
+function ensureSplitMeta(key: number): SplitMeta {
+  const existing = splitMeta[key];
+  if (existing) return existing;
+  const used = Object.values(splitMeta)
+    .map((m) => /^Group (\d+)$/.exec(m.name)?.[1])
+    .map(Number)
+    .filter((n) => !Number.isNaN(n));
+  const n = (used.length ? Math.max(...used) : 0) + 1;
+  const meta: SplitMeta = {
+    name: `Group ${n}`,
+    color: GROUP_COLORS[(n - 1) % GROUP_COLORS.length],
+    auto: true,
+  };
+  splitMeta[key] = meta;
+  saveSplitMeta();
+  return meta;
+}
+
+/// What the tab strip shows: a split tab's own name, a lone tab's
+/// session title.
+function tabTitleOf(key: number): string {
+  return (isSplit(key) && splitMeta[key]?.name) || titleOf(key);
+}
+
+/// Commit a rename from wherever it was typed — the tab strip, or the
+/// arrange bar. A split renames the group; a lone tab renames its
+/// session, as it always did.
+function renameTabTitle(key: number, v: string | null) {
+  if (v) {
+    if (isSplit(key)) {
+      const meta = ensureSplitMeta(key);
+      meta.name = v;
+      meta.auto = false;
+      saveSplitMeta();
+    } else {
+      customTitles[key] = v;
+      delete aiTitles[key]; // a name typed here supersedes a suggestion
+      saveAiTitles();
+      saveCustomTitles();
+    }
+  }
+  const tab = tabs.get(key);
+  if (tab) tab.label.textContent = tabTitleOf(key);
+  refreshChrome();
+}
+
 // ── tab groups (Chrome-style: colored, collapsible) ─────────────────────
 interface TabGroup {
   id: string;
@@ -2244,7 +2312,7 @@ function renderLayout(key: number) {
   // Pane headers and the focus ring only make sense once there are two.
   root.classList.toggle("multi", isSplit(key));
   markFocus(key);
-  updateSplitBadges();
+  updateSplitChrome();
 }
 
 /// Ring the focused pane, but only when there is more than one to tell
@@ -2275,16 +2343,24 @@ function labelPanes(key: number) {
   });
 }
 
-/// Show on the tab that it holds more than one pane. A split is
-/// otherwise invisible from the strip — the tab looks like any other.
-function updateSplitBadges() {
+/// Show on the tab that it holds more than one pane, and name it as a
+/// group rather than after one of its sessions. A split is otherwise
+/// indistinguishable from an ordinary tab in the strip.
+function updateSplitChrome() {
   for (const [key, tab] of tabs) {
     const badge = tab.button.querySelector<HTMLElement>(".tab-split");
-    if (!badge) continue;
+    const dot = tab.button.querySelector<HTMLElement>(".tab-dot");
+    if (!badge || !dot) continue;
     const n = layouts.has(key) ? leavesOf(treeOf(key)).length : 1;
-    badge.textContent = n > 1 ? String(n) : "";
-    badge.hidden = n < 2;
-    badge.title = n > 1 ? `${n} panes — Ctrl+Shift+A to arrange` : "";
+    const many = n > 1;
+    badge.textContent = many ? String(n) : "";
+    badge.hidden = !many;
+    badge.title = many ? `${n} panes — Ctrl+Shift+A to arrange` : "";
+    dot.hidden = !many;
+    if (many) dot.style.background = ensureSplitMeta(key).color;
+    tab.button.classList.toggle("is-split", many);
+    const title = tabTitleOf(key);
+    if (tab.label.textContent !== title && !renameActive) tab.label.textContent = title;
   }
 }
 
@@ -2830,22 +2906,15 @@ function arrangeBar(): HTMLElement {
   if (key !== undefined) {
     const tag = document.createElement("span");
     tag.className = "arrange-tag";
-    tag.textContent = "TAB";
+    tag.textContent = "GROUP";
+    tag.style.color = splitMeta[key]?.color ?? "";
     const name = document.createElement("span");
     name.className = "arrange-tab";
-    name.textContent = titleOf(key);
-    name.title = "Click to name this tab";
+    name.textContent = tabTitleOf(key);
+    name.title = "Click to rename this group";
     name.addEventListener("click", () => {
-      inlineRename(name, baseLabel(key).text, (v) => {
-        if (v) {
-          customTitles[key] = v;
-          delete aiTitles[key]; // a name typed here supersedes a suggestion
-          saveAiTitles();
-          saveCustomTitles();
-          const tab = tabs.get(key);
-          if (tab) tab.label.textContent = titleOf(key);
-          refreshChrome();
-        }
+      inlineRename(name, tabTitleOf(key), (v) => {
+        renameTabTitle(key, v);
         renderArrange();
       });
     });
@@ -2954,6 +3023,17 @@ function saveLayouts() {
     out[key] = { root: zoomed.get(key) ?? root, focus: focusedOf(key) };
   }
   localStorage.setItem("gterm-layouts", JSON.stringify(out));
+  // Group names outlive nothing: drop the ones whose tab is gone, and the
+  // auto-assigned ones for tabs that are no longer split.
+  let dropped = false;
+  for (const k of Object.keys(splitMeta)) {
+    const key = Number(k);
+    if (!layouts.has(key) || (splitMeta[k].auto && !isSplit(key))) {
+      delete splitMeta[k];
+      dropped = true;
+    }
+  }
+  if (dropped) saveSplitMeta();
 }
 
 function loadLayouts(): Record<string, { root: LayoutNode; focus: number }> {
@@ -2990,6 +3070,13 @@ function retagTab(oldKey: number, newKey: number) {
   if (zoom) {
     zoomed.delete(oldKey);
     zoomed.set(newKey, zoom);
+  }
+  // The group's name belongs to the tab, not to whichever session is
+  // currently carrying its identity.
+  if (splitMeta[oldKey]) {
+    splitMeta[newKey] = splitMeta[oldKey];
+    delete splitMeta[oldKey];
+    saveSplitMeta();
   }
   tabFocus.delete(oldKey);
   for (const leaf of leavesOf(tree)) paneTab.set(leaf, newKey);
@@ -3419,6 +3506,9 @@ async function createTab(
   const shellB = mkShellBadge(shell ?? config.default_shell, id);
   const icon = document.createElement("span");
   icon.className = "tab-icon";
+  const dot = document.createElement("span");
+  dot.className = "tab-dot";
+  dot.hidden = true;
   const label = document.createElement("span");
   label.className = "tab-label";
   label.textContent = titleOf(id);
@@ -3436,7 +3526,7 @@ async function createTab(
   const resize = document.createElement("span");
   resize.className = "tab-resize";
   resize.title = "Drag to resize this tab — double-click to reset";
-  button.append(shellB, icon, label, splitBadge, hide, close, resize);
+  button.append(shellB, icon, dot, label, splitBadge, hide, close, resize);
   applyTabWidth(button, id);
   // A split pane still gets a button — it may inherit the tab later, via
   // retagTab — but only a tab owner's button lives in the strip.
@@ -4210,7 +4300,7 @@ function renameSession(id: number, el: HTMLElement) {
     saveCustomTitles();
     sidebarSig = "";
     const tab = tabs.get(id);
-    if (tab) tab.label.textContent = titleOf(id);
+    if (tab) tab.label.textContent = tabTitleOf(id);
     refreshChrome();
   });
 }
@@ -4219,18 +4309,8 @@ function renameTab(id: number) {
   const tab = tabs.get(id);
   if (!tab) return;
   // Edit the base name, not the "(2)" disambiguation suffix.
-  inlineRename(tab.label, baseLabel(id).text, (v) => {
-    if (v) {
-      customTitles[id] = v;
-      delete aiTitles[id]; // user rename supersedes any AI suggestion
-      saveAiTitles();
-    } else if (v === null && !customTitles[id]) {
-      // cancelled, nothing to change
-    }
-    saveCustomTitles();
-    tab.label.textContent = titleOf(id);
-    refreshChrome();
-  });
+  const current = isSplit(id) ? tabTitleOf(id) : baseLabel(id).text;
+  inlineRename(tab.label, current, (v) => renameTabTitle(id, v));
 }
 
 /// Rebuild the tab bar in order: ungrouped tabs stay put; a group's chip and
@@ -4579,7 +4659,7 @@ function applyPickedTitle(id: number, title: string) {
   delete aiTitles[id];
   saveAiTitles();
   const tab = tabs.get(id);
-  if (tab) tab.label.textContent = titleOf(id);
+  if (tab) tab.label.textContent = tabTitleOf(id);
   sidebarSig = "";
   refreshChrome();
 }
@@ -4677,7 +4757,7 @@ async function updateLiveInfo() {
     // layout, resizes the pane, and makes the terminal caret stutter.
     if (tab.icon.textContent !== icon) tab.icon.textContent = icon;
     setShellBadge(tab.shellB, s.shell, s.id);
-    const label = titleOf(s.id);
+    const label = tabTitleOf(s.id);
     if (tab.label.textContent !== label && !renameActive) {
       tab.label.textContent = label;
     }
@@ -4878,7 +4958,7 @@ function refreshChrome() {
   requestAnimationFrame(() => {
     if (renameActive) return; // rebuilt on commit instead
     recomputeLabels();
-    updateSplitBadges();
+    updateSplitChrome();
     const key = activeTabKey();
     if (key !== undefined) labelPanes(key);
     layoutTabbar();

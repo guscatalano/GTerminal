@@ -552,6 +552,21 @@ body,
   outline: 2px solid var(--gc);
 }
 
+/* A split tab is named as a group, so it carries a group's colour dot.
+   The shell badge goes: one shell can't stand for several panes, and
+   showing one of them was the thing that read as arbitrary. */
+.tab-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 1px;
+}
+
+.tab.is-split .badge-wrap {
+  display: none;
+}
+
 /* How many panes a tab holds. Hidden at one, so an ordinary tab is
    unchanged and a split announces itself. */
 .tab-split {
