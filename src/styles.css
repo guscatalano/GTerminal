@@ -1828,13 +1828,14 @@ input.set-control {
 
 /* Grip and close, only once a tab holds more than one pane, and only on
    hover — a lone terminal should carry no chrome at all. */
-/* A pane's title bar. Only a split needs one — a lone terminal is named
-   by the tab strip, and the strip can only ever name one pane. */
-.pane-head {
+/* A pane's name bar, along its bottom edge. Only a split needs one — a
+   lone terminal is named by the tab strip, and the strip can only ever
+   name one pane. */
+.pane-bar {
   display: none;
 }
 
-.tab-root.multi .pane-head {
+.tab-root.multi .pane-bar {
   flex: none;
   display: flex;
   align-items: center;
@@ -1845,16 +1846,16 @@ input.set-control {
   font: 11px "Segoe UI", sans-serif;
   color: var(--muted);
   background: color-mix(in srgb, var(--panel) 55%, transparent);
-  border-bottom: 1px solid var(--border2);
+  border-top: 1px solid var(--border2);
 }
 
-.tab-root.multi .pane.focused .pane-head {
+.tab-root.multi .pane.focused .pane-bar {
   color: var(--text);
   background: color-mix(in srgb, var(--panel) 92%, transparent);
-  border-bottom-color: var(--accent);
+  border-top-color: var(--accent);
 }
 
-.pane-head:active {
+.pane-bar:active {
   cursor: grabbing;
 }
 
@@ -1951,7 +1952,7 @@ input.set-control {
   pointer-events: none;
 }
 
-#app.arranging .pane-head {
+#app.arranging .pane-bar {
   visibility: hidden;
 }
 

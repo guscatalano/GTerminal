@@ -3656,25 +3656,26 @@ async function createTab(
     if (activeId !== id) focusPane(id);
   });
 
-  // A title bar per pane, shown only once a tab holds more than one.
+  // A name bar per pane, along its bottom edge, shown only once a tab
+  // holds more than one.
   // Without it a split is anonymous: the tab strip can only ever name the
   // pane that has focus. It is also the drag handle, because dragging
   // inside the terminal already means "select text" — a strip the full
   // width of the pane beats the corner grip this replaces.
   pane.dataset.session = String(id);
-  const head = document.createElement("div");
-  head.className = "pane-head";
-  head.title = "Drag to move this pane — drop on the tab bar for its own tab";
-  head.addEventListener("pointerdown", (ev) => {
+  const paneBar = document.createElement("div");
+  paneBar.className = "pane-bar";
+  paneBar.title = "Drag to move this pane — drop on the tab bar for its own tab";
+  paneBar.addEventListener("pointerdown", (ev) => {
     focusPane(id);
     beginPaneDrag(ev, id);
   });
-  const headNum = document.createElement("span");
-  headNum.className = "pane-num";
+  const barNum = document.createElement("span");
+  barNum.className = "pane-num";
   const headName = document.createElement("span");
   headName.className = "pane-name";
   headName.textContent = titleOf(id);
-  head.append(headNum, headName);
+  paneBar.append(barNum, headName);
   // Leaves the split rather than closing: nothing in this app destroys a
   // session by accident, and popping back out is the undo for having
   // dragged a tab in. Closing is still Ctrl+Shift+W or the menu.
@@ -3684,8 +3685,8 @@ async function createTab(
   paneOut.title = "Take this pane out of the split, back to its own tab";
   paneOut.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   paneOut.addEventListener("click", () => promotePane(id));
-  head.appendChild(paneOut);
-  pane.insertBefore(head, paneBody);
+  paneBar.appendChild(paneOut);
+  pane.appendChild(paneBar);
 
   const backlog = pending.get(id);
   if (backlog) {
