@@ -2227,6 +2227,8 @@ function renderLayout(key: number) {
   const root = tabRoots.get(key);
   if (!root) return;
   root.replaceChildren(buildLayoutDom(treeOf(key)));
+  // Pane grips and the focus ring only make sense once there are two.
+  root.classList.toggle("multi", isSplit(key));
   markFocus(key);
 }
 
@@ -2284,16 +2286,18 @@ async function splitPane(dir: "row" | "col") {
   focusPane(id);
 }
 
-/// Move focus to the neighbouring pane in a direction. Picks by geometry
-/// rather than tree position so it behaves the way the layout looks.
-function focusNeighbour(dir: "left" | "right" | "up" | "down") {
-  const key = activeTabKey();
-  if (key === undefined || !isSplit(key)) return;
-  const here = tabs.get(focusedOf(key))?.pane.getBoundingClientRect();
-  if (!here) return;
+/// The pane next to `from` in a direction. Picked by geometry rather than
+/// tree position, so it behaves the way the layout looks.
+function neighbourOf(
+  key: number,
+  from: number,
+  dir: "left" | "right" | "up" | "down"
+): number | undefined {
+  const here = tabs.get(from)?.pane.getBoundingClientRect();
+  if (!here) return undefined;
   let best: { id: number; score: number } | undefined;
   for (const leaf of leavesOf(treeOf(key))) {
-    if (leaf === focusedOf(key)) continue;
+    if (leaf === from) continue;
     const r = tabs.get(leaf)?.pane.getBoundingClientRect();
     if (!r) continue;
     const along =
@@ -2309,7 +2313,14 @@ function focusNeighbour(dir: "left" | "right" | "up" | "down") {
     const score = along + across;
     if (!best || score < best.score) best = { id: leaf, score };
   }
-  if (best) focusPane(best.id);
+  return best?.id;
+}
+
+function focusNeighbour(dir: "left" | "right" | "up" | "down") {
+  const key = activeTabKey();
+  if (key === undefined || !isSplit(key)) return;
+  const id = neighbourOf(key, focusedOf(key), dir);
+  if (id !== undefined) focusPane(id);
 }
 
 /// Blow the focused pane up to fill the tab, keeping the layout intact
@@ -2331,6 +2342,281 @@ function toggleZoom() {
   fitPanes(key);
   tabs.get(focusedOf(key))?.term.focus();
   refreshChrome();
+}
+
+type DropSide = "left" | "right" | "top" | "bottom" | "swap";
+
+/// Panes of a tab in reading order — top to bottom, left to right — which
+/// is the order the numbers overlay and the layout presets both use.
+function panesInOrder(key: number): number[] {
+  return leavesOf(treeOf(key))
+    .map((id) => ({ id, r: tabs.get(id)?.pane.getBoundingClientRect() }))
+    .filter((p): p is { id: number; r: DOMRect } => !!p.r)
+    .sort((a, b) => a.r.top - b.r.top || a.r.left - b.r.left)
+    .map((p) => p.id);
+}
+
+/// Move a pane next to another inside the same tab, or exchange the two.
+/// Removing the source can collapse a split, so the target is re-found in
+/// the pruned tree rather than in the original.
+function movePaneWithin(key: number, src: number, target: number, side: DropSide) {
+  if (src === target) return;
+  const tree = treeOf(key);
+  if (side === "swap") {
+    const swap = (n: LayoutNode): LayoutNode =>
+      n.kind === "leaf"
+        ? { kind: "leaf", id: n.id === src ? target : n.id === target ? src : n.id }
+        : { ...n, a: swap(n.a), b: swap(n.b) };
+    layouts.set(key, swap(tree));
+  } else {
+    const without = dropLeaf(tree, src);
+    if (!without) return;
+    const dir: "row" | "col" = side === "left" || side === "right" ? "row" : "col";
+    const first = side === "left" || side === "top";
+    layouts.set(
+      key,
+      replaceLeaf(without, target, {
+        kind: "split",
+        dir,
+        ratio: 0.5,
+        a: { kind: "leaf", id: first ? src : target },
+        b: { kind: "leaf", id: first ? target : src },
+      })
+    );
+  }
+  renderLayout(key);
+  fitPanes(key);
+  focusPane(src);
+}
+
+/// Swap the focused pane with its neighbour in a direction — the
+/// keyboard counterpart of dragging it there.
+function movePaneDir(dir: "left" | "right" | "up" | "down") {
+  const key = activeTabKey();
+  if (key === undefined || !isSplit(key)) return;
+  const neighbour = neighbourOf(key, focusedOf(key), dir);
+  if (neighbour !== undefined) movePaneWithin(key, focusedOf(key), neighbour, "swap");
+}
+
+/// Pull a pane out of its tab into a tab of its own. Every pane already
+/// carries an unused tab button for exactly this.
+function promotePane(src: number) {
+  const key = paneTab.get(src);
+  if (key === undefined || !isSplit(key)) return;
+  const without = dropLeaf(treeOf(key), src);
+  if (!without) return;
+  layouts.set(key, without);
+  zoomed.delete(key);
+  if (focusedOf(key) === src) tabFocus.set(key, leavesOf(without)[0]);
+  // The old tab keeps its identity unless the promoted pane was carrying
+  // it, in which case a survivor takes over.
+  if (src === key) retagTab(key, leavesOf(without)[0]);
+  const stayKey = paneTab.get(leavesOf(without)[0]);
+  if (stayKey !== undefined) {
+    renderLayout(stayKey);
+    fitPanes(stayKey);
+  }
+
+  const tab = tabs.get(src);
+  if (!tab) return;
+  const root = document.createElement("div");
+  root.className = "tab-root";
+  panes.appendChild(root);
+  tabRoots.set(src, root);
+  layouts.set(src, { kind: "leaf", id: src });
+  paneTab.set(src, src);
+  tabFocus.set(src, src);
+  if (!tab.button.isConnected) tabbar.appendChild(tab.button);
+  if (!tabOrder.includes(src)) tabOrder.push(src);
+  saveOrder();
+  renderLayout(src);
+  setActive(src);
+  saveLayouts();
+}
+
+// ── layout presets ──────────────────────────────────────────────────────
+
+/// Even chain of leaves in one direction: ratios shrink so every pane
+/// ends up the same size.
+function evenChain(ids: number[], dir: "row" | "col"): LayoutNode {
+  if (ids.length === 1) return { kind: "leaf", id: ids[0] };
+  return {
+    kind: "split",
+    dir,
+    ratio: 1 / ids.length,
+    a: { kind: "leaf", id: ids[0] },
+    b: evenChain(ids.slice(1), dir),
+  };
+}
+
+/// Balanced split, alternating direction — roughly square cells.
+function tiled(ids: number[], dir: "row" | "col" = "row"): LayoutNode {
+  if (ids.length === 1) return { kind: "leaf", id: ids[0] };
+  const half = Math.ceil(ids.length / 2);
+  const next = dir === "row" ? "col" : "row";
+  return {
+    kind: "split",
+    dir,
+    ratio: half / ids.length,
+    a: tiled(ids.slice(0, half), next),
+    b: tiled(ids.slice(half), next),
+  };
+}
+
+type PresetKind = "even-cols" | "even-rows" | "main-stack" | "quad";
+
+function applyPreset(kind: PresetKind) {
+  const key = activeTabKey();
+  if (key === undefined) return;
+  const ids = panesInOrder(key);
+  if (ids.length < 2) return;
+  zoomed.delete(key);
+  let tree: LayoutNode;
+  switch (kind) {
+    case "even-cols":
+      tree = evenChain(ids, "row");
+      break;
+    case "even-rows":
+      tree = evenChain(ids, "col");
+      break;
+    case "main-stack":
+      tree =
+        ids.length === 1
+          ? { kind: "leaf", id: ids[0] }
+          : {
+              kind: "split",
+              dir: "row",
+              ratio: 0.6,
+              a: { kind: "leaf", id: ids[0] },
+              b: evenChain(ids.slice(1), "col"),
+            };
+      break;
+    case "quad":
+      tree = tiled(ids);
+      break;
+  }
+  layouts.set(key, tree);
+  renderLayout(key);
+  fitPanes(key);
+  saveLayouts();
+}
+
+// ── pane numbers ────────────────────────────────────────────────────────
+
+/// Holding Alt labels each pane, tmux's display-panes: Alt+<n> jumps.
+let numbersShown = false;
+function showPaneNumbers(on: boolean) {
+  const key = activeTabKey();
+  if (on && (key === undefined || !isSplit(key))) return;
+  if (numbersShown === on) return;
+  numbersShown = on;
+  document.querySelectorAll(".pane-number").forEach((n) => n.remove());
+  if (!on || key === undefined) return;
+  panesInOrder(key).forEach((id, i) => {
+    const pane = tabs.get(id)?.pane;
+    if (!pane || i > 8) return;
+    const badge = document.createElement("div");
+    badge.className = "pane-number";
+    badge.textContent = String(i + 1);
+    pane.appendChild(badge);
+  });
+}
+
+function focusPaneByNumber(n: number) {
+  const key = activeTabKey();
+  if (key === undefined) return false;
+  const id = panesInOrder(key)[n - 1];
+  if (id === undefined) return false;
+  focusPane(id);
+  return true;
+}
+
+// ── dragging a pane ─────────────────────────────────────────────────────
+
+/// Which part of a pane the pointer is over: the middle means "swap", the
+/// outer bands mean "put it on that side".
+function dropSideAt(r: DOMRect, x: number, y: number): DropSide {
+  const fx = (x - r.left) / r.width;
+  const fy = (y - r.top) / r.height;
+  if (fx > 0.3 && fx < 0.7 && fy > 0.3 && fy < 0.7) return "swap";
+  // Nearest edge measured in fractions, so tall and wide panes behave alike.
+  const d: Array<[DropSide, number]> = [
+    ["left", fx],
+    ["right", 1 - fx],
+    ["top", fy],
+    ["bottom", 1 - fy],
+  ];
+  d.sort((a, b) => a[1] - b[1]);
+  return d[0][0];
+}
+
+/// Drag a pane by its grip onto another pane to rearrange it, or onto the
+/// tab strip to give it a tab of its own. Pointer events rather than HTML5
+/// drag, which is unreliable inside the frameless window.
+function beginPaneDrag(e: PointerEvent, src: number) {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const key = paneTab.get(src);
+  const root = key === undefined ? undefined : tabRoots.get(key);
+  if (key === undefined || !root || !isSplit(key)) return;
+  app.classList.add("pane-dragging");
+  const hint = document.createElement("div");
+  hint.className = "drop-hint";
+  root.appendChild(hint);
+  let drop: { target: number; side: DropSide } | "tab" | null = null;
+
+  const place = (left: number, top: number, width: number, height: number, cls: string) => {
+    const rootR = root.getBoundingClientRect();
+    hint.className = `drop-hint ${cls}`;
+    hint.style.left = `${left - rootR.left}px`;
+    hint.style.top = `${top - rootR.top}px`;
+    hint.style.width = `${width}px`;
+    hint.style.height = `${height}px`;
+  };
+
+  const onMove = (ev: PointerEvent) => {
+    const under = document.elementFromPoint(ev.clientX, ev.clientY);
+    const overTabs = under?.closest("#tabbar-row");
+    if (overTabs) {
+      drop = "tab";
+      const r = overTabs.getBoundingClientRect();
+      place(r.left, r.top, r.width, r.height, "show tab");
+      return;
+    }
+    const el = under?.closest(".pane");
+    const targetId = el instanceof HTMLElement ? Number(el.dataset.session) : NaN;
+    if (!el || !Number.isFinite(targetId) || targetId === src || !tabs.has(targetId)) {
+      drop = null;
+      hint.className = "drop-hint";
+      return;
+    }
+    const r = el.getBoundingClientRect();
+    const side = dropSideAt(r, ev.clientX, ev.clientY);
+    drop = { target: targetId, side };
+    // Preview the space the pane would actually occupy.
+    let [left, top, width, height] = [r.left, r.top, r.width, r.height];
+    if (side === "left" || side === "right") {
+      width = r.width / 2;
+      if (side === "right") left += r.width / 2;
+    } else if (side === "top" || side === "bottom") {
+      height = r.height / 2;
+      if (side === "bottom") top += r.height / 2;
+    }
+    place(left, top, width, height, side === "swap" ? "show swap" : "show");
+  };
+
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    app.classList.remove("pane-dragging");
+    hint.remove();
+    if (drop === "tab") promotePane(src);
+    else if (drop) movePaneWithin(key, src, drop.target, drop.side);
+    saveLayouts();
+  };
+
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp, { once: true });
 }
 
 /// Per-tab layouts, pruned against the sessions the daemon still has.
@@ -2516,18 +2802,28 @@ function makeShortcutHandler(getId: () => number) {
       cycleTab(e.shiftKey ? -1 : 1);
       return false;
     }
-    // Alt+arrows move between panes. Only swallowed when the tab is
-    // actually split, so an unsplit terminal still receives them.
-    if (e.altKey && !e.ctrlKey && !e.shiftKey) {
-      const key = activeTabKey();
-      const dir =
-        e.key === "ArrowLeft" ? "left"
-        : e.key === "ArrowRight" ? "right"
-        : e.key === "ArrowUp" ? "up"
-        : e.key === "ArrowDown" ? "down"
-        : undefined;
-      if (dir && key !== undefined && isSplit(key)) {
-        focusNeighbour(dir);
+    // Pane navigation. All of it is only swallowed while the tab is
+    // actually split, so an unsplit terminal still receives these keys.
+    const key = activeTabKey();
+    const split = key !== undefined && isSplit(key);
+    const arrow =
+      e.key === "ArrowLeft" ? "left"
+      : e.key === "ArrowRight" ? "right"
+      : e.key === "ArrowUp" ? "up"
+      : e.key === "ArrowDown" ? "down"
+      : undefined;
+    if (split && arrow && e.altKey && e.ctrlKey && e.shiftKey) {
+      movePaneDir(arrow);
+      return false;
+    }
+    if (split && arrow && e.altKey && !e.ctrlKey && !e.shiftKey) {
+      focusNeighbour(arrow);
+      return false;
+    }
+    // Alt+<n> jumps to a numbered pane, matching the overlay Alt shows.
+    if (split && e.altKey && !e.ctrlKey && !e.shiftKey && /^[1-9]$/.test(e.key)) {
+      if (focusPaneByNumber(Number(e.key))) {
+        showPaneNumbers(false);
         return false;
       }
     }
@@ -2949,7 +3245,26 @@ async function createTab(
       items.push({ label: "Split down (Ctrl+Shift+E)", action: () => void splitPane("col") });
       const paneKey = paneTab.get(id);
       if (paneKey !== undefined && isSplit(paneKey)) {
+        items.push("sep");
+        // Only offer directions that actually have a neighbour.
+        for (const [dir, label] of [
+          ["left", "Move pane left"],
+          ["right", "Move pane right"],
+          ["up", "Move pane up"],
+          ["down", "Move pane down"],
+        ] as const) {
+          if (neighbourOf(paneKey, id, dir) !== undefined) {
+            items.push({ label, action: () => movePaneDir(dir) });
+          }
+        }
+        items.push({ label: "Move pane to new tab", action: () => promotePane(id) });
+        items.push("sep");
+        items.push({ label: "Layout: even columns", action: () => applyPreset("even-cols") });
+        items.push({ label: "Layout: even rows", action: () => applyPreset("even-rows") });
+        items.push({ label: "Layout: main + stack", action: () => applyPreset("main-stack") });
+        items.push({ label: "Layout: tiled", action: () => applyPreset("quad") });
         items.push({ label: "Zoom pane (Ctrl+Shift+M)", action: () => toggleZoom() });
+        items.push("sep");
         items.push({
           label: "Close pane",
           action: () => closeTab(id),
@@ -2986,6 +3301,25 @@ async function createTab(
   pane.addEventListener("pointerdown", () => {
     if (activeId !== id) focusPane(id);
   });
+
+  // Grip and close, shown on hover and only once a tab holds more than
+  // one pane. The grip is the drag source: dragging inside the terminal
+  // itself already means "select text".
+  pane.dataset.session = String(id);
+  const tools = document.createElement("div");
+  tools.className = "pane-tools";
+  const grip = document.createElement("button");
+  grip.className = "pane-grip";
+  grip.textContent = "⠿";
+  grip.title = "Drag to move this pane — drop on the tab bar for its own tab";
+  grip.addEventListener("pointerdown", (ev) => beginPaneDrag(ev, id));
+  const paneClose = document.createElement("button");
+  paneClose.className = "pane-x";
+  paneClose.textContent = "✕";
+  paneClose.title = "Close this pane";
+  paneClose.addEventListener("click", () => closeTab(id));
+  tools.append(grip, paneClose);
+  pane.appendChild(tools);
 
   const backlog = pending.get(id);
   if (backlog) {
@@ -6331,6 +6665,24 @@ async function main() {
     },
     { passive: false }
   );
+  // Holding Alt labels the panes; releasing it (or losing the window)
+  // clears them. Capture phase so it still fires with a terminal focused.
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.key === "Alt" && !e.ctrlKey && !e.shiftKey) showPaneNumbers(true);
+    },
+    true
+  );
+  window.addEventListener(
+    "keyup",
+    (e) => {
+      if (e.key === "Alt") showPaneNumbers(false);
+    },
+    true
+  );
+  window.addEventListener("blur", () => showPaneNumbers(false));
+
   new ResizeObserver(() => refreshChrome()).observe(tabbar);
   startFpsMeter();
   applyStatusBar();

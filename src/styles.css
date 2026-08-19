@@ -1790,6 +1790,104 @@ input.set-control {
   background: var(--accent);
 }
 
+/* Grip and close, only once a tab holds more than one pane, and only on
+   hover — a lone terminal should carry no chrome at all. */
+.pane-tools {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 5;
+  display: none;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  border: 1px solid var(--border2);
+}
+
+.tab-root.multi .pane:hover .pane-tools,
+.tab-root.multi .pane.focused .pane-tools {
+  display: flex;
+}
+
+.pane-tools button {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: 11px "Segoe UI", sans-serif;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.pane-tools button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.pane-grip {
+  cursor: grab;
+}
+
+.pane-grip:active {
+  cursor: grabbing;
+}
+
+.pane-x:hover {
+  color: var(--danger) !important;
+}
+
+/* While a pane is being dragged the terminals must not eat the pointer,
+   or elementFromPoint lands inside xterm instead of on the pane. */
+#app.pane-dragging .xterm {
+  pointer-events: none;
+}
+
+#app.pane-dragging {
+  cursor: grabbing;
+}
+
+/* Where the dragged pane would land. */
+.drop-hint {
+  position: absolute;
+  display: none;
+  z-index: 20;
+  pointer-events: none;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border: 2px solid var(--accent);
+  transition: left 90ms ease, top 90ms ease, width 90ms ease, height 90ms ease;
+}
+
+.drop-hint.show {
+  display: block;
+}
+
+/* Swap reads as an exchange rather than a placement. */
+.drop-hint.swap {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-style: dashed;
+}
+
+.drop-hint.tab {
+  border-radius: 0;
+}
+
+/* Alt-held pane numbers. */
+.pane-number {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  font: 700 64px var(--ui-font, "Segoe UI"), sans-serif;
+  color: color-mix(in srgb, var(--accent) 85%, transparent);
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.6);
+}
+
 .pane .xterm {
   height: 100%;
 }

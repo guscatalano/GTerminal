@@ -21,6 +21,26 @@ Terminal style.
 - Terminal right-click gained Split right / Split down / Zoom / Close
   pane.
 
+## Rearranging: the controls
+
+Designed before building, four ways in so nobody is stuck at one:
+
+| | |
+|---|---|
+| **Drag** | A grip appears in a pane's corner on hover, only when the tab is split — dragging inside the terminal already means "select text", so the drag source has to be something else. Drop on another pane's edge to land in that half; drop in its middle to swap the two; drop on the tab strip to pull the pane out into its own tab. |
+| **Menu** | Right-click a pane: move left/right/up/down (only directions that have a neighbour), move to new tab, the four layout presets, zoom, close. |
+| **Keyboard** | `Alt`+arrows move focus, `Ctrl+Shift+Alt`+arrows move the pane itself. |
+| **Numbers** | Hold `Alt` to label every pane, `Alt`+*n* to jump — tmux's display-panes. |
+
+Layout presets rearrange every pane in the tab at once: even columns,
+even rows, main + stack, tiled. They read the panes in visual order
+(top to bottom, left to right) so the result matches what you were
+looking at.
+
+The drop preview shows the space the pane would occupy rather than an
+arrow or an insertion line — the point is to see the outcome, not decode
+a symbol for it. Swap is drawn dashed so it doesn't read as a placement.
+
 ### Deviation from the plan below
 
 Tab identity stayed as **the session the tab was opened with**, the
