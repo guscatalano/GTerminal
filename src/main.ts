@@ -2096,23 +2096,334 @@ function orderedIds(): number[] {
   return [...tabbar.querySelectorAll<HTMLElement>(".tab")].map((el) => Number(el.dataset.id));
 }
 
+// ── tiling: a tab is a tree of panes ────────────────────────────────────
+// Leaves are sessions, splits divide their space in two at a ratio. This
+// is a guillotine model — the same one tmux and i3 use — so any layout
+// reachable by repeatedly cutting a rectangle in two is representable,
+// and nothing else is (see docs/tiling-panes.md).
+//
+// A tab is identified by the session it was opened with. If that pane
+// closes while others remain, the key moves to a surviving leaf, taking
+// the per-tab state (order, group, width) with it.
+
+type LayoutNode =
+  | { kind: "leaf"; id: number }
+  | { kind: "split"; dir: "row" | "col"; ratio: number; a: LayoutNode; b: LayoutNode };
+
+const layouts = new Map<number, LayoutNode>(); // tabKey -> tree
+const paneTab = new Map<number, number>(); // session -> tabKey
+const tabFocus = new Map<number, number>(); // tabKey -> focused session
+const tabRoots = new Map<number, HTMLElement>(); // tabKey -> container in #panes
+
+/// Smallest a pane may be dragged to, in pixels.
+const MIN_PANE = 90;
+
+function leavesOf(n: LayoutNode): number[] {
+  return n.kind === "leaf" ? [n.id] : [...leavesOf(n.a), ...leavesOf(n.b)];
+}
+
+function replaceLeaf(n: LayoutNode, id: number, repl: LayoutNode): LayoutNode {
+  if (n.kind === "leaf") return n.id === id ? repl : n;
+  return { ...n, a: replaceLeaf(n.a, id, repl), b: replaceLeaf(n.b, id, repl) };
+}
+
+/// Remove a leaf and collapse the split that held it; null when the tree
+/// was nothing but that leaf.
+function dropLeaf(n: LayoutNode, id: number): LayoutNode | null {
+  if (n.kind === "leaf") return n.id === id ? null : n;
+  const a = dropLeaf(n.a, id);
+  const b = dropLeaf(n.b, id);
+  if (!a) return b;
+  if (!b) return a;
+  return { ...n, a, b };
+}
+
+function treeOf(key: number): LayoutNode {
+  return layouts.get(key) ?? { kind: "leaf", id: key };
+}
+
+function activeTabKey(): number | undefined {
+  return activeId === null ? undefined : paneTab.get(activeId);
+}
+
+function focusedOf(key: number): number {
+  return tabFocus.get(key) ?? key;
+}
+
+/// Number of tabs, which is no longer the same as the number of sessions.
+function tabCount(): number {
+  return layouts.size;
+}
+
+function isSplit(key: number): boolean {
+  return treeOf(key).kind === "split";
+}
+
+function buildLayoutDom(node: LayoutNode): HTMLElement {
+  if (node.kind === "leaf") {
+    const el = tabs.get(node.id)?.pane;
+    if (el) {
+      el.style.flex = "";
+      return el;
+    }
+    // A leaf whose session has gone: keep the shape so the rest of the
+    // tree still lays out. Pruned the next time the layout is saved.
+    const gap = document.createElement("div");
+    gap.className = "pane";
+    return gap;
+  }
+  const box = document.createElement("div");
+  box.className = `split ${node.dir}`;
+  const a = buildLayoutDom(node.a);
+  const b = buildLayoutDom(node.b);
+  a.style.flex = `${node.ratio} 1 0`;
+  b.style.flex = `${1 - node.ratio} 1 0`;
+  const bar = document.createElement("div");
+  bar.className = "divider";
+  bar.title = "Drag to resize — double-click to even out";
+  bar.addEventListener("pointerdown", (e) => beginDividerDrag(e, node, box));
+  bar.addEventListener("dblclick", () => {
+    node.ratio = 0.5;
+    (box.children[0] as HTMLElement).style.flex = "0.5 1 0";
+    (box.children[2] as HTMLElement).style.flex = "0.5 1 0";
+    const key = activeTabKey();
+    if (key !== undefined) fitPanes(key);
+    saveLayouts();
+  });
+  box.append(a, bar, b);
+  return box;
+}
+
+function beginDividerDrag(e: PointerEvent, node: LayoutNode, box: HTMLElement) {
+  if (e.button !== 0 || node.kind !== "split") return;
+  e.preventDefault();
+  e.stopPropagation();
+  const horizontal = node.dir === "row";
+  const rect = box.getBoundingClientRect();
+  const total = horizontal ? rect.width : rect.height;
+  if (total <= 0) return;
+  const start = horizontal ? e.clientX : e.clientY;
+  const from = node.ratio;
+  const first = box.children[0] as HTMLElement;
+  const second = box.children[2] as HTMLElement;
+  const limit = MIN_PANE / total;
+  const onMove = (ev: PointerEvent) => {
+    const delta = (horizontal ? ev.clientX : ev.clientY) - start;
+    node.ratio = Math.min(1 - limit, Math.max(limit, from + delta / total));
+    first.style.flex = `${node.ratio} 1 0`;
+    second.style.flex = `${1 - node.ratio} 1 0`;
+  };
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    const key = activeTabKey();
+    if (key !== undefined) fitPanes(key);
+    saveLayouts();
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp, { once: true });
+}
+
+function renderLayout(key: number) {
+  const root = tabRoots.get(key);
+  if (!root) return;
+  root.replaceChildren(buildLayoutDom(treeOf(key)));
+  markFocus(key);
+}
+
+/// Ring the focused pane, but only when there is more than one to tell
+/// apart — a lone pane with a highlight border just looks like chrome.
+function markFocus(key: number) {
+  const focused = focusedOf(key);
+  const many = isSplit(key);
+  for (const leaf of leavesOf(treeOf(key))) {
+    tabs.get(leaf)?.pane.classList.toggle("focused", many && leaf === focused);
+  }
+}
+
+function fitPanes(key: number) {
+  for (const leaf of leavesOf(treeOf(key))) {
+    const t = tabs.get(leaf);
+    if (t) fitTab(t);
+  }
+}
+
+function focusPane(id: number) {
+  const key = paneTab.get(id);
+  if (key === undefined) return;
+  tabFocus.set(key, id);
+  activeId = id;
+  markFocus(key);
+  tabs.get(id)?.term.focus();
+  saveLayouts();
+  refreshChrome();
+}
+
+/// Split the focused pane, giving the new session the same folder — the
+/// tmux behaviour, and what makes splitting useful mid-task.
+async function splitPane(dir: "row" | "col") {
+  const key = activeTabKey();
+  if (key === undefined) return;
+  const from = focusedOf(key);
+  const cwd = lastInfo.get(from)?.cwd;
+  const shell = lastInfo.get(from)?.shell;
+  const id = await createTab(undefined, shell, cwd, undefined, from);
+  if (id === undefined) return;
+  layouts.set(
+    key,
+    replaceLeaf(treeOf(key), from, {
+      kind: "split",
+      dir,
+      ratio: 0.5,
+      a: { kind: "leaf", id: from },
+      b: { kind: "leaf", id },
+    })
+  );
+  paneTab.set(id, key);
+  renderLayout(key);
+  fitPanes(key);
+  focusPane(id);
+}
+
+/// Move focus to the neighbouring pane in a direction. Picks by geometry
+/// rather than tree position so it behaves the way the layout looks.
+function focusNeighbour(dir: "left" | "right" | "up" | "down") {
+  const key = activeTabKey();
+  if (key === undefined || !isSplit(key)) return;
+  const here = tabs.get(focusedOf(key))?.pane.getBoundingClientRect();
+  if (!here) return;
+  let best: { id: number; score: number } | undefined;
+  for (const leaf of leavesOf(treeOf(key))) {
+    if (leaf === focusedOf(key)) continue;
+    const r = tabs.get(leaf)?.pane.getBoundingClientRect();
+    if (!r) continue;
+    const along =
+      dir === "left" ? here.left - r.right
+      : dir === "right" ? r.left - here.right
+      : dir === "up" ? here.top - r.bottom
+      : r.top - here.bottom;
+    if (along < -1) continue; // not on that side at all
+    const across =
+      dir === "left" || dir === "right"
+        ? Math.abs(r.top + r.height / 2 - (here.top + here.height / 2))
+        : Math.abs(r.left + r.width / 2 - (here.left + here.width / 2));
+    const score = along + across;
+    if (!best || score < best.score) best = { id: leaf, score };
+  }
+  if (best) focusPane(best.id);
+}
+
+/// Blow the focused pane up to fill the tab, keeping the layout intact
+/// underneath. Toggles back to the same arrangement.
+const zoomed = new Map<number, LayoutNode>();
+function toggleZoom() {
+  const key = activeTabKey();
+  if (key === undefined) return;
+  const stashed = zoomed.get(key);
+  if (stashed) {
+    layouts.set(key, stashed);
+    zoomed.delete(key);
+  } else {
+    if (!isSplit(key)) return;
+    zoomed.set(key, treeOf(key));
+    layouts.set(key, { kind: "leaf", id: focusedOf(key) });
+  }
+  renderLayout(key);
+  fitPanes(key);
+  tabs.get(focusedOf(key))?.term.focus();
+  refreshChrome();
+}
+
+/// Per-tab layouts, pruned against the sessions the daemon still has.
+function saveLayouts() {
+  const out: Record<string, { root: LayoutNode; focus: number }> = {};
+  for (const [key, root] of layouts) {
+    out[key] = { root: zoomed.get(key) ?? root, focus: focusedOf(key) };
+  }
+  localStorage.setItem("gterm-layouts", JSON.stringify(out));
+}
+
+function loadLayouts(): Record<string, { root: LayoutNode; focus: number }> {
+  try {
+    return JSON.parse(localStorage.getItem("gterm-layouts") ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+/// Keep only leaves whose sessions exist; returns null if none survive.
+function pruneTree(n: LayoutNode, alive: Set<number>): LayoutNode | null {
+  if (n.kind === "leaf") return alive.has(n.id) ? n : null;
+  const a = pruneTree(n.a, alive);
+  const b = pruneTree(n.b, alive);
+  if (!a) return b;
+  if (!b) return a;
+  return { ...n, a, b };
+}
+
+/// Hand a tab's identity to another of its panes, carrying the per-tab
+/// state that is keyed by session id.
+function retagTab(oldKey: number, newKey: number) {
+  const tree = layouts.get(oldKey);
+  if (!tree) return;
+  layouts.delete(oldKey);
+  layouts.set(newKey, tree);
+  const root = tabRoots.get(oldKey);
+  if (root) {
+    tabRoots.delete(oldKey);
+    tabRoots.set(newKey, root);
+  }
+  const zoom = zoomed.get(oldKey);
+  if (zoom) {
+    zoomed.delete(oldKey);
+    zoomed.set(newKey, zoom);
+  }
+  tabFocus.delete(oldKey);
+  for (const leaf of leavesOf(tree)) paneTab.set(leaf, newKey);
+  tabOrder = tabOrder.map((t) => (t === oldKey ? newKey : t));
+  saveOrder();
+  const group = groupState.assign[oldKey];
+  if (group) {
+    delete groupState.assign[oldKey];
+    groupState.assign[newKey] = group;
+    saveGroups();
+  }
+  if (tabWidths[oldKey] !== undefined) {
+    tabWidths[newKey] = tabWidths[oldKey];
+    delete tabWidths[oldKey];
+    saveTabWidths();
+  }
+  // The surviving pane's own button becomes the tab's button.
+  const btn = tabs.get(newKey)?.button;
+  if (btn && !btn.isConnected) {
+    const old = tabs.get(oldKey)?.button;
+    if (old?.isConnected) old.replaceWith(btn);
+    else tabbar.appendChild(btn);
+    applyTabWidth(btn, newKey);
+  }
+}
+
 function setActive(id: number) {
   const tab = tabs.get(id);
   if (!tab) return;
+  const key = paneTab.get(id) ?? id;
   closeSettings();
-  activeId = id;
-  for (const [tid, t] of tabs) {
-    t.pane.classList.toggle("active", tid === id);
-    t.button.classList.toggle("active", tid === id);
-  }
-  fitTab(tab);
-  tab.term.focus();
+  // Activating a tab restores whichever pane had focus there; activating
+  // a specific pane (from the sidebar, say) focuses that one.
+  const focused = id === key ? focusedOf(key) : id;
+  activeId = focused;
+  tabFocus.set(key, focused);
+  for (const [k, root] of tabRoots) root.classList.toggle("active", k === key);
+  for (const [tid, t] of tabs) t.button.classList.toggle("active", tid === key);
+  fitPanes(key);
+  markFocus(key);
+  const focusedTerm = tabs.get(focused)?.term;
+  focusedTerm?.focus();
   refreshChrome();
   // Re-assert focus after the chrome rebuild settles so a click in the
   // sidebar (or anywhere in the bar) always ends with the terminal ready
   // to type into.
   requestAnimationFrame(() => {
-    if (activeId === id && !renameActive) tab.term.focus();
+    if (activeId === focused && !renameActive) focusedTerm?.focus();
   });
 }
 
@@ -2164,6 +2475,18 @@ function makeShortcutHandler(getId: () => number) {
         toggleStatusBar();
         return false;
       }
+      if (key === "D") {
+        void splitPane("row"); // side by side
+        return false;
+      }
+      if (key === "E") {
+        void splitPane("col"); // one above the other
+        return false;
+      }
+      if (key === "M") {
+        toggleZoom();
+        return false;
+      }
       if (key === "Z") {
         restoreLast();
         return false;
@@ -2192,6 +2515,21 @@ function makeShortcutHandler(getId: () => number) {
     if (e.ctrlKey && !e.altKey && e.key === "Tab") {
       cycleTab(e.shiftKey ? -1 : 1);
       return false;
+    }
+    // Alt+arrows move between panes. Only swallowed when the tab is
+    // actually split, so an unsplit terminal still receives them.
+    if (e.altKey && !e.ctrlKey && !e.shiftKey) {
+      const key = activeTabKey();
+      const dir =
+        e.key === "ArrowLeft" ? "left"
+        : e.key === "ArrowRight" ? "right"
+        : e.key === "ArrowUp" ? "up"
+        : e.key === "ArrowDown" ? "down"
+        : undefined;
+      if (dir && key !== undefined && isSplit(key)) {
+        focusNeighbour(dir);
+        return false;
+      }
     }
     return true;
   };
@@ -2241,8 +2579,9 @@ function closeTabViaKeyboard(id: number) {
 
 function cycleTab(dir: number) {
   const ids = orderedIds();
-  if (ids.length < 2 || activeId === null) return;
-  const i = ids.indexOf(activeId);
+  const key = activeTabKey();
+  if (ids.length < 2 || key === undefined) return;
+  const i = ids.indexOf(key);
   setActive(ids[(i + dir + ids.length) % ids.length]);
 }
 
@@ -2338,10 +2677,34 @@ function openClipViewer(id: number, term: Terminal) {
   document.body.appendChild(ov);
 }
 
-async function createTab(attachId?: number, shell?: string, cwd?: string, title?: string) {
+/// Open a session and give it a pane. Without `splitFrom` that pane
+/// becomes a new tab; with it the caller is splitting an existing tab and
+/// places the pane in that tab's tree instead. Returns the session id.
+async function createTab(
+  attachId?: number,
+  shell?: string,
+  cwd?: string,
+  title?: string,
+  splitFrom?: number
+): Promise<number | undefined> {
   const pane = document.createElement("div");
-  pane.className = "pane active";
-  panes.appendChild(pane);
+  pane.className = "pane";
+  // The first fit() decides the session's initial cols/rows, and a
+  // detached element measures as nothing — so the pane needs a home with
+  // real dimensions before that. A split joins its tab's existing (and
+  // visible) root; a new tab gets a staged root, laid out but invisible,
+  // which is revealed by setActive once the session is up.
+  const hostKey = splitFrom === undefined ? undefined : paneTab.get(splitFrom);
+  const host = hostKey === undefined ? undefined : tabRoots.get(hostKey);
+  let freshRoot: HTMLElement | undefined;
+  if (host) {
+    host.appendChild(pane);
+  } else {
+    freshRoot = document.createElement("div");
+    freshRoot.className = "tab-root staging";
+    freshRoot.appendChild(pane);
+    panes.appendChild(freshRoot);
+  }
 
   const term = new Terminal({
     fontFamily: effFont(),
@@ -2390,6 +2753,7 @@ async function createTab(attachId?: number, shell?: string, cwd?: string, title?
     console.error(`Failed to ${attachId !== undefined ? "restore" : "start"} session:`, err);
     term.dispose();
     pane.remove();
+    freshRoot?.remove(); // don't leave a staged root behind
     return;
   }
 
@@ -2426,9 +2790,20 @@ async function createTab(attachId?: number, shell?: string, cwd?: string, title?
   resize.title = "Drag to resize this tab — double-click to reset";
   button.append(shellB, icon, label, hide, close, resize);
   applyTabWidth(button, id);
-  tabbar.appendChild(button);
-  tabOrder.push(id);
-  saveOrder();
+  // A split pane still gets a button — it may inherit the tab later, via
+  // retagTab — but only a tab owner's button lives in the strip.
+  if (splitFrom === undefined) {
+    tabbar.appendChild(button);
+    tabOrder.push(id);
+    saveOrder();
+    const root = freshRoot ?? document.createElement("div");
+    root.className = "tab-root";
+    if (!root.isConnected) panes.appendChild(root);
+    tabRoots.set(id, root);
+    layouts.set(id, { kind: "leaf", id });
+    paneTab.set(id, id);
+    tabFocus.set(id, id);
+  }
 
   const tab: Tab = { id, term, fit, pane, button, label, icon, shellB, webgl };
   tabs.set(id, tab);
@@ -2569,6 +2944,18 @@ async function createTab(attachId?: number, shell?: string, cwd?: string, title?
           term.focus();
         },
       });
+      items.push("sep");
+      items.push({ label: "Split right (Ctrl+Shift+D)", action: () => void splitPane("row") });
+      items.push({ label: "Split down (Ctrl+Shift+E)", action: () => void splitPane("col") });
+      const paneKey = paneTab.get(id);
+      if (paneKey !== undefined && isSplit(paneKey)) {
+        items.push({ label: "Zoom pane (Ctrl+Shift+M)", action: () => toggleZoom() });
+        items.push({
+          label: "Close pane",
+          action: () => closeTab(id),
+          color: "var(--danger)",
+        });
+      }
       showContextMenu(x, y, items);
     })();
   });
@@ -2588,10 +2975,17 @@ async function createTab(attachId?: number, shell?: string, cwd?: string, title?
   });
   term.attachCustomKeyEventHandler(makeShortcutHandler(() => id));
 
+  // Every pane of the visible tab needs refitting, not just the focused
+  // one — a split resizes its neighbours too.
   const observer = new ResizeObserver(() => {
-    if (activeId === id) fitTab(tab);
+    if (paneTab.get(id) === activeTabKey()) fitTab(tab);
   });
   observer.observe(pane);
+
+  // Click anywhere in a pane to focus it.
+  pane.addEventListener("pointerdown", () => {
+    if (activeId !== id) focusPane(id);
+  });
 
   const backlog = pending.get(id);
   if (backlog) {
@@ -2599,28 +2993,67 @@ async function createTab(attachId?: number, shell?: string, cwd?: string, title?
     for (const chunk of backlog) term.write(chunk);
   }
 
-  setActive(id);
+  if (splitFrom === undefined) {
+    renderLayout(id);
+    setActive(id);
+  }
+  return id;
 }
 
+/// Remove one pane. When it is the last pane of its tab the tab goes with
+/// it; otherwise the split collapses and a neighbour takes focus.
 function removeTab(id: number, closeWindowIfLast = true) {
   const tab = tabs.get(id);
   if (!tab) return;
+  const key = paneTab.get(id) ?? id;
+  const remaining = dropLeaf(treeOf(key), id);
   tabs.delete(id);
-  tabOrder = tabOrder.filter((t) => t !== id);
-  saveOrder();
-  const ids = orderedIds();
-  const i = ids.indexOf(id);
+  paneTab.delete(id);
   tab.term.dispose();
   tab.pane.remove();
+
+  if (remaining) {
+    // The tab lives on. If the pane that closed was carrying the tab's
+    // identity, hand it to a survivor.
+    layouts.set(key, remaining);
+    zoomed.delete(key);
+    const survivors = leavesOf(remaining);
+    if (id === key) {
+      tab.button.remove();
+      retagTab(key, survivors[0]);
+    }
+    const newKey = id === key ? survivors[0] : key;
+    if (tabFocus.get(newKey) === id || activeId === id) {
+      tabFocus.set(newKey, survivors[0]);
+    }
+    renderLayout(newKey);
+    fitPanes(newKey);
+    if (activeId === id) setActive(focusedOf(newKey));
+    saveLayouts();
+    refreshChrome();
+    return;
+  }
+
+  // Last pane: the tab goes away.
+  const ids = orderedIds();
+  const i = ids.indexOf(key);
   tab.button.remove();
-  if (tabs.size === 0) {
+  layouts.delete(key);
+  tabFocus.delete(key);
+  zoomed.delete(key);
+  tabRoots.get(key)?.remove();
+  tabRoots.delete(key);
+  tabOrder = tabOrder.filter((t) => t !== key);
+  saveOrder();
+  saveLayouts();
+  if (tabCount() === 0) {
     if (closeWindowIfLast) getCurrentWindow().close();
     refreshChrome();
     return;
   }
   if (activeId === id) {
-    const remaining = orderedIds();
-    setActive(remaining[Math.min(i, remaining.length - 1)]);
+    const rest = orderedIds();
+    setActive(rest[Math.min(i, rest.length - 1)]);
   }
   refreshChrome();
 }
@@ -2641,7 +3074,7 @@ async function hideTab(id: number) {
   hidden.add(id);
   saveHidden();
   removeTab(id, false);
-  if (tabs.size === 0) await createTab();
+  if (tabCount() === 0) await createTab();
   refreshChrome();
 }
 
@@ -3032,7 +3465,7 @@ function showTabContextMenu(x: number, y: number, id: number) {
 async function killAndClose(id: number) {
   removeTab(id, false);
   await killSession(id);
-  if (tabs.size === 0) await createTab();
+  if (tabCount() === 0) await createTab();
 }
 
 /// True while an inline rename input is open. Chrome rebuilds re-parent the
@@ -5266,13 +5699,13 @@ const STATUS_BUILTINS: Record<string, StatusItemDef> = {
   },
   sessions: {
     label: "Sessions",
-    render: () => `S ${tabs.size}${hidden.size ? `+${hidden.size}` : ""}`,
+    render: () => `S ${tabCount()}${tabs.size > tabCount() ? `/${tabs.size}` : ""}`,
     detail: () => {
       const cold = [...lastInfo.values()].filter((s) => !s.attached && !s.expires_ms);
       const doomed = [...lastInfo.values()].filter((s) => s.expires_ms);
       return {
         rows: [
-          ["Open tabs", String(tabs.size)],
+          ["Open tabs", String(tabCount())], ["Panes", String(tabs.size)],
           ["Hidden", String(hidden.size)],
           ["Detached", String(cold.length)],
           ["Closing soon", String(doomed.length)],
@@ -5932,13 +6365,45 @@ async function main() {
     return i === -1 ? Number.MAX_SAFE_INTEGER : i;
   };
   sessions.sort((a, b) => rank(a.id) - rank(b.id) || a.created_ms - b.created_ms);
-  for (const s of sessions) {
-    // Never re-adopt a session the user closed: attaching cancels its
-    // pending kill, so an app restart would resurrect every tab still in
-    // its grace window. They stay under "Closing soon" instead.
-    if (s.expires_ms) continue;
-    if (!hidden.has(s.id)) await createTab(s.id);
+  // Never re-adopt a session the user closed: attaching cancels its
+  // pending kill, so an app restart would resurrect every tab still in
+  // its grace window. They stay under "Closing soon" instead.
+  const adoptable = sessions.filter((s) => !s.expires_ms && !hidden.has(s.id));
+  const alive = new Set(adoptable.map((s) => s.id));
+
+  // Rebuild saved pane trees first, in the saved tab order. Any leaf whose
+  // session is gone is pruned out, and a tab whose sessions have all gone
+  // simply doesn't come back.
+  const savedLayouts = loadLayouts();
+  const placed = new Set<number>();
+  for (const key of savedOrder) {
+    const entry = savedLayouts[key];
+    if (!entry) continue;
+    const tree = pruneTree(entry.root, alive);
+    if (!tree) continue;
+    const leaves = leavesOf(tree).filter((l) => !placed.has(l));
+    if (!leaves.length) continue;
+    const owner = leaves[0];
+    if ((await createTab(owner)) === undefined) continue;
+    placed.add(owner);
+    for (const leaf of leaves.slice(1)) {
+      if ((await createTab(leaf, undefined, undefined, undefined, owner)) === undefined) continue;
+      placed.add(leaf);
+      paneTab.set(leaf, owner);
+    }
+    // Re-prune to whatever actually attached, so a session that failed to
+    // come back can't leave a hole in the tree.
+    const attached = pruneTree(tree, new Set(leaves.filter((l) => tabs.has(l))));
+    if (attached) layouts.set(owner, attached);
+    tabFocus.set(owner, tabs.has(entry.focus) ? entry.focus : owner);
+    renderLayout(owner);
+    fitPanes(owner);
   }
+  // Anything the layouts didn't account for opens as its own tab.
+  for (const s of adoptable) {
+    if (!placed.has(s.id)) await createTab(s.id);
+  }
+  saveLayouts();
   // `--workspace <name>` (e.g. from a shortcut) opens every template the
   // named workspace lists, on top of whatever sessions were adopted.
   const wsArgs = launchInfo?.args ?? [];
@@ -5955,7 +6420,7 @@ async function main() {
       if (t) await createTab(undefined, t.shell, t.cwd, t.title);
     }
   }
-  if (tabs.size === 0) await createTab();
+  if (tabCount() === 0) await createTab();
   refreshChrome();
 }
 

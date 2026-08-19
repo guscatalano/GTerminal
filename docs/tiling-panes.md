@@ -1,10 +1,35 @@
 # Tiling panes — design notes
 
-**Status:** not started. This is a plan, not a description of anything that
-exists. Written 2026-08-16 against `main` at v0.4.1.
+**Status:** phases 1–4 implemented. Phase 5 (workspace layout templates)
+is not. Written 2026-08-16 against v0.4.1; built 2026-08-18.
 
 Goal: split a tab into multiple terminals side by side, tmux/Windows
 Terminal style.
+
+## What shipped
+
+- Split the focused pane right (`Ctrl+Shift+D`) or down (`Ctrl+Shift+E`),
+  inheriting its folder and shell.
+- Draggable dividers with a 90px floor; double-click evens a split.
+- `Alt`+arrows move focus by geometry; click focuses; the focused pane
+  gets a ring, but only when a tab holds more than one.
+- `Ctrl+Shift+M` zooms a pane to fill the tab and back, layout preserved.
+- `Ctrl+Shift+W` and the tab ✕ close a *pane*; the tab goes when its last
+  pane does.
+- Layouts persist in `gterm-layouts` and are rebuilt on start, pruned
+  against the sessions the daemon still has.
+- Terminal right-click gained Split right / Split down / Zoom / Close
+  pane.
+
+### Deviation from the plan below
+
+Tab identity stayed as **the session the tab was opened with**, the
+"cheap option" this document argued against, plus a `retagTab()` that
+hands the identity (and the tab-order, group and width entries keyed by
+it) to a surviving pane when the owner closes. The reason: giving tabs
+their own ids meant migrating five persisted maps and every consumer of
+them, for no behaviour the retag approach doesn't already give. If a
+third thing ever needs to key off a tab, revisit it.
 
 ## Why this is cheap
 

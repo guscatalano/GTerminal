@@ -1715,22 +1715,79 @@ input.set-control {
   min-height: 0;
 }
 
-/* The whole pane carries the background veil (--cell-veil, set from JS
-   from the transparency setting) and the terminal's own cells are fully
-   transparent. Veiling the cells instead leaves the gutter — and the
-   remainder where the row grid doesn't divide evenly into the pane —
-   showing the art at full strength, which reads as the background
-   bleeding past the terminal's edges. */
-.pane {
+/* One tab's pane tree. The veil (--cell-veil, set from JS from the
+   transparency setting) lives here rather than on each pane so that
+   every pixel of the terminal area — panes, gutters and the dividers
+   between them — carries exactly one veil. Veiling the panes instead
+   leaves the dividers showing the art at full strength. */
+.tab-root {
   position: absolute;
   inset: 0;
-  padding: 8px 4px 4px 10px;
-  background: var(--cell-veil, transparent);
   display: none;
+  background: var(--cell-veil, transparent);
 }
 
-.pane.active {
-  display: block;
+.tab-root.active {
+  display: flex;
+}
+
+/* Laid out so a new pane can be measured, but not yet shown. */
+.tab-root.staging {
+  display: flex;
+  visibility: hidden;
+}
+
+.pane {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px 4px 4px 10px;
+  position: relative;
+}
+
+/* Focus ring, only drawn when a tab holds more than one pane. */
+.pane.focused::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.split {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.split.row {
+  flex-direction: row;
+}
+
+.split.col {
+  flex-direction: column;
+}
+
+.divider {
+  flex: none;
+  background: color-mix(in srgb, var(--border2) 70%, transparent);
+}
+
+.split.row > .divider {
+  width: 5px;
+  cursor: col-resize;
+}
+
+.split.col > .divider {
+  height: 5px;
+  cursor: row-resize;
+}
+
+.divider:hover,
+.divider:active {
+  background: var(--accent);
 }
 
 .pane .xterm {
