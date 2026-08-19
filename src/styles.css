@@ -1913,9 +1913,6 @@ input.set-control {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
   border: 2px solid var(--border2);
   border-radius: 8px;
   background: color-mix(in srgb, var(--panel) 62%, transparent);
@@ -1933,19 +1930,49 @@ input.set-control {
   cursor: grabbing;
 }
 
-.arrange-n {
-  font: 600 34px "Segoe UI", sans-serif;
-  line-height: 1;
-  color: var(--text);
+/* The title bar a split pane never has room for. */
+.arrange-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 9px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border2);
+  font: 12px "Segoe UI", sans-serif;
 }
 
-.arrange-title {
-  font: 12px "Segoe UI", sans-serif;
-  color: var(--muted);
-  max-width: 88%;
+.arrange-badge {
+  flex: none;
+  min-width: 16px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--bg);
+  background: var(--accent);
+}
+
+.arrange-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--text);
+}
+
+/* Same number again, large and faint: identity at a glance from across
+   the window, without competing with the title bar. */
+.arrange-ghost {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  font: 600 40px "Segoe UI", sans-serif;
+  line-height: 1;
+  color: color-mix(in srgb, var(--text) 22%, transparent);
 }
 
 .arrange-bar {
@@ -1963,6 +1990,18 @@ input.set-control {
   background: var(--panel);
   border: 1px solid var(--border2);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.38);
+}
+
+.arrange-tab {
+  font: 600 12px "Segoe UI", sans-serif;
+  color: var(--text);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-right: 8px;
+  margin-right: 2px;
+  border-right: 1px solid var(--border2);
 }
 
 .arrange-hint {

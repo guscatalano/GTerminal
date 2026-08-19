@@ -2757,13 +2757,23 @@ function renderArrange() {
     box.style.top = `${r.top - rootR.top}px`;
     box.style.width = `${r.width}px`;
     box.style.height = `${r.height}px`;
-    const n = document.createElement("div");
-    n.className = "arrange-n";
-    n.textContent = String(i + 1);
-    const t = document.createElement("div");
-    t.className = "arrange-title";
-    t.textContent = titleOf(id);
-    box.append(n, t);
+    // A title bar per pane — the thing a split terminal otherwise has no
+    // room for. It doubles as the box's identity: the same number Alt+<n>
+    // jumps to, echoed large and faint in the body so a glance is enough.
+    const head = document.createElement("div");
+    head.className = "arrange-head";
+    const badge = document.createElement("span");
+    badge.className = "arrange-badge";
+    badge.textContent = String(i + 1);
+    const name = document.createElement("span");
+    name.className = "arrange-name";
+    name.textContent = titleOf(id);
+    name.title = name.textContent;
+    head.append(badge, name);
+    const ghost = document.createElement("div");
+    ghost.className = "arrange-ghost";
+    ghost.textContent = String(i + 1);
+    box.append(head, ghost);
     box.addEventListener("pointerdown", (e) => beginArrangeDrag(e, id));
     ov.appendChild(box);
   });
@@ -2774,6 +2784,16 @@ function renderArrange() {
 function arrangeBar(): HTMLElement {
   const bar = document.createElement("div");
   bar.className = "arrange-bar";
+  // Which tab this is. The strip above is dimmed and the boxes are named
+  // after their panes, so without this there is nothing on screen saying
+  // what you are rearranging.
+  if (arrangeKey !== undefined) {
+    const name = document.createElement("span");
+    name.className = "arrange-tab";
+    name.textContent = tabs.get(arrangeKey)?.label.textContent || titleOf(arrangeKey);
+    name.title = name.textContent;
+    bar.appendChild(name);
+  }
   const hint = document.createElement("span");
   hint.className = "arrange-hint";
   hint.textContent = "Drag a pane onto another — edges place it, middle swaps";
