@@ -2241,9 +2241,10 @@ function renderLayout(key: number) {
   const root = tabRoots.get(key);
   if (!root) return;
   root.replaceChildren(buildLayoutDom(treeOf(key)));
-  // Pane grips and the focus ring only make sense once there are two.
+  // Pane headers and the focus ring only make sense once there are two.
   root.classList.toggle("multi", isSplit(key));
   markFocus(key);
+  updateSplitBadges();
 }
 
 /// Ring the focused pane, but only when there is more than one to tell
@@ -2253,6 +2254,37 @@ function markFocus(key: number) {
   const many = isSplit(key);
   for (const leaf of leavesOf(treeOf(key))) {
     tabs.get(leaf)?.pane.classList.toggle("focused", many && leaf === focused);
+  }
+  labelPanes(key);
+}
+
+/// Number and name every pane header. The numbers are the ones Alt+<n>
+/// jumps to, so they follow visual order and have to be redone whenever
+/// the layout moves.
+function labelPanes(key: number) {
+  panesInOrder(key).forEach((id, i) => {
+    const pane = tabs.get(id)?.pane;
+    if (!pane) return;
+    const num = pane.querySelector<HTMLElement>(".pane-num");
+    const name = pane.querySelector<HTMLElement>(".pane-name");
+    if (num) num.textContent = String(i + 1);
+    if (name) {
+      name.textContent = titleOf(id);
+      name.title = titleOf(id);
+    }
+  });
+}
+
+/// Show on the tab that it holds more than one pane. A split is
+/// otherwise invisible from the strip — the tab looks like any other.
+function updateSplitBadges() {
+  for (const [key, tab] of tabs) {
+    const badge = tab.button.querySelector<HTMLElement>(".tab-split");
+    if (!badge) continue;
+    const n = layouts.has(key) ? leavesOf(treeOf(key)).length : 1;
+    badge.textContent = n > 1 ? String(n) : "";
+    badge.hidden = n < 2;
+    badge.title = n > 1 ? `${n} panes — Ctrl+Shift+A to arrange` : "";
   }
 }
 
@@ -3295,6 +3327,13 @@ async function createTab(
 ): Promise<number | undefined> {
   const pane = document.createElement("div");
   pane.className = "pane";
+  // The terminal gets its own box under the header. FitAddon derives
+  // cols/rows from the terminal element's *parent*, so the header has to
+  // sit outside that parent or every pane would fit itself a header too
+  // tall and clip its own last rows.
+  const paneBody = document.createElement("div");
+  paneBody.className = "pane-body";
+  pane.appendChild(paneBody);
   // The first fit() decides the session's initial cols/rows, and a
   // detached element measures as nothing — so the pane needs a home with
   // real dimensions before that. A split joins its tab's existing (and
@@ -3328,7 +3367,7 @@ async function createTab(
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
-  term.open(pane);
+  term.open(paneBody);
   // The WebGL renderer can't composite transparency over a decorative
   // background; those tabs use the DOM renderer instead.
   let webgl: WebglAddon | undefined;
@@ -3383,6 +3422,9 @@ async function createTab(
   const label = document.createElement("span");
   label.className = "tab-label";
   label.textContent = titleOf(id);
+  const splitBadge = document.createElement("span");
+  splitBadge.className = "tab-split";
+  splitBadge.hidden = true;
   const hide = document.createElement("button");
   hide.className = "tab-close";
   hide.textContent = "–";
@@ -3394,7 +3436,7 @@ async function createTab(
   const resize = document.createElement("span");
   resize.className = "tab-resize";
   resize.title = "Drag to resize this tab — double-click to reset";
-  button.append(shellB, icon, label, hide, close, resize);
+  button.append(shellB, icon, label, splitBadge, hide, close, resize);
   applyTabWidth(button, id);
   // A split pane still gets a button — it may inherit the tab later, via
   // retagTab — but only a tab owner's button lives in the strip.
@@ -3594,6 +3636,8 @@ async function createTab(
       const next = titleOf(id);
       if (label.textContent !== next) {
         label.textContent = next;
+        headName.textContent = next;
+        headName.title = next;
         refreshChrome();
       }
     }
@@ -3612,17 +3656,25 @@ async function createTab(
     if (activeId !== id) focusPane(id);
   });
 
-  // Grip and close, shown on hover and only once a tab holds more than
-  // one pane. The grip is the drag source: dragging inside the terminal
-  // itself already means "select text".
+  // A title bar per pane, shown only once a tab holds more than one.
+  // Without it a split is anonymous: the tab strip can only ever name the
+  // pane that has focus. It is also the drag handle, because dragging
+  // inside the terminal already means "select text" — a strip the full
+  // width of the pane beats the corner grip this replaces.
   pane.dataset.session = String(id);
-  const tools = document.createElement("div");
-  tools.className = "pane-tools";
-  const grip = document.createElement("button");
-  grip.className = "pane-grip";
-  grip.textContent = "⠿";
-  grip.title = "Drag to move this pane — drop on the tab bar for its own tab";
-  grip.addEventListener("pointerdown", (ev) => beginPaneDrag(ev, id));
+  const head = document.createElement("div");
+  head.className = "pane-head";
+  head.title = "Drag to move this pane — drop on the tab bar for its own tab";
+  head.addEventListener("pointerdown", (ev) => {
+    focusPane(id);
+    beginPaneDrag(ev, id);
+  });
+  const headNum = document.createElement("span");
+  headNum.className = "pane-num";
+  const headName = document.createElement("span");
+  headName.className = "pane-name";
+  headName.textContent = titleOf(id);
+  head.append(headNum, headName);
   // Leaves the split rather than closing: nothing in this app destroys a
   // session by accident, and popping back out is the undo for having
   // dragged a tab in. Closing is still Ctrl+Shift+W or the menu.
@@ -3630,9 +3682,10 @@ async function createTab(
   paneOut.className = "pane-out";
   paneOut.textContent = "⧉";
   paneOut.title = "Take this pane out of the split, back to its own tab";
+  paneOut.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   paneOut.addEventListener("click", () => promotePane(id));
-  tools.append(grip, paneOut);
-  pane.appendChild(tools);
+  head.appendChild(paneOut);
+  pane.insertBefore(head, paneBody);
 
   const backlog = pending.get(id);
   if (backlog) {
@@ -4824,6 +4877,9 @@ function refreshChrome() {
   requestAnimationFrame(() => {
     if (renameActive) return; // rebuilt on commit instead
     recomputeLabels();
+    updateSplitBadges();
+    const key = activeTabKey();
+    if (key !== undefined) labelPanes(key);
     layoutTabbar();
     updateTabOverflow();
     renderHiddenPills();

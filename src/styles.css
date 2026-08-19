@@ -552,6 +552,21 @@ body,
   outline: 2px solid var(--gc);
 }
 
+/* How many panes a tab holds. Hidden at one, so an ordinary tab is
+   unchanged and a split announces itself. */
+.tab-split {
+  flex: none;
+  font: 600 10px "Segoe UI", sans-serif;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--muted) 20%, transparent);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.tab.active .tab-split {
+  color: var(--text);
+}
+
 /* Dropping on a tab's middle splits into it. Filled rather than edge-lined
    so it reads as "into this one", not "insert beside it". */
 .tab.drop-merge {
@@ -1751,8 +1766,19 @@ input.set-control {
   flex: 1 1 0;
   min-width: 0;
   min-height: 0;
-  padding: 8px 4px 4px 10px;
   position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* FitAddon sizes the terminal from its parent, so the terminal gets a box
+   of its own that excludes the header — and carries the padding that
+   keeps cells off the pane's edges. */
+.pane-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px 4px 4px 10px;
 }
 
 /* Focus ring, only drawn when a tab holds more than one pane. */
@@ -1802,51 +1828,83 @@ input.set-control {
 
 /* Grip and close, only once a tab holds more than one pane, and only on
    hover — a lone terminal should carry no chrome at all. */
-.pane-tools {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 5;
+/* A pane's title bar. Only a split needs one — a lone terminal is named
+   by the tab strip, and the strip can only ever name one pane. */
+.pane-head {
   display: none;
-  gap: 2px;
-  padding: 2px;
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--panel) 88%, transparent);
-  border: 1px solid var(--border2);
 }
 
-.tab-root.multi .pane:hover .pane-tools,
-.tab-root.multi .pane.focused .pane-tools {
+.tab-root.multi .pane-head {
+  flex: none;
   display: flex;
-}
-
-.pane-tools button {
-  border: none;
-  background: none;
-  color: var(--muted);
-  font: 11px "Segoe UI", sans-serif;
-  line-height: 1;
-  padding: 3px 5px;
-  border-radius: 3px;
-  cursor: pointer;
-}
-
-.pane-tools button:hover {
-  background: var(--hover);
-  color: var(--text);
-}
-
-.pane-grip {
+  align-items: center;
+  gap: 7px;
+  padding: 3px 5px 3px 9px;
   cursor: grab;
+  user-select: none;
+  font: 11px "Segoe UI", sans-serif;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--panel) 55%, transparent);
+  border-bottom: 1px solid var(--border2);
 }
 
-.pane-grip:active {
+.tab-root.multi .pane.focused .pane-head {
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  border-bottom-color: var(--accent);
+}
+
+.pane-head:active {
   cursor: grabbing;
 }
 
-/* Not destructive — no danger colour on hover. */
+/* The number Alt+<n> jumps to. */
+.pane-num {
+  flex: none;
+  min-width: 13px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  text-align: center;
+  font-weight: 600;
+  color: var(--text);
+  background: color-mix(in srgb, var(--muted) 28%, transparent);
+}
+
+.pane.focused .pane-num {
+  color: var(--bg);
+  background: var(--accent);
+}
+
+.pane-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Leaves the split; not destructive, so no danger colour. */
 .pane-out {
-  font-size: 12px;
+  flex: none;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: 12px "Segoe UI", sans-serif;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.pane:hover .pane-out,
+.pane.focused .pane-out {
+  opacity: 1;
+}
+
+.pane-out:hover {
+  background: var(--hover);
+  color: var(--text);
 }
 
 /* While a pane is being dragged the terminals must not eat the pointer,
@@ -1893,8 +1951,8 @@ input.set-control {
   pointer-events: none;
 }
 
-#app.arranging .pane-tools {
-  display: none;
+#app.arranging .pane-head {
+  visibility: hidden;
 }
 
 /* Transparent to the pointer, so the dividers underneath stay draggable
