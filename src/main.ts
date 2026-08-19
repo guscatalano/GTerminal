@@ -2728,6 +2728,7 @@ function closeArrange() {
   window.removeEventListener("resize", renderArrange);
   app.classList.remove("arranging");
   document.getElementById("arrange")?.remove();
+  document.getElementById("arrange-bar")?.remove();
   saveLayouts();
   tabs.get(focusedOf(key))?.term.focus();
 }
@@ -2743,6 +2744,7 @@ function renderArrange() {
     return;
   }
   document.getElementById("arrange")?.remove();
+  document.getElementById("arrange-bar")?.remove();
   const ov = document.createElement("div");
   ov.id = "arrange";
   const rootR = root.getBoundingClientRect();
@@ -2777,13 +2779,17 @@ function renderArrange() {
     box.addEventListener("pointerdown", (e) => beginArrangeDrag(e, id));
     ov.appendChild(box);
   });
-  ov.appendChild(arrangeBar());
   root.appendChild(ov);
+  // The toolbar is chrome, not content: fixed to the window and parented
+  // to #app, so it cannot inherit the tab-root's clipping or stacking and
+  // cannot be swept away by the replaceChildren() that every layout
+  // change does to that root.
+  app.appendChild(arrangeBar());
 }
 
 function arrangeBar(): HTMLElement {
   const bar = document.createElement("div");
-  bar.className = "arrange-bar";
+  bar.id = "arrange-bar";
   // Which tab this is. A split tab has no name of its own — the strip
   // above shows whichever pane has focus — so naming it here is the only
   // way the container gets an identity, and the only place it is worth

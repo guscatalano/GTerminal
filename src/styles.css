@@ -1975,24 +1975,29 @@ input.set-control {
   color: color-mix(in srgb, var(--text) 22%, transparent);
 }
 
-.arrange-bar {
-  position: absolute;
+/* Fixed to the window, not to the tab: nothing about the pane layout can
+   clip it, cover it, or delete it. */
+#arrange-bar {
+  position: fixed;
   left: 50%;
-  bottom: 14px;
+  bottom: 22px;
   transform: translateX(-50%);
-  pointer-events: auto;
-  z-index: 42;
+  z-index: 200;
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 8px;
-  border-radius: 9px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  /* Themes may make --panel translucent (the transparency setting feeds
+     it), which over a busy terminal would leave this unreadable. */
   background: var(--panel);
+  backdrop-filter: blur(10px);
   border: 1px solid var(--border2);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.38);
-  /* Centred on the tab, so it must never grow past it — the tab's name
-     leads the bar and would be the half pushed off-screen. */
-  max-width: calc(100% - 24px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  /* Centred, so overflow would push the tab's name off the left edge
+     first — the one thing that must never happen here. */
+  max-width: calc(100vw - 24px);
+  overflow: hidden;
 }
 
 .arrange-tag {
@@ -2039,7 +2044,7 @@ input.set-control {
   white-space: nowrap;
 }
 
-.arrange-bar button {
+#arrange-bar button {
   border: none;
   background: none;
   color: var(--muted);
@@ -2050,7 +2055,7 @@ input.set-control {
   cursor: pointer;
 }
 
-.arrange-bar button:hover {
+#arrange-bar button:hover {
   background: var(--hover);
   color: var(--text);
 }
