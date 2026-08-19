@@ -431,6 +431,7 @@ body,
 
 #sidebtn,
 #newtab,
+#splitbtn,
 #restore,
 #historybtn,
 #settingsbtn {
@@ -448,6 +449,7 @@ body,
 
 #sidebtn svg,
 #newtab svg,
+#splitbtn svg,
 #restore svg,
 #historybtn svg,
 #settingsbtn svg {
@@ -469,6 +471,7 @@ body,
 
 #sidebtn:hover,
 #newtab:hover,
+#splitbtn:hover,
 #restore:hover,
 #historybtn:hover,
 #settingsbtn:hover {

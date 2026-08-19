@@ -20,6 +20,10 @@ Terminal style.
   against the sessions the daemon still has.
 - Terminal right-click gained Split right / Split down / Zoom / Close
   pane.
+- A split button sits in the toolbar next to **+**: click to split right,
+  right-click for down, the presets and zoom. Without it the feature was
+  keyboard-only plus a menu entry that a long paste history pushed off the
+  bottom — nobody found it.
 
 ## Rearranging: the controls
 
@@ -27,6 +31,7 @@ Designed before building, four ways in so nobody is stuck at one:
 
 | | |
 |---|---|
+| **Toolbar** | The split button beside **+**. The only control you can find without being told it exists, so it comes first. |
 | **Drag** | A grip appears in a pane's corner on hover, only when the tab is split — dragging inside the terminal already means "select text", so the drag source has to be something else. Drop on another pane's edge to land in that half; drop in its middle to swap the two; drop on the tab strip to pull the pane out into its own tab. |
 | **Menu** | Right-click a pane: move left/right/up/down (only directions that have a neighbour), move to new tab, the four layout presets, zoom, close. |
 | **Keyboard** | `Alt`+arrows move focus, `Ctrl+Shift+Alt`+arrows move the pane itself. |

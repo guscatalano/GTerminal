@@ -3189,12 +3189,23 @@ async function createTab(
     const y = e.clientY;
     void (async () => {
       const sel = term.getSelection();
-      let current = "";
-      try {
-        current = await navigator.clipboard.readText();
-      } catch {}
+      // Never let the clipboard hold the menu hostage. readText() can hang
+      // forever in WebView2 when another process has the clipboard locked —
+      // and everything below is what builds the menu, so a stalled promise
+      // means right-click silently does nothing. Race it; a missing paste
+      // preview is a far smaller loss than no menu.
+      const current = await Promise.race([
+        navigator.clipboard.readText().catch(() => ""),
+        new Promise<string>((r) => window.setTimeout(() => r(""), 150)),
+      ]);
       if (current) pushClip(current);
       const items: CtxItem[] = [];
+      // Splitting leads, above the clipboard entries: it is the reason
+      // most people open this menu, and a long paste history used to push
+      // it off the bottom.
+      items.push({ label: "Split right (Ctrl+Shift+D)", action: () => void splitPane("row") });
+      items.push({ label: "Split down (Ctrl+Shift+E)", action: () => void splitPane("col") });
+      items.push("sep");
       if (sel) {
         items.push({
           label: "Copy",
@@ -3240,9 +3251,6 @@ async function createTab(
           term.focus();
         },
       });
-      items.push("sep");
-      items.push({ label: "Split right (Ctrl+Shift+D)", action: () => void splitPane("row") });
-      items.push({ label: "Split down (Ctrl+Shift+E)", action: () => void splitPane("col") });
       const paneKey = paneTab.get(id);
       if (paneKey !== undefined && isSplit(paneKey)) {
         items.push("sep");
@@ -6521,6 +6529,30 @@ async function main() {
     );
     showContextMenu(e.clientX, e.clientY, items);
   };
+  // Splitting needs a control you can see: it was keyboard-only plus a
+  // context-menu entry, which is no way to discover a feature.
+  const splitBtn = document.getElementById("splitbtn")!;
+  splitBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    void splitPane("row");
+  });
+  splitBtn.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeMenus();
+    showContextMenu(e.clientX, e.clientY, [
+      { label: "Split right (Ctrl+Shift+D)", action: () => void splitPane("row") },
+      { label: "Split down (Ctrl+Shift+E)", action: () => void splitPane("col") },
+      "sep",
+      { label: "Even columns", action: () => applyPreset("even-cols") },
+      { label: "Even rows", action: () => applyPreset("even-rows") },
+      { label: "Main + stack", action: () => applyPreset("main-stack") },
+      { label: "Tiled", action: () => applyPreset("quad") },
+      "sep",
+      { label: "Zoom pane (Ctrl+Shift+M)", action: () => toggleZoom() },
+    ]);
+  });
+
   const newTabBtn = document.getElementById("newtab")!;
   newTabBtn.addEventListener("click", newShellMenu);
   newTabBtn.addEventListener("contextmenu", newShellMenu);
