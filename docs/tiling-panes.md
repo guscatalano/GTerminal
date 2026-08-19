@@ -31,10 +31,11 @@ Designed before building, four ways in so nobody is stuck at one:
 
 | | |
 |---|---|
+| **Arrange mode** (`Ctrl+Shift+A`) | The main way. Terminals go inert and every pane gets a numbered box over its own rectangle — so the drop target is the size of the pane, not a 14px grip. Drag a box onto another: edges place, middle swaps. The four presets and Done sit on a bar at the bottom. Esc leaves. The overlay is pointer-transparent except for its boxes, so the dividers underneath stay draggable and resizing works without leaving the mode. |
 | **Tab onto tab** | Drag a tab onto another tab's middle and it becomes a pane there, splitting the target's focused pane along its longer axis. The reverse of dragging a pane out to the tab strip, and the gesture people reach for first — a menu item is the wrong affordance for a spatial operation. Its ends keep meaning "reorder", so the two gestures coexist on the same target. |
 | **Toolbar** | The split button beside **+**. |
 | **Drag** | A grip appears in a pane's corner on hover, only when the tab is split — dragging inside the terminal already means "select text", so the drag source has to be something else. Drop on another pane's edge to land in that half; drop in its middle to swap the two; drop on the tab strip to pull the pane out into its own tab. |
-| **Menu** | Right-click a pane: move left/right/up/down (only directions that have a neighbour), move to new tab, the four layout presets, zoom, close. |
+| **Menu** | Right-click a pane: arrange, zoom, move to its own tab, close. It used to carry four move commands and four presets; those are all in arrange mode now, where they have room. |
 | **Keyboard** | `Alt`+arrows move focus, `Ctrl+Shift+Alt`+arrows move the pane itself. |
 | **Numbers** | Hold `Alt` to label every pane, `Alt`+*n* to jump — tmux's display-panes. |
 

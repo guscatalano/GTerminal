@@ -2694,6 +2694,182 @@ function beginPaneDrag(e: PointerEvent, src: number) {
   window.addEventListener("pointerup", onUp, { once: true });
 }
 
+// ── arrange mode ────────────────────────────────────────────────────────
+
+/// Rearranging panes has one hard constraint: dragging inside a terminal
+/// already means "select text", so the only handle a pane can offer is a
+/// small grip you have to go hunting for. This trades that for a mode —
+/// terminals go inert, and every pane gets a drop target the size of the
+/// pane itself. Dividers still poke through between the boxes, so
+/// resizing keeps working without leaving.
+let arrangeKey: number | undefined;
+
+function toggleArrange() {
+  if (arrangeKey !== undefined) closeArrange();
+  else openArrange();
+}
+
+function openArrange() {
+  const key = activeTabKey();
+  if (key === undefined || !isSplit(key)) return;
+  arrangeKey = key;
+  app.classList.add("arranging");
+  // Out of the terminal, so stray keys don't reach the shell and Escape
+  // reaches the window handler.
+  (document.activeElement as HTMLElement | null)?.blur();
+  renderArrange();
+  window.addEventListener("resize", renderArrange);
+}
+
+function closeArrange() {
+  if (arrangeKey === undefined) return;
+  const key = arrangeKey;
+  arrangeKey = undefined;
+  window.removeEventListener("resize", renderArrange);
+  app.classList.remove("arranging");
+  document.getElementById("arrange")?.remove();
+  saveLayouts();
+  tabs.get(focusedOf(key))?.term.focus();
+}
+
+/// The boxes mirror the real pane rectangles rather than a schematic of
+/// them, so what you drag is exactly what you are looking at.
+function renderArrange() {
+  if (arrangeKey === undefined) return;
+  const key = arrangeKey;
+  const root = tabRoots.get(key);
+  if (!root || !isSplit(key)) {
+    closeArrange();
+    return;
+  }
+  document.getElementById("arrange")?.remove();
+  const ov = document.createElement("div");
+  ov.id = "arrange";
+  const rootR = root.getBoundingClientRect();
+  panesInOrder(key).forEach((id, i) => {
+    const pane = tabs.get(id)?.pane;
+    if (!pane) return;
+    const r = pane.getBoundingClientRect();
+    const box = document.createElement("div");
+    box.className = "arrange-box";
+    box.dataset.session = String(id);
+    box.style.left = `${r.left - rootR.left}px`;
+    box.style.top = `${r.top - rootR.top}px`;
+    box.style.width = `${r.width}px`;
+    box.style.height = `${r.height}px`;
+    const n = document.createElement("div");
+    n.className = "arrange-n";
+    n.textContent = String(i + 1);
+    const t = document.createElement("div");
+    t.className = "arrange-title";
+    t.textContent = titleOf(id);
+    box.append(n, t);
+    box.addEventListener("pointerdown", (e) => beginArrangeDrag(e, id));
+    ov.appendChild(box);
+  });
+  ov.appendChild(arrangeBar());
+  root.appendChild(ov);
+}
+
+function arrangeBar(): HTMLElement {
+  const bar = document.createElement("div");
+  bar.className = "arrange-bar";
+  const hint = document.createElement("span");
+  hint.className = "arrange-hint";
+  hint.textContent = "Drag a pane onto another — edges place it, middle swaps";
+  bar.appendChild(hint);
+  const presets: Array<[PresetKind, string, string]> = [
+    ["even-cols", "▯▯", "Even columns"],
+    ["even-rows", "▤", "Even rows"],
+    ["main-stack", "▙", "Main + stack"],
+    ["quad", "▦", "Tiled"],
+  ];
+  for (const [kind, glyph, label] of presets) {
+    const b = document.createElement("button");
+    b.textContent = glyph;
+    b.title = label;
+    b.addEventListener("click", () => {
+      applyPreset(kind);
+      requestAnimationFrame(renderArrange);
+    });
+    bar.appendChild(b);
+  }
+  const done = document.createElement("button");
+  done.className = "arrange-done";
+  done.textContent = "Done";
+  done.title = "Finish arranging (Esc)";
+  done.addEventListener("click", closeArrange);
+  bar.appendChild(done);
+  return bar;
+}
+
+function beginArrangeDrag(e: PointerEvent, src: number) {
+  if (e.button !== 0 || arrangeKey === undefined) return;
+  e.preventDefault();
+  const key = arrangeKey;
+  const root = tabRoots.get(key);
+  const ov = document.getElementById("arrange");
+  if (!root || !ov) return;
+  const srcBox = ov.querySelector<HTMLElement>(`.arrange-box[data-session="${src}"]`);
+  const hint = document.createElement("div");
+  hint.className = "drop-hint";
+  ov.appendChild(hint);
+  const rootR = root.getBoundingClientRect();
+  let drop: { target: number; side: DropSide } | null = null;
+  let moved = false;
+
+  const onMove = (ev: PointerEvent) => {
+    if (!moved) {
+      if (Math.abs(ev.clientX - e.clientX) < 4 && Math.abs(ev.clientY - e.clientY) < 4) return;
+      moved = true;
+      srcBox?.classList.add("dragging");
+    }
+    const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".arrange-box");
+    const targetId = el instanceof HTMLElement ? Number(el.dataset.session) : NaN;
+    if (!el || !Number.isFinite(targetId) || targetId === src) {
+      drop = null;
+      hint.className = "drop-hint";
+      return;
+    }
+    const r = el.getBoundingClientRect();
+    const side = dropSideAt(r, ev.clientX, ev.clientY);
+    drop = { target: targetId, side };
+    // Preview the space the pane would actually occupy.
+    let [left, top, width, height] = [r.left, r.top, r.width, r.height];
+    if (side === "left" || side === "right") {
+      width = r.width / 2;
+      if (side === "right") left += r.width / 2;
+    } else if (side === "top" || side === "bottom") {
+      height = r.height / 2;
+      if (side === "bottom") top += r.height / 2;
+    }
+    hint.className = `drop-hint show${side === "swap" ? " swap" : ""}`;
+    hint.style.left = `${left - rootR.left}px`;
+    hint.style.top = `${top - rootR.top}px`;
+    hint.style.width = `${width}px`;
+    hint.style.height = `${height}px`;
+  };
+
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    hint.remove();
+    srcBox?.classList.remove("dragging");
+    // A click that never moved just picks the pane to work on.
+    if (!moved || !drop) {
+      focusPane(src);
+      return;
+    }
+    movePaneWithin(key, src, drop.target, drop.side);
+    // renderLayout replaced the root's children, taking the overlay with
+    // it; rebuild once the new rectangles have settled.
+    requestAnimationFrame(renderArrange);
+    saveLayouts();
+  };
+
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp, { once: true });
+}
+
 /// Per-tab layouts, pruned against the sessions the daemon still has.
 function saveLayouts() {
   const out: Record<string, { root: LayoutNode; focus: number }> = {};
@@ -2767,6 +2943,9 @@ function setActive(id: number) {
   const tab = tabs.get(id);
   if (!tab) return;
   const key = paneTab.get(id) ?? id;
+  // The arrange overlay belongs to one tab's panes; leaving that tab
+  // leaves the mode.
+  if (arrangeKey !== undefined && arrangeKey !== key) closeArrange();
   closeSettings();
   // Activating a tab restores whichever pane had focus there; activating
   // a specific pane (from the sidebar, say) focuses that one.
@@ -2810,6 +2989,13 @@ async function restoreLast() {
 function makeShortcutHandler(getId: () => number) {
   return (e: KeyboardEvent): boolean => {
     if (e.type !== "keydown") return true;
+    // Arrange mode blurs the terminal, but a click back into one can
+    // return focus — Escape must still leave the mode rather than reach
+    // the shell.
+    if (arrangeKey !== undefined && e.key === "Escape") {
+      closeArrange();
+      return false;
+    }
     if (e.key === "F11") {
       void toggleZen();
       return false;
@@ -2846,6 +3032,10 @@ function makeShortcutHandler(getId: () => number) {
       }
       if (key === "M") {
         toggleZoom();
+        return false;
+      }
+      if (key === "A") {
+        toggleArrange();
         return false;
       }
       if (key === "Z") {
@@ -3333,25 +3523,12 @@ async function createTab(
       });
       const paneKey = paneTab.get(id);
       if (paneKey !== undefined && isSplit(paneKey)) {
+        // Arranging is a mode now, not eight menu rows: the presets and
+        // every move live in there, with targets the size of a pane.
         items.push("sep");
-        // Only offer directions that actually have a neighbour.
-        for (const [dir, label] of [
-          ["left", "Move pane left"],
-          ["right", "Move pane right"],
-          ["up", "Move pane up"],
-          ["down", "Move pane down"],
-        ] as const) {
-          if (neighbourOf(paneKey, id, dir) !== undefined) {
-            items.push({ label, action: () => movePaneDir(dir) });
-          }
-        }
-        items.push({ label: "Move pane to new tab", action: () => promotePane(id) });
-        items.push("sep");
-        items.push({ label: "Layout: even columns", action: () => applyPreset("even-cols") });
-        items.push({ label: "Layout: even rows", action: () => applyPreset("even-rows") });
-        items.push({ label: "Layout: main + stack", action: () => applyPreset("main-stack") });
-        items.push({ label: "Layout: tiled", action: () => applyPreset("quad") });
+        items.push({ label: "Arrange panes… (Ctrl+Shift+A)", action: () => openArrange() });
         items.push({ label: "Zoom pane (Ctrl+Shift+M)", action: () => toggleZoom() });
+        items.push({ label: "Move pane to its own tab", action: () => promotePane(id) });
         items.push("sep");
         items.push({
           label: "Close pane",
@@ -6627,11 +6804,7 @@ async function main() {
       { label: "Split right (Ctrl+Shift+D)", action: () => void splitPane("row") },
       { label: "Split down (Ctrl+Shift+E)", action: () => void splitPane("col") },
       "sep",
-      { label: "Even columns", action: () => applyPreset("even-cols") },
-      { label: "Even rows", action: () => applyPreset("even-rows") },
-      { label: "Main + stack", action: () => applyPreset("main-stack") },
-      { label: "Tiled", action: () => applyPreset("quad") },
-      "sep",
+      { label: "Arrange panes… (Ctrl+Shift+A)", action: () => openArrange() },
       { label: "Zoom pane (Ctrl+Shift+M)", action: () => toggleZoom() },
     ]);
   });
@@ -6712,6 +6885,11 @@ async function main() {
       void toggleZen();
       return;
     }
+    if (e.key === "Escape" && arrangeKey !== undefined) {
+      e.preventDefault();
+      closeArrange();
+      return;
+    }
     if (e.key === "Escape" && app.classList.contains("zen-on")) {
       e.preventDefault();
       void toggleZen();
@@ -6765,6 +6943,12 @@ async function main() {
     if (e.ctrlKey && e.shiftKey && e.key.toUpperCase() === "S") {
       e.preventDefault();
       toggleStatusBar();
+    }
+    // Arrange mode blurs the terminal, so its own toggle has to work from
+    // out here too — otherwise the key that opens it can't close it.
+    if (e.ctrlKey && e.shiftKey && e.key.toUpperCase() === "A") {
+      e.preventDefault();
+      toggleArrange();
     }
   });
   // Ctrl+scroll over the tab bar resizes tabs live.

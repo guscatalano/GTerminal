@@ -1885,6 +1885,119 @@ input.set-control {
   border-radius: 0;
 }
 
+/* ── arrange mode ────────────────────────────────────────────────────── */
+
+/* Terminals recede so the boxes read as the subject, and stop taking the
+   pointer so a drag can't turn into a text selection. */
+#app.arranging .xterm {
+  pointer-events: none;
+}
+
+#app.arranging .pane-tools {
+  display: none;
+}
+
+/* Transparent to the pointer, so the dividers underneath stay draggable
+   and resizing works without leaving the mode. */
+#arrange {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.arrange-box {
+  position: absolute;
+  pointer-events: auto;
+  cursor: grab;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 2px solid var(--border2);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 62%, transparent);
+  user-select: none;
+  transition: border-color 90ms ease, background 90ms ease;
+}
+
+.arrange-box:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--panel) 78%, transparent);
+}
+
+.arrange-box.dragging {
+  opacity: 0.35;
+  cursor: grabbing;
+}
+
+.arrange-n {
+  font: 600 34px "Segoe UI", sans-serif;
+  line-height: 1;
+  color: var(--text);
+}
+
+.arrange-title {
+  font: 12px "Segoe UI", sans-serif;
+  color: var(--muted);
+  max-width: 88%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.arrange-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  z-index: 42;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  background: var(--panel);
+  border: 1px solid var(--border2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.38);
+}
+
+.arrange-hint {
+  font: 11px "Segoe UI", sans-serif;
+  color: var(--muted);
+  margin-right: 6px;
+  white-space: nowrap;
+}
+
+.arrange-bar button {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: 13px "Segoe UI", sans-serif;
+  line-height: 1;
+  padding: 5px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.arrange-bar button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.arrange-done {
+  margin-left: 4px;
+  color: var(--text) !important;
+  border: 1px solid var(--border2) !important;
+}
+
+#arrange .drop-hint {
+  z-index: 41;
+}
+
 /* Alt-held pane numbers. */
 .pane-number {
   position: absolute;
