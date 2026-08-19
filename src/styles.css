@@ -1990,18 +1990,46 @@ input.set-control {
   background: var(--panel);
   border: 1px solid var(--border2);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.38);
+  /* Centred on the tab, so it must never grow past it — the tab's name
+     leads the bar and would be the half pushed off-screen. */
+  max-width: calc(100% - 24px);
+}
+
+.arrange-tag {
+  flex: none;
+  font: 600 9px "Segoe UI", sans-serif;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  padding: 2px 4px;
 }
 
 .arrange-tab {
   font: 600 12px "Segoe UI", sans-serif;
   color: var(--text);
-  max-width: 160px;
+  max-width: 180px;
+  min-width: 40px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: text;
   padding-right: 8px;
-  margin-right: 2px;
+  margin-right: 4px;
   border-right: 1px solid var(--border2);
+}
+
+.arrange-tab:hover {
+  background: var(--hover);
+}
+
+/* The hint is the first thing to give up room; the tab's name is not. */
+.arrange-hint {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .arrange-hint {

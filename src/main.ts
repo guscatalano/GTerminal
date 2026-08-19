@@ -2784,15 +2784,34 @@ function renderArrange() {
 function arrangeBar(): HTMLElement {
   const bar = document.createElement("div");
   bar.className = "arrange-bar";
-  // Which tab this is. The strip above is dimmed and the boxes are named
-  // after their panes, so without this there is nothing on screen saying
-  // what you are rearranging.
-  if (arrangeKey !== undefined) {
+  // Which tab this is. A split tab has no name of its own — the strip
+  // above shows whichever pane has focus — so naming it here is the only
+  // way the container gets an identity, and the only place it is worth
+  // asking for one.
+  const key = arrangeKey;
+  if (key !== undefined) {
+    const tag = document.createElement("span");
+    tag.className = "arrange-tag";
+    tag.textContent = "TAB";
     const name = document.createElement("span");
     name.className = "arrange-tab";
-    name.textContent = tabs.get(arrangeKey)?.label.textContent || titleOf(arrangeKey);
-    name.title = name.textContent;
-    bar.appendChild(name);
+    name.textContent = titleOf(key);
+    name.title = "Click to name this tab";
+    name.addEventListener("click", () => {
+      inlineRename(name, baseLabel(key).text, (v) => {
+        if (v) {
+          customTitles[key] = v;
+          delete aiTitles[key]; // a name typed here supersedes a suggestion
+          saveAiTitles();
+          saveCustomTitles();
+          const tab = tabs.get(key);
+          if (tab) tab.label.textContent = titleOf(key);
+          refreshChrome();
+        }
+        renderArrange();
+      });
+    });
+    bar.append(tag, name);
   }
   const hint = document.createElement("span");
   hint.className = "arrange-hint";
