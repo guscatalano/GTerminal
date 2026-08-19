@@ -18,12 +18,12 @@ Terminal style.
   pane does.
 - Layouts persist in `gterm-layouts` and are rebuilt on start, pruned
   against the sessions the daemon still has.
-- Terminal right-click gained Split right / Split down / Zoom / Close
-  pane.
+- Terminal right-click gained Zoom / Close pane and the move commands.
 - A split button sits in the toolbar next to **+**: click to split right,
   right-click for down, the presets and zoom. Without it the feature was
-  keyboard-only plus a menu entry that a long paste history pushed off the
-  bottom — nobody found it.
+  keyboard-only — nobody found it.
+- **Drag a tab onto the middle of another tab to split into it.** The ends
+  of a tab still mean "insert here"; only the middle 40% merges.
 
 ## Rearranging: the controls
 
@@ -31,7 +31,8 @@ Designed before building, four ways in so nobody is stuck at one:
 
 | | |
 |---|---|
-| **Toolbar** | The split button beside **+**. The only control you can find without being told it exists, so it comes first. |
+| **Tab onto tab** | Drag a tab onto another tab's middle and it becomes a pane there, splitting the target's focused pane along its longer axis. The reverse of dragging a pane out to the tab strip, and the gesture people reach for first — a menu item is the wrong affordance for a spatial operation. Its ends keep meaning "reorder", so the two gestures coexist on the same target. |
+| **Toolbar** | The split button beside **+**. |
 | **Drag** | A grip appears in a pane's corner on hover, only when the tab is split — dragging inside the terminal already means "select text", so the drag source has to be something else. Drop on another pane's edge to land in that half; drop in its middle to swap the two; drop on the tab strip to pull the pane out into its own tab. |
 | **Menu** | Right-click a pane: move left/right/up/down (only directions that have a neighbour), move to new tab, the four layout presets, zoom, close. |
 | **Keyboard** | `Alt`+arrows move focus, `Ctrl+Shift+Alt`+arrows move the pane itself. |

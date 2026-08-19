@@ -741,8 +741,8 @@ let dragSuppressClick = false;
 
 function clearDropMarkers() {
   for (const root of [tabbar, sidebarList]) {
-    for (const el of root.querySelectorAll(".drop-before, .drop-after, .drop-into")) {
-      el.classList.remove("drop-before", "drop-after", "drop-into");
+    for (const el of root.querySelectorAll(".drop-before, .drop-after, .drop-into, .drop-merge")) {
+      el.classList.remove("drop-before", "drop-after", "drop-into", "drop-merge");
     }
   }
 }
@@ -757,17 +757,23 @@ function beginPointerDrag(
   el: HTMLElement,
   axis: "x" | "y",
   hitSelector: string,
-  onDrop: (target: HTMLElement | null, before: boolean, ev: PointerEvent) => void
+  onDrop: (target: HTMLElement | null, before: boolean, ev: PointerEvent) => void,
+  onMerge?: (target: HTMLElement) => void
 ) {
   if (e.button !== 0) return;
   const start = axis === "x" ? e.clientX : e.clientY;
   let dragging = false;
   const hit = (ev: PointerEvent): HTMLElement | null =>
     (document.elementFromPoint(ev.clientX, ev.clientY)?.closest(hitSelector) as HTMLElement | null);
-  const isBefore = (t: HTMLElement, ev: PointerEvent): boolean => {
+  const fraction = (t: HTMLElement, ev: PointerEvent): number => {
     const r = t.getBoundingClientRect();
-    return axis === "x" ? ev.clientX < r.left + r.width / 2 : ev.clientY < r.top + r.height / 2;
+    return axis === "x" ? (ev.clientX - r.left) / r.width : (ev.clientY - r.top) / r.height;
   };
+  const isBefore = (t: HTMLElement, ev: PointerEvent): boolean => fraction(t, ev) < 0.5;
+  // The middle of a target means "combine", its ends mean "insert here" —
+  // the same split browsers use for dropping onto a bookmark folder.
+  const isMerge = (t: HTMLElement, ev: PointerEvent): boolean =>
+    !!onMerge && !t.classList.contains("group-chip") && Math.abs(fraction(t, ev) - 0.5) < 0.2;
   const onMove = (ev: PointerEvent) => {
     if (!dragging) {
       if (Math.abs((axis === "x" ? ev.clientX : ev.clientY) - start) < 5) return;
@@ -781,6 +787,10 @@ function beginPointerDrag(
       t.classList.add("drop-into");
       return;
     }
+    if (isMerge(t, ev)) {
+      t.classList.add("drop-merge");
+      return;
+    }
     t.classList.add(isBefore(t, ev) ? "drop-before" : "drop-after");
   };
   const onUp = (ev: PointerEvent) => {
@@ -790,6 +800,10 @@ function beginPointerDrag(
     if (!dragging) return;
     dragSuppressClick = true;
     const t = hit(ev);
+    if (t && t !== el && onMerge && isMerge(t, ev)) {
+      onMerge(t);
+      return;
+    }
     onDrop(t && t !== el ? t : null, t ? isBefore(t, ev) : false, ev);
   };
   window.addEventListener("pointermove", onMove);
@@ -2434,6 +2448,67 @@ function promotePane(src: number) {
   saveLayouts();
 }
 
+/// Fold one tab into another as a split — the inverse of `promotePane`,
+/// and how splitting is meant to be discovered: drag a tab onto the middle
+/// of another. The source's whole tree comes along, so merging a tab that
+/// is itself split keeps its arrangement intact.
+function mergeTabInto(srcKey: number, dstKey: number) {
+  if (srcKey === dstKey || !layouts.has(srcKey) || !layouts.has(dstKey)) return;
+  // Zoom is a view state rather than a layout. Un-zoom both ends first, or
+  // the stashed tree is stranded on a tab that no longer exists.
+  for (const k of [srcKey, dstKey]) {
+    const stashed = zoomed.get(k);
+    if (stashed) {
+      layouts.set(k, stashed);
+      zoomed.delete(k);
+    }
+  }
+  const srcTree = treeOf(srcKey);
+  // Show the destination before measuring: a hidden tab-root is
+  // display:none, so its panes have no geometry to split along.
+  setActive(dstKey);
+  const anchor = focusedOf(dstKey);
+  const r = tabs.get(anchor)?.pane.getBoundingClientRect();
+  // Cut the anchor along its longer axis, so the result stays roughly
+  // square instead of producing ever-thinner columns.
+  const dir: "row" | "col" = !r || r.width >= r.height ? "row" : "col";
+  layouts.set(
+    dstKey,
+    replaceLeaf(treeOf(dstKey), anchor, {
+      kind: "split",
+      dir,
+      ratio: 0.5,
+      a: { kind: "leaf", id: anchor },
+      b: srcTree,
+    })
+  );
+  for (const leaf of leavesOf(srcTree)) paneTab.set(leaf, dstKey);
+
+  // The source is no longer a tab: drop its bar button, its root, and the
+  // per-tab state keyed by it.
+  tabs.get(srcKey)?.button.remove();
+  layouts.delete(srcKey);
+  tabFocus.delete(srcKey);
+  tabRoots.get(srcKey)?.remove();
+  tabRoots.delete(srcKey);
+  tabOrder = tabOrder.filter((t) => t !== srcKey);
+  saveOrder();
+  if (groupState.assign[srcKey]) {
+    delete groupState.assign[srcKey];
+    saveGroups();
+  }
+  if (tabWidths[srcKey] !== undefined) {
+    delete tabWidths[srcKey];
+    saveTabWidths();
+  }
+
+  renderLayout(dstKey);
+  fitPanes(dstKey);
+  focusPane(leavesOf(srcTree)[0]);
+  saveLayouts();
+  refreshChrome();
+}
+
 // ── layout presets ──────────────────────────────────────────────────────
 
 /// Even chain of leaves in one direction: ratios shrink so every pane
@@ -3140,33 +3215,44 @@ async function createTab(
   });
   // Drag to reorder within the tab strip; dropping onto a group chip
   // joins that group at its front, past a group's last member leaves it.
+  // Dropping on the middle of another tab splits into it instead.
   button.addEventListener("pointerdown", (e) => {
     if (e.target === close || e.target === hide) return;
-    beginPointerDrag(e, button, "x", ".tab, .group-chip", (target, before, ev) => {
-      if (!target) {
-        const bar = tabbar.getBoundingClientRect();
-        const inBar =
-          ev.clientX >= bar.left && ev.clientX <= bar.right &&
-          ev.clientY >= bar.top && ev.clientY <= bar.bottom;
-        if (inBar) moveTab(id, undefined, false);
-        return;
+    beginPointerDrag(
+      e,
+      button,
+      "x",
+      ".tab, .group-chip",
+      (target, before, ev) => {
+        if (!target) {
+          const bar = tabbar.getBoundingClientRect();
+          const inBar =
+            ev.clientX >= bar.left && ev.clientX <= bar.right &&
+            ev.clientY >= bar.top && ev.clientY <= bar.bottom;
+          if (inBar) moveTab(id, undefined, false);
+          return;
+        }
+        if (target.classList.contains("group-chip")) {
+          const gid = target.dataset.gid!;
+          const first = tabOrder.find((m) => groupState.assign[m] === gid);
+          moveTab(id, first, true, gid);
+          return;
+        }
+        const refId = Number(target.dataset.id);
+        if (!tabs.has(refId) || refId === id) return;
+        const gid = groupState.assign[refId];
+        let joinGroup: string | undefined = gid;
+        if (gid) {
+          const members = tabOrder.filter((m) => groupState.assign[m] === gid);
+          if (!before && members[members.length - 1] === refId) joinGroup = undefined;
+        }
+        moveTab(id, refId, before, joinGroup);
+      },
+      (target) => {
+        const refId = Number(target.dataset.id);
+        if (tabs.has(refId) && refId !== id) mergeTabInto(id, refId);
       }
-      if (target.classList.contains("group-chip")) {
-        const gid = target.dataset.gid!;
-        const first = tabOrder.find((m) => groupState.assign[m] === gid);
-        moveTab(id, first, true, gid);
-        return;
-      }
-      const refId = Number(target.dataset.id);
-      if (!tabs.has(refId) || refId === id) return;
-      const gid = groupState.assign[refId];
-      let joinGroup: string | undefined = gid;
-      if (gid) {
-        const members = tabOrder.filter((m) => groupState.assign[m] === gid);
-        if (!before && members[members.length - 1] === refId) joinGroup = undefined;
-      }
-      moveTab(id, refId, before, joinGroup);
-    });
+    );
   });
   button.addEventListener("contextmenu", (e) => {
     e.preventDefault();
@@ -3200,12 +3286,6 @@ async function createTab(
       ]);
       if (current) pushClip(current);
       const items: CtxItem[] = [];
-      // Splitting leads, above the clipboard entries: it is the reason
-      // most people open this menu, and a long paste history used to push
-      // it off the bottom.
-      items.push({ label: "Split right (Ctrl+Shift+D)", action: () => void splitPane("row") });
-      items.push({ label: "Split down (Ctrl+Shift+E)", action: () => void splitPane("col") });
-      items.push("sep");
       if (sel) {
         items.push({
           label: "Copy",
