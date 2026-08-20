@@ -25,6 +25,21 @@ Terminal style.
 - **Drag a tab onto the middle of another tab to split into it.** The ends
   of a tab still mean "insert here"; only the middle 40% merges.
 
+## Splits are not groups
+
+Two containers, deliberately kept apart in the language and the visuals:
+
+| | |
+|---|---|
+| **Group** | Several *tabs* banded together in the strip. Chrome-style chip, round colour dot, collapsible. Pre-existing. |
+| **Split** | Several *terminals* inside one tab. Square colour mark, pane count, its own name (`Split N`), arranged with `Ctrl+Shift+A`. |
+
+A split tab is named after the split, not after any of its sessions —
+naming it after one meant the label was whichever pane happened to hold
+the tab's identity, and it jumped to another when that pane left. The
+name lives in `gterm-split-meta`, keyed by tab, and `retagTab` carries it
+over when the identity moves.
+
 ## Rearranging: the controls
 
 Designed before building, four ways in so nobody is stuck at one:

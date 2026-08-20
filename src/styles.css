@@ -552,14 +552,15 @@ body,
   outline: 2px solid var(--gc);
 }
 
-/* A split tab is named as a group, so it carries a group's colour dot.
-   The shell badge goes: one shell can't stand for several panes, and
+/* A split's colour mark. Square, where a group's dot is round — the two
+   are different things and must not read as the same one. The shell
+   badge goes while split: one shell can't stand for several panes, and
    showing one of them was the thing that read as arbitrary. */
 .tab-dot {
   flex: none;
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: 2px;
   margin-right: 1px;
 }
 

@@ -687,8 +687,12 @@ function titleOf(id: number): string {
 /// it after a session was always going to look arbitrary: it showed
 /// whichever pane happened to hold the tab's identity, and jumped to
 /// another the moment that one was popped out. So a split gets a name of
-/// its own, in the same language as tab groups — a colour and a name you
-/// can change — and keeps it however the panes are shuffled.
+/// its own — a colour and a name you can change — and keeps it however
+/// the panes are shuffled.
+///
+/// Deliberately *not* called a group. A group is several tabs banded
+/// together in the strip; a split is several terminals inside one tab.
+/// Two different things, so two different words.
 interface SplitMeta {
   name: string;
   color: string;
@@ -697,6 +701,10 @@ interface SplitMeta {
 const splitMeta: Record<string, SplitMeta> = JSON.parse(
   localStorage.getItem("gterm-split-meta") ?? "{}"
 );
+// Auto names were "Group N" before splits and groups were told apart.
+for (const m of Object.values(splitMeta)) {
+  if (m.auto) m.name = m.name.replace(/^Group /, "Split ");
+}
 function saveSplitMeta() {
   localStorage.setItem("gterm-split-meta", JSON.stringify(splitMeta));
 }
@@ -707,12 +715,12 @@ function ensureSplitMeta(key: number): SplitMeta {
   const existing = splitMeta[key];
   if (existing) return existing;
   const used = Object.values(splitMeta)
-    .map((m) => /^Group (\d+)$/.exec(m.name)?.[1])
+    .map((m) => /^Split (\d+)$/.exec(m.name)?.[1])
     .map(Number)
     .filter((n) => !Number.isNaN(n));
   const n = (used.length ? Math.max(...used) : 0) + 1;
   const meta: SplitMeta = {
-    name: `Group ${n}`,
+    name: `Split ${n}`,
     color: GROUP_COLORS[(n - 1) % GROUP_COLORS.length],
     auto: true,
   };
@@ -728,7 +736,7 @@ function tabTitleOf(key: number): string {
 }
 
 /// Commit a rename from wherever it was typed — the tab strip, or the
-/// arrange bar. A split renames the group; a lone tab renames its
+/// arrange bar. A split renames the split; a lone tab renames its
 /// session, as it always did.
 function renameTabTitle(key: number, v: string | null) {
   if (v) {
@@ -2343,8 +2351,8 @@ function labelPanes(key: number) {
   });
 }
 
-/// Show on the tab that it holds more than one pane, and name it as a
-/// group rather than after one of its sessions. A split is otherwise
+/// Show on the tab that it holds more than one pane, and name it after
+/// the split rather than after one of its sessions. A split is otherwise
 /// indistinguishable from an ordinary tab in the strip.
 function updateSplitChrome() {
   for (const [key, tab] of tabs) {
@@ -2518,6 +2526,14 @@ function movePaneDir(dir: "left" | "right" | "up" | "down") {
   if (key === undefined || !isSplit(key)) return;
   const neighbour = neighbourOf(key, focusedOf(key), dir);
   if (neighbour !== undefined) movePaneWithin(key, focusedOf(key), neighbour, "swap");
+}
+
+/// Break a split apart: every pane becomes an ordinary tab again. The
+/// pane carrying the tab's identity stays put and keeps it.
+function unsplitTab(key: number) {
+  if (!isSplit(key)) return;
+  // Each promotion re-renders what is left, so decide the list up front.
+  for (const id of panesInOrder(key).filter((id) => id !== key)) promotePane(id);
 }
 
 /// Pull a pane out of its tab into a tab of its own. Every pane already
@@ -2906,12 +2922,12 @@ function arrangeBar(): HTMLElement {
   if (key !== undefined) {
     const tag = document.createElement("span");
     tag.className = "arrange-tag";
-    tag.textContent = "GROUP";
+    tag.textContent = "SPLIT";
     tag.style.color = splitMeta[key]?.color ?? "";
     const name = document.createElement("span");
     name.className = "arrange-tab";
     name.textContent = tabTitleOf(key);
-    name.title = "Click to rename this group";
+    name.title = "Click to rename this split";
     name.addEventListener("click", () => {
       inlineRename(name, tabTitleOf(key), (v) => {
         renameTabTitle(key, v);
@@ -3023,7 +3039,7 @@ function saveLayouts() {
     out[key] = { root: zoomed.get(key) ?? root, focus: focusedOf(key) };
   }
   localStorage.setItem("gterm-layouts", JSON.stringify(out));
-  // Group names outlive nothing: drop the ones whose tab is gone, and the
+  // Split names outlive nothing: drop the ones whose tab is gone, and the
   // auto-assigned ones for tabs that are no longer split.
   let dropped = false;
   for (const k of Object.keys(splitMeta)) {
@@ -3071,7 +3087,7 @@ function retagTab(oldKey: number, newKey: number) {
     zoomed.delete(oldKey);
     zoomed.set(newKey, zoom);
   }
-  // The group's name belongs to the tab, not to whichever session is
+  // The split's name belongs to the tab, not to whichever session is
   // currently carrying its identity.
   if (splitMeta[oldKey]) {
     splitMeta[newKey] = splitMeta[oldKey];
@@ -4228,6 +4244,16 @@ function showTabContextMenu(x: number, y: number, id: number) {
   items.push({ label: "Set badge…", action: () => openBadgePicker(id) });
   if (customBadges[id]) {
     items.push({ label: "Reset badge to shell", action: () => clearBadge(id) });
+  }
+  // Splitting is about panes inside this tab; grouping is about this tab
+  // among others. Separate sections so the two never read as one feature.
+  if (isSplit(id)) {
+    items.push("sep");
+    items.push({ label: "Arrange panes… (Ctrl+Shift+A)", action: () => openArrange() });
+    items.push({
+      label: `Unsplit — ${leavesOf(treeOf(id)).length} separate tabs`,
+      action: () => unsplitTab(id),
+    });
   }
   items.push("sep");
   for (const g of groupState.groups) {
