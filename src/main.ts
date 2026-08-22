@@ -66,8 +66,10 @@ function iconFor(running: string[]): string {
 
 // User config (%LOCALAPPDATA%\GTerminal\config.json), loaded at startup.
 // cursor_style: "bar" | "block" | "underline" (default bar, like Windows
-// Terminal); cursor_blink: boolean (default true); ctrl_v_paste: boolean
-// (default true — Ctrl+V pastes rather than reaching the shell).
+// Terminal); cursor_blink: boolean (default true); ctrl_v_paste and
+// ctrl_f_find: boolean (default true — Ctrl+V pastes and Ctrl+F opens the
+// find bar rather than reaching the shell, except on the alternate
+// buffer); clickable_links: boolean (default true).
 // A "new tab" preset: right-clicking the + button lists these. Unset
 // fields fall back to the regular defaults (default_shell, default_cwd,
 // automatic titles).
@@ -122,6 +124,7 @@ interface AppConfig {
   cursor_style?: CursorStyle;
   cursor_blink?: boolean;
   ctrl_v_paste?: boolean;
+  ctrl_f_find?: boolean;
   clickable_links?: boolean;
   grace_minutes?: number;
   theme?: string;
@@ -2120,6 +2123,10 @@ function effCtrlVPaste(): boolean {
   return config.ctrl_v_paste ?? true;
 }
 
+function effCtrlFFind(): boolean {
+  return config.ctrl_f_find ?? true;
+}
+
 let saveTimer: number | undefined;
 function saveConfig() {
   window.clearTimeout(saveTimer);
@@ -3353,6 +3360,23 @@ function makeShortcutHandler(getId: () => number) {
       }
       if (key === "V") {
         pasteClipboardInto(getId());
+        return false;
+      }
+    }
+    // Ctrl+F finds, on the same terms as Ctrl+V below: everyone reaches
+    // for it, and the shells that want ^F (readline's forward-char, vim
+    // and less paging) are full-screen programs on the alternate buffer,
+    // where it still passes straight through.
+    if (
+      e.ctrlKey &&
+      !e.shiftKey &&
+      !e.altKey &&
+      e.key.toUpperCase() === "F" &&
+      effCtrlFFind()
+    ) {
+      const tab = tabs.get(getId());
+      if (tab && tab.term.buffer.active.type !== "alternate") {
+        openFind();
         return false;
       }
     }
@@ -5632,6 +5656,14 @@ function buildSettingsPage() {
     "Ctrl+click URLs in terminal output to open them in your browser. Takes effect for sessions opened after the change.",
     mkSelect([["on", "On"], ["off", "Off"]], config.clickable_links !== false ? "on" : "off", (v) => {
       config.clickable_links = v === "on";
+      changed();
+    })
+  );
+  settingRow(
+    "Ctrl+F finds",
+    "Open the find bar with Ctrl+F as well as Ctrl+Shift+F. Full-screen programs still receive the key, where it pages forward in vim and less.",
+    mkSelect([["on", "On"], ["off", "Off"]], effCtrlFFind() ? "on" : "off", (v) => {
+      config.ctrl_f_find = v === "on";
       changed();
     })
   );
