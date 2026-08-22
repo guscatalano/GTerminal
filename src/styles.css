@@ -1960,6 +1960,39 @@ input.set-control {
   border-radius: 0;
 }
 
+/* ── summon hotkey picker ────────────────────────────────────────────── */
+
+.hotkey-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hotkey-value {
+  min-width: 150px;
+  padding: 5px 9px;
+  border: 1px solid var(--border2);
+  border-radius: 5px;
+  background: var(--panel2);
+  color: var(--text);
+  font: 12px "Cascadia Mono", Consolas, monospace;
+}
+
+.hotkey-value.none {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.hotkey-value.bad {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.hotkey-set.armed {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* ── find in terminal ────────────────────────────────────────────────── */
 
 /* Bottom-right of the terminal area: out of the way of the output you

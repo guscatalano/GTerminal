@@ -11,7 +11,8 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
-import { routeCtrlKey, isBrowserAccelerator } from "./keys";
+import { register, unregisterAll } from "@tauri-apps/plugin-global-shortcut";
+import { routeCtrlKey, isBrowserAccelerator, accelerator } from "./keys";
 import "@xterm/xterm/css/xterm.css";
 import "./styles.css";
 
@@ -127,6 +128,7 @@ interface AppConfig {
   ctrl_v_paste?: boolean;
   ctrl_f_find?: boolean;
   clickable_links?: boolean;
+  summon_hotkey?: string;
   grace_minutes?: number;
   theme?: string;
   font_family?: string;
@@ -3184,6 +3186,124 @@ async function restoreLast() {
   if (detached.length) await createTab(detached[detached.length - 1].id);
 }
 
+// ── summon hotkey ───────────────────────────────────────────────────────
+
+/// Capture widget: click Set, press the combination, done. Typing an
+/// accelerator string by hand is a guessing game about spelling, and
+/// getting it wrong fails silently at registration time.
+function mkHotkeyPicker(): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "hotkey-picker";
+  const shown = document.createElement("span");
+  shown.className = "hotkey-value";
+  const setBtn = document.createElement("button");
+  setBtn.className = "set-control hotkey-set";
+  const clearBtn = document.createElement("button");
+  clearBtn.className = "set-control hotkey-clear";
+  clearBtn.textContent = "Clear";
+
+  let capturing = false;
+  const render = () => {
+    shown.textContent = config.summon_hotkey || "None";
+    shown.classList.toggle("none", !config.summon_hotkey);
+    setBtn.textContent = capturing ? "Press keys…" : "Set";
+    setBtn.classList.toggle("armed", capturing);
+    clearBtn.hidden = !config.summon_hotkey;
+  };
+
+  const commit = async (combo: string | null) => {
+    config.summon_hotkey = combo ?? undefined;
+    saveConfig();
+    const ok = await applySummonHotkey();
+    if (!ok) {
+      // Registration is the only place a clash shows up, so say so
+      // rather than leaving a hotkey that silently does nothing.
+      shown.textContent = `${combo} — already taken`;
+      shown.classList.add("bad");
+      window.setTimeout(() => {
+        shown.classList.remove("bad");
+        render();
+      }, 2500);
+      return;
+    }
+    render();
+  };
+
+  const onKey = (e: KeyboardEvent) => {
+    if (!capturing) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === "Escape") {
+      capturing = false;
+      stop();
+      render();
+      return;
+    }
+    const combo = accelerator(e);
+    if (!combo) return; // still holding modifiers; wait for a real key
+    capturing = false;
+    stop();
+    void commit(combo);
+  };
+  const stop = () => window.removeEventListener("keydown", onKey, true);
+
+  setBtn.addEventListener("click", () => {
+    capturing = !capturing;
+    if (capturing) window.addEventListener("keydown", onKey, true);
+    else stop();
+    render();
+  });
+  clearBtn.addEventListener("click", () => void commit(null));
+
+  wrap.append(shown, setBtn, clearBtn);
+  render();
+  return wrap;
+}
+
+/// Quake-style: one key from anywhere brings the terminal to the front,
+/// and the same key puts it away again. The toggle is deliberately keyed
+/// on focus rather than visibility — a visible but buried window should
+/// come forward, not disappear, which is what catches people out with a
+/// naive show/hide.
+async function summonToggle() {
+  const win = getCurrentWindow();
+  try {
+    const [visible, focused, minimized] = await Promise.all([
+      win.isVisible(),
+      win.isFocused(),
+      win.isMinimized(),
+    ]);
+    if (visible && focused && !minimized) {
+      await win.hide();
+      return;
+    }
+    if (minimized) await win.unminimize();
+    await win.show();
+    await win.setFocus();
+  } catch {
+    // Never leave the window stuck away because one call failed.
+    await win.show().catch(() => {});
+    await win.setFocus().catch(() => {});
+  }
+}
+
+/// Re-register from config. Called at startup and whenever the setting
+/// changes; unregisterAll first so an old binding cannot linger.
+async function applySummonHotkey() {
+  await unregisterAll().catch(() => {});
+  const combo = config.summon_hotkey;
+  if (!combo) return true;
+  try {
+    await register(combo, (e) => {
+      // The plugin reports both edges; acting on both toggles twice.
+      if (e.state === "Pressed") void summonToggle();
+    });
+    return true;
+  } catch {
+    return false; // taken by another program, or not a valid accelerator
+  }
+}
+
 // ── find in terminal ────────────────────────────────────────────────────
 
 const findbar = document.getElementById("findbar")!;
@@ -5659,6 +5779,11 @@ function buildSettingsPage() {
     })
   );
   settingRow(
+    "Summon hotkey",
+    "Press this from anywhere in Windows to bring GTerminal to the front, and again to send it away. Click Set and press the combination you want — it needs a modifier (or a function key), since a bare key would be taken from every other program on the machine.",
+    mkHotkeyPicker()
+  );
+  settingRow(
     "Clickable links",
     "Ctrl+click URLs in terminal output to open them in your browser. Takes effect for sessions opened after the change.",
     mkSelect([["on", "On"], ["off", "Off"]], config.clickable_links !== false ? "on" : "off", (v) => {
@@ -7285,6 +7410,7 @@ async function main() {
   window.addEventListener("contextmenu", (e) => e.preventDefault());
   document.getElementById("settings-close")!.addEventListener("click", closeSettings);
   initFind();
+  void applySummonHotkey();
   window.addEventListener("keydown", (e) => {
     // Keystrokes inside a terminal are handled by that terminal's own
     // shortcut handler; letting them also reach this global handler

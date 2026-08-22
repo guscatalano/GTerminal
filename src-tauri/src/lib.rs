@@ -295,6 +295,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // The summon hotkey is registered from the frontend, which owns the
+        // config; this only installs the machinery.
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             // The window is created hidden (visible:false) so the webview's
             // white pre-paint never flashes; the frontend shows it once the

@@ -41,6 +41,70 @@ export function routeCtrlKey(e: KeyEventLike, ctx: KeyContext): KeyAction {
   return "pass";
 }
 
+/// Turn a key press into a Tauri accelerator string ("Alt+Space",
+/// "Control+Shift+Backquote"), or null when it is not usable on its own —
+/// a bare modifier, or a plain key with nothing held, which would swallow
+/// that key everywhere on the machine.
+///
+/// `code` is used rather than `key` so the binding survives layout
+/// changes: the key left of 1 stays the summon key whether the layout
+/// calls it backquote, plus-minus or paragraph.
+export function accelerator(e: {
+  ctrlKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+  metaKey: boolean;
+  code: string;
+  key: string;
+}): string | null {
+  const mods: string[] = [];
+  if (e.ctrlKey) mods.push("Control");
+  if (e.altKey) mods.push("Alt");
+  if (e.shiftKey) mods.push("Shift");
+  if (e.metaKey) mods.push("Super");
+  let base = "";
+  if (/^Key[A-Z]$/.test(e.code)) base = e.code.slice(3);
+  else if (/^Digit[0-9]$/.test(e.code)) base = e.code.slice(5);
+  else if (/^Numpad[0-9]$/.test(e.code)) base = e.code;
+  else if (/^F([1-9]|1[0-9]|2[0-4])$/.test(e.code)) base = e.code;
+  else {
+    const named: Record<string, string> = {
+      Space: "Space",
+      Backquote: "Backquote",
+      Minus: "Minus",
+      Equal: "Equal",
+      BracketLeft: "BracketLeft",
+      BracketRight: "BracketRight",
+      Backslash: "Backslash",
+      Semicolon: "Semicolon",
+      Quote: "Quote",
+      Comma: "Comma",
+      Period: "Period",
+      Slash: "Slash",
+      Escape: "Escape",
+      Enter: "Enter",
+      Tab: "Tab",
+      Insert: "Insert",
+      Delete: "Delete",
+      Home: "Home",
+      End: "End",
+      PageUp: "PageUp",
+      PageDown: "PageDown",
+      ArrowUp: "Up",
+      ArrowDown: "Down",
+      ArrowLeft: "Left",
+      ArrowRight: "Right",
+    };
+    base = named[e.code] ?? "";
+  }
+  if (!base) return null; // modifier alone, or a key we cannot name
+  // A global shortcut with no modifier takes that key away from every
+  // other program on the machine. Function keys are the exception people
+  // actually want (F12 as a summon key is a convention).
+  if (!mods.length && !/^F([1-9]|1[0-9]|2[0-4])$/.test(base)) return null;
+  return [...mods, base].join("+");
+}
+
 /// Keys WebView2 hands to Edge — find-on-page and the print dialog. They
 /// fire wherever focus is, including inside our own find box, so their
 /// default has to be cancelled at the document rather than in the

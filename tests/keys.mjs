@@ -11,7 +11,7 @@
 //
 // Node 24 strips types natively, so this imports the real module rather
 // than a copy of it.
-import { routeCtrlKey, isBrowserAccelerator } from "../src/keys.ts";
+import { routeCtrlKey, isBrowserAccelerator, accelerator } from "../src/keys.ts";
 
 let failed = 0;
 function check(name, got, want) {
@@ -118,6 +118,52 @@ check("Ctrl+R is not ours to cancel", isBrowserAccelerator(key("r", { ctrlKey: t
 // Ctrl+Shift+C precisely so this key can reach the shell.
 check("Ctrl+C reaches the shell", routeCtrlKey(key("c", { ctrlKey: true }), ctx()), "pass");
 check("Ctrl+C is not cancelled", isBrowserAccelerator(key("c", { ctrlKey: true })), false);
+
+// ── summon hotkey capture ──────────────────────────────────────────────
+// The picker turns a keypress into a Tauri accelerator string. Getting
+// this wrong fails at registration with no visible cause, so the parsing
+// is worth pinning down.
+const press = (code, mods = {}) => ({
+  ctrlKey: false,
+  shiftKey: false,
+  altKey: false,
+  metaKey: false,
+  code,
+  key: "",
+  ...mods,
+});
+
+check("Alt+Space", accelerator(press("Space", { altKey: true })), "Alt+Space");
+check(
+  "Ctrl+Shift+backquote, the classic quake key",
+  accelerator(press("Backquote", { ctrlKey: true, shiftKey: true })),
+  "Control+Shift+Backquote"
+);
+check("Super+T", accelerator(press("KeyT", { metaKey: true })), "Super+T");
+check("digits", accelerator(press("Digit3", { altKey: true })), "Alt+3");
+check("arrows are renamed", accelerator(press("ArrowUp", { altKey: true })), "Alt+Up");
+check("modifier order is stable", accelerator(press("KeyG", {
+  shiftKey: true, ctrlKey: true, altKey: true,
+})), "Control+Alt+Shift+G");
+
+// A bare key would be taken from every other program on the machine.
+check("a bare letter is rejected", accelerator(press("KeyG")), null);
+check("a bare Space is rejected", accelerator(press("Space")), null);
+// Function keys are the exception: F12 as a summon key is a convention.
+check("a bare F12 is allowed", accelerator(press("F12")), "F12");
+check("F12 with a modifier too", accelerator(press("F12", { ctrlKey: true })), "Control+F12");
+
+// Holding a modifier alone must not commit a half-finished combination.
+check("Control alone is not a hotkey", accelerator(press("ControlLeft", { ctrlKey: true })), null);
+check("Shift alone is not a hotkey", accelerator(press("ShiftRight", { shiftKey: true })), null);
+
+// code, not key: the binding has to survive a layout change, where the
+// key left of 1 is no longer called backquote.
+check(
+  "layout-independent (code wins over key)",
+  accelerator({ ...press("Backquote", { altKey: true }), key: "plusminus" }),
+  "Alt+Backquote"
+);
 
 if (failed) {
   console.log(`${failed} key test(s) failed`);

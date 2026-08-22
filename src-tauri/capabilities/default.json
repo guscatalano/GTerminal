@@ -13,6 +13,14 @@
     "core:window:allow-set-fullscreen",
     "core:window:allow-start-dragging",
     "core:window:allow-internal-toggle-maximize",
-    "core:window:allow-show"
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-is-visible",
+    "core:window:allow-is-focused",
+    "core:window:allow-unminimize",
+    "core:window:allow-is-minimized",
+    "core:window:allow-request-user-attention",
+    "global-shortcut:default"
   ]
 }
