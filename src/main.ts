@@ -3290,7 +3290,7 @@ function pasteClipboardInto(id: number) {
 }
 
 function makeShortcutHandler(getId: () => number) {
-  return (e: KeyboardEvent): boolean => {
+  const handle = (e: KeyboardEvent): boolean => {
     if (e.type !== "keydown") return true;
     // Arrange mode blurs the terminal, but a click back into one can
     // return focus — Escape must still leave the mode rather than reach
@@ -3431,6 +3431,16 @@ function makeShortcutHandler(getId: () => number) {
       }
     }
     return true;
+  };
+
+  return (e: KeyboardEvent): boolean => {
+    const pass = handle(e);
+    // xterm bails out of _keyDown the moment a custom handler returns
+    // false, *before* its own preventDefault — so the WebView2 browser
+    // accelerator still fires and Edge opens its find-on-page on top of
+    // ours. Anything we claim, we have to cancel ourselves.
+    if (!pass) e.preventDefault();
+    return pass;
   };
 }
 
