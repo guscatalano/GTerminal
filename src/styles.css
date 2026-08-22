@@ -1962,11 +1962,11 @@ input.set-control {
 
 /* ── find in terminal ────────────────────────────────────────────────── */
 
-/* Top-right of the terminal area, where every browser puts it. Anchored
-   to #main so the tab strip stays reachable above it. */
+/* Bottom-right of the terminal area: out of the way of the output you
+   are reading, and it never covers the tab strip. */
 #findbar {
   position: absolute;
-  top: 8px;
+  bottom: 12px;
   right: 16px;
   z-index: 60;
   display: flex;

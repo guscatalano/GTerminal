@@ -26,6 +26,11 @@ portable-pty = "0.9"
 tauri-plugin-dialog = "2.7.2"
 
 [target.'cfg(windows)'.dependencies]
+# Reaching WebView2's own settings, to turn Edge's accelerator keys off.
+# Pinned to what wry already links, so there is only one WebView2 binding
+# in the build.
+webview2-com = "0.38"
+windows = { version = "0.61", features = ["Win32_Foundation"] }
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_System_Diagnostics_ToolHelp",

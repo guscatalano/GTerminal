@@ -301,6 +301,26 @@ pub fn run() {
             // theme is applied. Backstop: if the frontend never boots (dead
             // dev server, JS error), reveal the window after 5s anyway.
             if let Some(win) = app.get_webview_window("main") {
+                // Turn off Edge's accelerator keys. WebView2 leaves them on
+                // by default, which in a terminal means Ctrl+F opens
+                // find-on-page over ours, Ctrl+P offers to print the app,
+                // and Ctrl+R / F5 reload it out from under live sessions.
+                // The frontend cancels these per-event too, but that only
+                // works where a handler of ours has focus — this closes the
+                // whole class regardless of focus.
+                #[cfg(windows)]
+                let _ = win.with_webview(|webview| unsafe {
+                    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
+                    use windows::core::Interface;
+                    if let Ok(settings) = webview
+                        .controller()
+                        .CoreWebView2()
+                        .and_then(|core| core.Settings())
+                        .and_then(|s| s.cast::<ICoreWebView2Settings3>())
+                    {
+                        let _ = settings.SetAreBrowserAcceleratorKeysEnabled(false);
+                    }
+                });
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_secs(5));
                     if !win.is_visible().unwrap_or(true) {
