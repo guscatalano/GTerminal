@@ -11,6 +11,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { routeCtrlKey, isBrowserAccelerator } from "./keys";
 import "@xterm/xterm/css/xterm.css";
 import "./styles.css";
 
@@ -3273,11 +3274,7 @@ function initFind() {
   window.addEventListener(
     "keydown",
     (e) => {
-      if (!e.ctrlKey || e.altKey) return;
-      const k = e.key.toUpperCase();
-      // F: our find bar. P: Edge's print dialog, which is meaningless
-      // here and steals the shell's previous-history key.
-      if (k === "F" || k === "P") e.preventDefault();
+      if (isBrowserAccelerator(e)) e.preventDefault();
     },
     true
   );
@@ -3382,40 +3379,21 @@ function makeShortcutHandler(getId: () => number) {
         return false;
       }
     }
-    // Ctrl+F finds, on the same terms as Ctrl+V below: everyone reaches
-    // for it, and the shells that want ^F (readline's forward-char, vim
-    // and less paging) are full-screen programs on the alternate buffer,
-    // where it still passes straight through.
-    if (
-      e.ctrlKey &&
-      !e.shiftKey &&
-      !e.altKey &&
-      e.key.toUpperCase() === "F" &&
-      effCtrlFFind()
-    ) {
-      const tab = tabs.get(getId());
-      if (tab && tab.term.buffer.active.type !== "alternate") {
+    // Unshifted Ctrl+F / Ctrl+V. The routing lives in keys.ts so it can
+    // be tested without a browser — see tests/keys.mjs for what each
+    // combination is supposed to do.
+    const tab = tabs.get(getId());
+    if (tab) {
+      const action = routeCtrlKey(e, {
+        alternate: tab.term.buffer.active.type === "alternate",
+        ctrlVPaste: effCtrlVPaste(),
+        ctrlFFind: effCtrlFFind(),
+      });
+      if (action === "find") {
         openFind();
         return false;
       }
-    }
-    // Ctrl+V pastes too, because almost no shell does it for us: bash
-    // binds it to quoted-insert, cmd ignores it, and PSReadLine only
-    // pastes in its Windows edit mode — so whether Ctrl+V worked used to
-    // depend on which shell the pane happened to be running.
-    //
-    // Full-screen programs keep it. On the alternate buffer Ctrl+V is
-    // vim's visual block and readline's quoted insert, and swallowing
-    // those would trade one broken key for another.
-    if (
-      e.ctrlKey &&
-      !e.shiftKey &&
-      !e.altKey &&
-      e.key.toUpperCase() === "V" &&
-      effCtrlVPaste()
-    ) {
-      const tab = tabs.get(getId());
-      if (tab && tab.term.buffer.active.type !== "alternate") {
+      if (action === "paste") {
         pasteClipboardInto(getId());
         return false;
       }
