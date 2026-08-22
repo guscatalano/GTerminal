@@ -63,7 +63,8 @@ function iconFor(running: string[]): string {
 
 // User config (%LOCALAPPDATA%\GTerminal\config.json), loaded at startup.
 // cursor_style: "bar" | "block" | "underline" (default bar, like Windows
-// Terminal); cursor_blink: boolean (default true).
+// Terminal); cursor_blink: boolean (default true); ctrl_v_paste: boolean
+// (default true — Ctrl+V pastes rather than reaching the shell).
 // A "new tab" preset: right-clicking the + button lists these. Unset
 // fields fall back to the regular defaults (default_shell, default_cwd,
 // automatic titles).
@@ -117,6 +118,7 @@ interface CustomTheme {
 interface AppConfig {
   cursor_style?: CursorStyle;
   cursor_blink?: boolean;
+  ctrl_v_paste?: boolean;
   grace_minutes?: number;
   theme?: string;
   font_family?: string;
@@ -2110,6 +2112,10 @@ function effCursorBlink(): boolean {
   return config.cursor_blink ?? true;
 }
 
+function effCtrlVPaste(): boolean {
+  return config.ctrl_v_paste ?? true;
+}
+
 let saveTimer: number | undefined;
 function saveConfig() {
   window.clearTimeout(saveTimer);
@@ -3166,6 +3172,19 @@ async function restoreLast() {
   if (detached.length) await createTab(detached[detached.length - 1].id);
 }
 
+/// Paste the system clipboard into a session, recording it in the
+/// clipboard history like every other paste path.
+function pasteClipboardInto(id: number) {
+  navigator.clipboard
+    .readText()
+    .then((text) => {
+      if (!text) return;
+      pushClip(text);
+      return invoke("write_session", { id, data: text });
+    })
+    .catch(() => {});
+}
+
 function makeShortcutHandler(getId: () => number) {
   return (e: KeyboardEvent): boolean => {
     if (e.type !== "keydown") return true;
@@ -3232,14 +3251,28 @@ function makeShortcutHandler(getId: () => number) {
         return false;
       }
       if (key === "V") {
-        navigator.clipboard
-          .readText()
-          .then((text) => {
-            if (!text) return;
-            pushClip(text);
-            return invoke("write_session", { id: getId(), data: text });
-          })
-          .catch(() => {});
+        pasteClipboardInto(getId());
+        return false;
+      }
+    }
+    // Ctrl+V pastes too, because almost no shell does it for us: bash
+    // binds it to quoted-insert, cmd ignores it, and PSReadLine only
+    // pastes in its Windows edit mode — so whether Ctrl+V worked used to
+    // depend on which shell the pane happened to be running.
+    //
+    // Full-screen programs keep it. On the alternate buffer Ctrl+V is
+    // vim's visual block and readline's quoted insert, and swallowing
+    // those would trade one broken key for another.
+    if (
+      e.ctrlKey &&
+      !e.shiftKey &&
+      !e.altKey &&
+      e.key.toUpperCase() === "V" &&
+      effCtrlVPaste()
+    ) {
+      const tab = tabs.get(getId());
+      if (tab && tab.term.buffer.active.type !== "alternate") {
+        pasteClipboardInto(getId());
         return false;
       }
     }
@@ -5478,6 +5511,14 @@ function buildSettingsPage() {
     "Whether the terminal cursor blinks.",
     mkSelect([["on", "On"], ["off", "Off"]], effCursorBlink() ? "on" : "off", (v) => {
       config.cursor_blink = v === "on";
+      changed();
+    })
+  );
+  settingRow(
+    "Ctrl+V pastes",
+    "Paste with Ctrl+V as well as Ctrl+Shift+V. Most shells never implement Ctrl+V themselves — bash reads it as quoted-insert, cmd ignores it, PowerShell only pastes in its Windows edit mode — so without this, whether Ctrl+V works depends on the shell. Full-screen programs still receive the key, where it means vim's visual block.",
+    mkSelect([["on", "On"], ["off", "Off"]], effCtrlVPaste() ? "on" : "off", (v) => {
+      config.ctrl_v_paste = v === "on";
       changed();
     })
   );
