@@ -1011,6 +1011,23 @@ fn start_session(
         }
         _ => {}
     }
+    // PSReadLine's bell is the beeping people actually hear: it dings on a
+    // tab-completion with no match, an unbound key, backspace at the start
+    // of a line. It calls Beep() directly, so the sound never passes
+    // through this pty and the terminal cannot intercept it — the only
+    // place to turn it off is in the shell, here, per session. The user's
+    // own profile is left alone either way.
+    let bell = read_config()
+        .get("bell")
+        .and_then(|v| v.as_str())
+        .unwrap_or("audible")
+        .to_string();
+    if bell == "none" || bell == "visual" {
+        let style = if bell == "visual" { "Visual" } else { "None" };
+        ps_init.push_str("; try { Set-PSReadLineOption -BellStyle ");
+        ps_init.push_str(style);
+        ps_init.push_str(" -ErrorAction Stop } catch {}");
+    }
     let build_ps = |exe: &str| {
         let mut cmd = CommandBuilder::new(exe);
         cmd.args(["-NoLogo", "-NoExit", "-Command", &ps_init]);

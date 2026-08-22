@@ -1960,6 +1960,27 @@ input.set-control {
   border-radius: 0;
 }
 
+/* Visual bell: a brief wash over the pane that rang, so a bell in a
+   background pane is still attributable to it. */
+.pane.belled::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  animation: bell-flash 400ms ease-out;
+}
+
+@keyframes bell-flash {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
 /* ── summon hotkey picker ────────────────────────────────────────────── */
 
 .hotkey-picker {

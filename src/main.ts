@@ -129,6 +129,7 @@ interface AppConfig {
   ctrl_f_find?: boolean;
   clickable_links?: boolean;
   summon_hotkey?: string;
+  bell?: string;
   grace_minutes?: number;
   theme?: string;
   font_family?: string;
@@ -3412,16 +3413,29 @@ function initFind() {
   document.getElementById("find-close")!.addEventListener("click", closeFind);
 }
 
-/// Paste the system clipboard into a session, recording it in the
-/// clipboard history like every other paste path.
+/// The one way text gets pasted into a session.
+///
+/// Always via term.paste() rather than straight down the pipe, because
+/// xterm does two things there that matter. It wraps the text in
+/// bracketed-paste markers when the shell has asked for them, so the
+/// shell takes the whole clipboard as one pasted block — without that it
+/// reads the text as typing, which runs every line of a multi-line paste
+/// the moment it arrives and lets a pasted tab trigger completion, whose
+/// no-match beep is where the mystery beeping came from. It also folds
+/// CRLF to CR, so Windows line endings do not arrive as two Enters.
+function pasteText(id: number, text: string) {
+  if (!text) return;
+  pushClip(text);
+  const tab = tabs.get(id);
+  if (tab) tab.term.paste(text);
+  else invoke("write_session", { id, data: text }).catch(() => {});
+}
+
+/// Paste the system clipboard into a session.
 function pasteClipboardInto(id: number) {
   navigator.clipboard
     .readText()
-    .then((text) => {
-      if (!text) return;
-      pushClip(text);
-      return invoke("write_session", { id, data: text });
-    })
+    .then((text) => pasteText(id, text))
     .catch(() => {});
 }
 
@@ -3678,7 +3692,7 @@ function openClipViewer(id: number, term: Terminal) {
     };
     acts.append(
       mkBtn("Paste", () => {
-        invoke("write_session", { id, data: text }).catch(() => {});
+        pasteText(id, text);
         closeClipViewer();
         term.focus();
       }),
@@ -3944,11 +3958,7 @@ async function createTab(
 
   // Right-click in the terminal opens a copy/paste menu. (The WebView2
   // default context menu is suppressed globally.)
-  const paste = () =>
-    navigator.clipboard
-      .readText()
-      .then((text) => text && invoke("write_session", { id, data: text }))
-      .catch(() => {});
+  const paste = () => pasteClipboardInto(id);
   pane.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     const x = e.clientX;
@@ -3980,8 +3990,7 @@ async function createTab(
       // Focus returns to the terminal after every menu action so typing
       // (especially right after a paste) lands where it belongs.
       const writePaste = (text: string) => {
-        pushClip(text);
-        invoke("write_session", { id, data: text }).catch(() => {});
+        pasteText(id, text);
         term.focus();
       };
       if (current) {
@@ -4032,6 +4041,16 @@ async function createTab(
 
   term.onData((data) => {
     invoke("write_session", { id, data }).catch(() => {});
+  });
+  // A BEL in the output stream — a different source from PSReadLine's own
+  // beep, which never reaches us. Flash the pane instead of ignoring it,
+  // unless the bell is meant to be heard and not seen.
+  term.onBell(() => {
+    if ((config.bell ?? "audible") === "audible") return;
+    pane.classList.remove("belled");
+    void pane.offsetWidth; // restart the animation on repeat bells
+    pane.classList.add("belled");
+    window.setTimeout(() => pane.classList.remove("belled"), 400);
   });
   term.onTitleChange((title) => {
     if (title.trim()) {
@@ -5777,6 +5796,18 @@ function buildSettingsPage() {
       config.cursor_blink = v === "on";
       changed();
     })
+  );
+  settingRow(
+    "Terminal bell",
+    "The beeping. Most of it is PowerShell's own bell — it rings on a tab-completion with no match, an unbound key, backspace at the start of a line — and it is played directly by the shell, so only the shell can silence it. This sets that per session without touching your PowerShell profile, and applies to sessions started after the change. Visual flashes instead of beeping.",
+    mkSelect(
+      [["audible", "Beep"], ["visual", "Flash"], ["none", "Silent"]],
+      config.bell ?? "audible",
+      (v) => {
+        config.bell = v;
+        changed();
+      }
+    )
   );
   settingRow(
     "Summon hotkey",
