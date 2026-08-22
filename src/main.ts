@@ -3261,7 +3261,26 @@ function initFind() {
     e.stopPropagation(); // never let the terminal shortcuts see this
     if (e.key === "Escape") closeFind();
     if (e.key === "Enter") runFind(false, e.shiftKey);
+    // Find again while the bar is already up: reselect the query, the
+    // way a browser does, rather than doing nothing.
+    if (e.ctrlKey && !e.altKey && e.key.toUpperCase() === "F") findInput.select();
   });
+  // WebView2 keeps Edge's accelerator keys, and they fire wherever focus
+  // happens to be — the terminal's handler only guards the terminal. Any
+  // we have our own answer for has to be cancelled at the document, in
+  // the capture phase, before focus can decide the outcome. This does not
+  // stop propagation, so our own handlers still run.
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (!e.ctrlKey || e.altKey) return;
+      const k = e.key.toUpperCase();
+      // F: our find bar. P: Edge's print dialog, which is meaningless
+      // here and steals the shell's previous-history key.
+      if (k === "F" || k === "P") e.preventDefault();
+    },
+    true
+  );
   const toggle = (btn: HTMLElement, get: () => boolean, set: (v: boolean) => void) =>
     btn.addEventListener("click", () => {
       set(!get());
