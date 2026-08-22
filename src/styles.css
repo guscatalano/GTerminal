@@ -1536,6 +1536,9 @@ input.set-control {
 #statusbar {
   display: none;
   flex: none;
+  /* Its own stacking context, so it is never painted under a pane. */
+  position: relative;
+  z-index: 3;
   align-items: center;
   gap: 2px;
   height: 22px;
@@ -1804,6 +1807,11 @@ input.set-control {
   min-width: 0;
   min-height: 0;
   padding: 8px 4px 4px 10px;
+  /* A row is rows × cell height, and cell height is rounded — with a
+     fractional line-height the last row can end up a pixel or two taller
+     than the space it was fitted to. Nothing between here and #app clips,
+     so that remainder used to paint over the status bar. */
+  overflow: hidden;
 }
 
 /* Focus ring, only drawn when a tab holds more than one pane. */
