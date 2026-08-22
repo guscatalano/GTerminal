@@ -1,3 +1,12 @@
+/* The browser's own [hidden] rule is a UA style, and *any* author display
+   outranks it — so every element given a display here silently ignores
+   the attribute. That broke settings search: rows are display:flex, so
+   `el.hidden = true` did nothing and only the section titles disappeared.
+   Anything that sets .hidden in JS depends on this line. */
+[hidden] {
+  display: none !important;
+}
+
 /* Theme variables: JS sets --bg/--text/--tint/--accent/--danger per theme;
    everything else derives via color-mix so the whole chrome follows. */
 :root {
@@ -2032,10 +2041,6 @@ input.set-control {
   backdrop-filter: blur(10px);
   border: 1px solid var(--border2);
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
-}
-
-#findbar[hidden] {
-  display: none;
 }
 
 #find-input {

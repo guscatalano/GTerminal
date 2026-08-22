@@ -4046,7 +4046,7 @@ async function createTab(
   // beep, which never reaches us. Flash the pane instead of ignoring it,
   // unless the bell is meant to be heard and not seen.
   term.onBell(() => {
-    if ((config.bell ?? "audible") === "audible") return;
+    if ((config.bell ?? "none") !== "visual") return;
     pane.classList.remove("belled");
     void pane.offsetWidth; // restart the animation on repeat bells
     pane.classList.add("belled");
@@ -5799,10 +5799,10 @@ function buildSettingsPage() {
   );
   settingRow(
     "Terminal bell",
-    "The beeping. Most of it is PowerShell's own bell — it rings on a tab-completion with no match, an unbound key, backspace at the start of a line — and it is played directly by the shell, so only the shell can silence it. This sets that per session without touching your PowerShell profile, and applies to sessions started after the change. Visual flashes instead of beeping.",
+    "The beeping, off by default. Most of it is PowerShell's own bell — it rings on a tab-completion with no match, an unbound key, backspace at the start of a line — and the shell plays it directly, so only the shell can silence it. This sets that per session without touching your PowerShell profile, and applies to sessions started after the change. Flash washes the pane that rang instead of making a sound.",
     mkSelect(
       [["audible", "Beep"], ["visual", "Flash"], ["none", "Silent"]],
-      config.bell ?? "audible",
+      config.bell ?? "none",
       (v) => {
         config.bell = v;
         changed();

@@ -1017,10 +1017,12 @@ fn start_session(
     // through this pty and the terminal cannot intercept it — the only
     // place to turn it off is in the shell, here, per session. The user's
     // own profile is left alone either way.
+    // Silent by default: the bell fires on ordinary mistypes, so out of the
+    // box it is noise rather than signal.
     let bell = read_config()
         .get("bell")
         .and_then(|v| v.as_str())
-        .unwrap_or("audible")
+        .unwrap_or("none")
         .to_string();
     if bell == "none" || bell == "visual" {
         let style = if bell == "visual" { "Visual" } else { "None" };
