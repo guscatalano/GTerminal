@@ -1960,6 +1960,77 @@ input.set-control {
   border-radius: 0;
 }
 
+/* ── find in terminal ────────────────────────────────────────────────── */
+
+/* Top-right of the terminal area, where every browser puts it. Anchored
+   to #main so the tab strip stays reachable above it. */
+#findbar {
+  position: absolute;
+  top: 8px;
+  right: 16px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 6px;
+  border-radius: 8px;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border2);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
+}
+
+#findbar[hidden] {
+  display: none;
+}
+
+#find-input {
+  width: 190px;
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--border2);
+  border-radius: 5px;
+  padding: 4px 7px;
+  font: 12px "Segoe UI", sans-serif;
+  outline: none;
+}
+
+#find-input:focus {
+  border-color: var(--accent);
+}
+
+#find-count {
+  min-width: 58px;
+  padding: 0 4px;
+  text-align: center;
+  font: 11px "Segoe UI", sans-serif;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+#findbar button {
+  border: 1px solid transparent;
+  background: none;
+  color: var(--muted);
+  font: 11px "Segoe UI", sans-serif;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#findbar button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* Case / regex are sticky toggles, so they show their state. */
+#findbar button.on {
+  color: var(--text);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
 /* ── arrange mode ────────────────────────────────────────────────────── */
 
 /* Terminals recede so the boxes read as the subject, and stop taking the

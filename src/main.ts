@@ -9,6 +9,8 @@ import type { ITheme } from "@xterm/xterm";
 import Anthropic from "@anthropic-ai/sdk";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
+import { SearchAddon } from "@xterm/addon-search";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import "./styles.css";
 
@@ -22,6 +24,7 @@ interface Tab {
   icon: HTMLElement;
   shellB: HTMLElement;
   webgl?: WebglAddon;
+  search: SearchAddon;
 }
 
 interface SessionInfo {
@@ -119,6 +122,7 @@ interface AppConfig {
   cursor_style?: CursorStyle;
   cursor_blink?: boolean;
   ctrl_v_paste?: boolean;
+  clickable_links?: boolean;
   grace_minutes?: number;
   theme?: string;
   font_family?: string;
@@ -3172,6 +3176,99 @@ async function restoreLast() {
   if (detached.length) await createTab(detached[detached.length - 1].id);
 }
 
+// ── find in terminal ────────────────────────────────────────────────────
+
+const findbar = document.getElementById("findbar")!;
+const findInput = document.getElementById("find-input") as HTMLInputElement;
+const findCount = document.getElementById("find-count")!;
+const findCaseBtn = document.getElementById("find-case")!;
+const findRegexBtn = document.getElementById("find-regex")!;
+let findCase = false;
+let findRegex = false;
+/// The pane being searched. Held so that closing the bar clears the
+/// highlights from the pane they were drawn in, even if focus has since
+/// moved somewhere else.
+let findId: number | undefined;
+
+function findOptions() {
+  return {
+    caseSensitive: findCase,
+    regex: findRegex,
+    decorations: {
+      matchBackground: "#ffd54f55",
+      matchBorder: "#ffd54f",
+      matchOverviewRuler: "#ffd54f",
+      activeMatchBackground: "#ff9800aa",
+      activeMatchBorder: "#ff9800",
+      activeMatchColorOverviewRuler: "#ff9800",
+    },
+  };
+}
+
+function openFind() {
+  const id = activeId;
+  if (id === null || !tabs.has(id)) return;
+  findId = id;
+  findbar.hidden = false;
+  const sel = tabs.get(id)?.term.getSelection();
+  // A selection is almost always what you meant to search for.
+  if (sel && !sel.includes("\n")) findInput.value = sel;
+  findInput.focus();
+  findInput.select();
+  runFind(true);
+}
+
+function closeFind() {
+  if (findbar.hidden) return;
+  findbar.hidden = true;
+  if (findId !== undefined) tabs.get(findId)?.search.clearDecorations();
+  findCount.textContent = "";
+  const back = findId;
+  findId = undefined;
+  if (back !== undefined) tabs.get(back)?.term.focus();
+}
+
+/// `settle` re-runs from the top rather than stepping — used while typing
+/// so the first match is found again on every keystroke.
+function runFind(settle = false, back = false) {
+  if (findId === undefined) return;
+  const tab = tabs.get(findId);
+  const q = findInput.value;
+  if (!tab || !q) {
+    tab?.search.clearDecorations();
+    findCount.textContent = "";
+    return;
+  }
+  try {
+    if (back) tab.search.findPrevious(q, findOptions());
+    else tab.search.findNext(q, { ...findOptions(), incremental: settle });
+  } catch {
+    // An unfinished regex ("[") throws; leave the previous state alone.
+    findCount.textContent = "bad pattern";
+  }
+}
+
+function initFind() {
+  findInput.addEventListener("input", () => runFind(true));
+  findInput.addEventListener("keydown", (e) => {
+    e.stopPropagation(); // never let the terminal shortcuts see this
+    if (e.key === "Escape") closeFind();
+    if (e.key === "Enter") runFind(false, e.shiftKey);
+  });
+  const toggle = (btn: HTMLElement, get: () => boolean, set: (v: boolean) => void) =>
+    btn.addEventListener("click", () => {
+      set(!get());
+      btn.classList.toggle("on", get());
+      findInput.focus();
+      runFind(true);
+    });
+  toggle(findCaseBtn, () => findCase, (v) => (findCase = v));
+  toggle(findRegexBtn, () => findRegex, (v) => (findRegex = v));
+  document.getElementById("find-prev")!.addEventListener("click", () => runFind(false, true));
+  document.getElementById("find-next")!.addEventListener("click", () => runFind(false));
+  document.getElementById("find-close")!.addEventListener("click", closeFind);
+}
+
 /// Paste the system clipboard into a session, recording it in the
 /// clipboard history like every other paste path.
 function pasteClipboardInto(id: number) {
@@ -3219,6 +3316,10 @@ function makeShortcutHandler(getId: () => number) {
       }
       if (key === "S") {
         toggleStatusBar();
+        return false;
+      }
+      if (key === "F") {
+        openFind();
         return false;
       }
       if (key === "D") {
@@ -3503,6 +3604,18 @@ async function createTab(
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
+  const search = new SearchAddon();
+  term.loadAddon(search);
+  search.onDidChangeResults(({ resultIndex, resultCount }) => {
+    if (findId !== id) return;
+    findCount.textContent =
+      resultCount === 0 ? "no results" : `${resultIndex + 1}/${resultCount}`;
+  });
+  // Links open in the real browser rather than navigating the webview,
+  // which would replace the whole app with the page.
+  if (config.clickable_links !== false) {
+    term.loadAddon(new WebLinksAddon((_e, uri) => void openUrl(uri).catch(() => {})));
+  }
   term.open(paneBody);
   // The WebGL renderer can't composite transparency over a decorative
   // background; those tabs use the DOM renderer instead.
@@ -3592,7 +3705,7 @@ async function createTab(
     tabFocus.set(id, id);
   }
 
-  const tab: Tab = { id, term, fit, pane, button, label, icon, shellB, webgl };
+  const tab: Tab = { id, term, fit, pane, button, label, icon, shellB, webgl, search };
   tabs.set(id, tab);
 
   button.addEventListener("mousedown", (e) => {
@@ -5515,6 +5628,14 @@ function buildSettingsPage() {
     })
   );
   settingRow(
+    "Clickable links",
+    "Ctrl+click URLs in terminal output to open them in your browser. Takes effect for sessions opened after the change.",
+    mkSelect([["on", "On"], ["off", "Off"]], config.clickable_links !== false ? "on" : "off", (v) => {
+      config.clickable_links = v === "on";
+      changed();
+    })
+  );
+  settingRow(
     "Ctrl+V pastes",
     "Paste with Ctrl+V as well as Ctrl+Shift+V. Most shells never implement Ctrl+V themselves — bash reads it as quoted-insert, cmd ignores it, PowerShell only pastes in its Windows edit mode — so without this, whether Ctrl+V works depends on the shell. Full-screen programs still receive the key, where it means vim's visual block.",
     mkSelect([["on", "On"], ["off", "Off"]], effCtrlVPaste() ? "on" : "off", (v) => {
@@ -7124,6 +7245,7 @@ async function main() {
   // devices", "Web capture", etc.) — the app provides its own menus.
   window.addEventListener("contextmenu", (e) => e.preventDefault());
   document.getElementById("settings-close")!.addEventListener("click", closeSettings);
+  initFind();
   window.addEventListener("keydown", (e) => {
     // Keystrokes inside a terminal are handled by that terminal's own
     // shortcut handler; letting them also reach this global handler
@@ -7132,6 +7254,11 @@ async function main() {
     if (e.key === "F11") {
       e.preventDefault();
       void toggleZen();
+      return;
+    }
+    if (e.key === "Escape" && !findbar.hidden) {
+      e.preventDefault();
+      closeFind();
       return;
     }
     if (e.key === "Escape" && arrangeKey !== undefined) {
@@ -7192,6 +7319,10 @@ async function main() {
     if (e.ctrlKey && e.shiftKey && e.key.toUpperCase() === "S") {
       e.preventDefault();
       toggleStatusBar();
+    }
+    if (e.ctrlKey && e.shiftKey && e.key.toUpperCase() === "F") {
+      e.preventDefault();
+      openFind();
     }
     // Arrange mode blurs the terminal, so its own toggle has to work from
     // out here too — otherwise the key that opens it can't close it.
