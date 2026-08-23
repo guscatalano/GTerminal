@@ -1,9 +1,14 @@
 # Visual tests: drive a real window through things you can only judge by
 # looking, and record each scene as a video.
 #
-#   npm run test:visual              -> docs/visual/*.avi + *.gif
-#   npm run test:visual -- -Only cmd -> just that scene
-#   npm run test:visual -- -Yes      -> skip the countdown (unattended)
+#   npm run test:visual               -> docs/visual/*.avi + *.gif
+#   npm run test:visual -- -Only cmd  -> just that scene
+#   npm run test:visual -- -Yes       -> skip the countdown (unattended)
+#   npm run test:visual -- -Force     -> run even if the machine is in use
+#   npm run test:visual -- -Exe path  -> a binary built somewhere else
+#
+# It refuses to start if the keyboard or mouse was touched in the last two
+# minutes, because it types into whatever is in front.
 #
 # Not part of `npm test`: it opens windows, types into them, and takes a
 # couple of minutes. It is meant to be watched.
@@ -14,16 +19,65 @@
 # clipboard is saved and put back, since that one is genuinely shared.
 param(
   [switch]$Yes,
-  [string]$Only = ""
+  # Run even though someone is using the machine. The scenes are still
+  # going to type into their work; this only says you know that.
+  [switch]$Force,
+  [string]$Only = "",
+  [string]$Exe = ""
 )
 $ErrorActionPreference = "Stop"
 $repo = Split-Path $PSScriptRoot -Parent
-$exe = Join-Path $repo "src-tauri\target\debug\gterminal.exe"
+# -Exe runs a binary built somewhere else. Needed when a copy of the app
+# is already running from target\debug: Windows locks the file, so cargo
+# cannot replace it, and you would silently keep testing the old one.
+$exe = if ($Exe) { $Exe } else { Join-Path $repo "src-tauri\target\debug\gterminal.exe" }
 if (-not (Test-Path $exe)) { Write-Error "build first: cargo build in src-tauri" }
+
+# Tauri bakes dist\ into the exe when cargo compiles, not when vite
+# builds. An exe older than the bundle is running last week's frontend,
+# and every assertion about the UI is then meaningless — this cost a
+# whole mutation check that "passed" against code it never contained.
+$bundle = Get-ChildItem (Join-Path $repo "dist") -Filter *.js -Recurse -ErrorAction SilentlyContinue |
+  Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if ($bundle -and $bundle.LastWriteTime -gt (Get-Item $exe).LastWriteTime) {
+  Write-Host "WARNING: $exe predates dist\$($bundle.Name) — run cargo build, or you are testing stale UI code." -ForegroundColor Yellow
+}
 
 $failures = @()
 function Pass { param($n) Write-Host "PASS $n" -ForegroundColor Green }
 function Fail { param($n, $d) $script:failures += "${n}: $d"; Write-Host "FAIL ${n}: $d" -ForegroundColor Red }
+
+# A countdown only protects someone who is watching this terminal. Ask
+# Windows when the keyboard or mouse was last touched instead: if the
+# answer is "just now", someone is working, and taking the foreground for
+# two minutes would type test commands into whatever they have open. -Yes
+# means unattended, which is a promise about the runner, not about the
+# machine — so it does not get to skip this. -Force does.
+$idleSig = @'
+[DllImport("user32.dll")] public static extern bool GetLastInputInfo(ref LASTINPUTINFO p);
+public struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
+'@
+$Idle = Add-Type -MemberDefinition $idleSig -Name Idle -Namespace GTerm -PassThru |
+  Where-Object { $_.Name -eq "Idle" }
+function Idle-Seconds {
+  $i = New-Object 'GTerm.Idle+LASTINPUTINFO'
+  $i.cbSize = 8
+  [void]$Idle::GetLastInputInfo([ref]$i)
+  [int](([Environment]::TickCount - $i.dwTime) / 1000)
+}
+$IDLE_REQUIRED = 120
+if (-not $Force) {
+  $idle = Idle-Seconds
+  if ($idle -lt $IDLE_REQUIRED) {
+    Write-Host ""
+    Write-Host "  Not running: the keyboard or mouse was used $idle second(s) ago." -ForegroundColor Yellow
+    Write-Host "  This test takes over the foreground and types for a couple of" -ForegroundColor Yellow
+    Write-Host "  minutes; anything you are working in would receive it." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  Run it when the machine is free, or pass -Force to override." -ForegroundColor Yellow
+    exit 2
+  }
+}
 
 # This test takes the foreground and types into whatever has focus. If
 # someone is using the machine, their typing lands in the recording and
@@ -51,13 +105,15 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
     Write-Host ""
     Write-Host "── scene: $s ──" -ForegroundColor Cyan
-    & pwsh -NoProfile -File $PSCommandPath -Yes -Only $s
+    # -Force on the child: the idle check already ran here, and by now the
+    # only thing touching the keyboard is this test.
+    & pwsh -NoProfile -File $PSCommandPath -Yes -Force -Only $s -Exe $exe
     if ($LASTEXITCODE -ne 0) { $bad++ }
   }
   Write-Host ""
@@ -128,6 +184,19 @@ function Release-Modifiers {
 # SetForegroundWindow they go nowhere and the scene records an untouched
 # prompt. A click in the middle of the terminal is what actually puts
 # focus where the keys are read.
+# A click at a point inside the window, in window coordinates.
+function Click {
+  param($hwnd, $x, $y)
+  $r = New-Object 'GTerm.Vis+RECT'
+  [void]$U::GetWindowRect($hwnd, [ref]$r)
+  [void]$U::SetCursorPos(($r.L + $x), ($r.T + $y))
+  Start-Sleep -Milliseconds 120
+  $U::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+  Start-Sleep -Milliseconds 50
+  $U::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+  Start-Sleep -Milliseconds 350
+}
+
 function Focus-Pane {
   param($hwnd)
   [void]$U::SetForegroundWindow($hwnd)
@@ -174,6 +243,14 @@ if (Test-Path $pidFile) {
   Start-Sleep -Seconds 1
 }
 $env:LOCALAPPDATA = $scratch
+# Redirecting LOCALAPPDATA moves the daemon, sessions and config, but not
+# the WebView2 store: Tauri asks the OS for the known folder, so
+# localStorage stayed in the real %LOCALAPPDATA%\com.gus.gterminal — every
+# run reading and writing the sidebar state, tab widths and badges of the
+# app you actually use. This variable is read by the WebView2 loader
+# itself and does move it. It also makes runs deterministic: scenes now
+# start from a known UI state instead of inheriting the last run's.
+$env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $scratch "webview2"
 
 $savedClipboard = try { Get-Clipboard -Raw } catch { "" }
 $RECW = 1280; $RECH = 800
@@ -183,6 +260,11 @@ New-Item -ItemType Directory -Force $outDir | Out-Null
 function Start-App {
   param([string]$config)
   Remove-Item "$scratch\GTerminal" -Recurse -Force -ErrorAction SilentlyContinue
+  # The WebView2 store goes too, so every scene starts from the same UI
+  # state. Without this a scene that toggles the sidebar leaves it on for
+  # the next run, and a coordinate that worked yesterday clicks into the
+  # terminal today.
+  Remove-Item $env:WEBVIEW2_USER_DATA_FOLDER -Recurse -Force -ErrorAction SilentlyContinue
   New-Item -ItemType Directory -Force "$scratch\GTerminal" | Out-Null
   Set-Content "$scratch\GTerminal\config.json" $config
   $app = Start-Process -FilePath $exe -PassThru
@@ -190,7 +272,14 @@ function Start-App {
   foreach ($i in 1..60) {
     Start-Sleep -Milliseconds 500
     $app.Refresh()
-    if ($app.MainWindowHandle -ne 0) { $hwnd = $app.MainWindowHandle; break }
+    # A handle can exist before the window has been sized — on the first
+    # run against a fresh WebView2 store that window is briefly 16x16, and
+    # anything clicked by coordinate then lands nowhere.
+    if ($app.MainWindowHandle -ne 0) {
+      $probe = New-Object 'GTerm.Vis+RECT'
+      [void]$U::GetWindowRect($app.MainWindowHandle, [ref]$probe)
+      if (($probe.R - $probe.L) -gt 200) { $hwnd = $app.MainWindowHandle; break }
+    }
   }
   if ($hwnd -eq [IntPtr]::Zero) { throw "the window never appeared" }
   # Find the daemon by asking which process is listening on the port it
@@ -335,6 +424,127 @@ if (-not $Only -or $Only -eq "cmd") {
   if ($U::IsWindowVisible($ctx.Hwnd)) { Pass "cmd scene: the window came through it" }
   else { Fail "cmd" "the window did not survive the scene" }
   Stop-App $ctx
+}
+
+# ══ scene: switching tabs ══════════════════════════════════════════════
+# Clicking a tab and typing straight away used to drop the first
+# character: the browser focuses the clicked element after setActive has
+# already focused the terminal, so the terminal lost focus for a frame.
+# Asserted against the transcript rather than the screen — what reached
+# the shell is the question, and a screenshot cannot answer it.
+if (-not $Only -or $Only -eq "switch") {
+  $ctx = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7}"
+  $sh = $ctx.Hwnd
+  Record-Scene "switch" 42 $ctx {
+    Run-Cmd 'echo "first tab"' 2
+    Key 0x54 @([byte]$VK_CTRL, [byte]$VK_SHIFT)    # Ctrl+Shift+T
+    Start-Sleep -Seconds 5
+    Run-Cmd 'echo "second tab"' 2
+    # Back to the first tab by clicking it, then type at once. The strip
+    # runs along the top with the sidebar off, so the first tab sits just
+    # right of the toolbar buttons.
+    Click ($sh) 120 33
+    Send-Text "echo ZZTOP"
+    Key $VK_RETURN
+    Start-Sleep -Seconds 3
+    # And with the keyboard, which never had the problem.
+    Key 0x09 @([byte]$VK_CTRL)                     # Ctrl+Tab
+    Send-Text "echo YYTOP"
+    Key $VK_RETURN
+    Start-Sleep -Seconds 3
+    # The sidebar is where the lost keystroke was actually reported: its
+    # rows are plain divs, and the tab bar is display:none while it is on,
+    # so this is a different click path from the one above, not a repeat.
+    Key 0x42 @([byte]$VK_CTRL, [byte]$VK_SHIFT)    # Ctrl+Shift+B
+    Start-Sleep -Seconds 2
+    Click ($sh) 100 47                             # first row, on its label
+    Send-Text "echo XXTOP"
+    Key $VK_RETURN
+    Start-Sleep -Seconds 3
+  }
+  # The transcripts are the evidence — what reached the shell, not what
+  # was drawn. Each session has its own, so the marker landing in the
+  # *first* tab's transcript also proves the click switched tabs at all;
+  # a click that missed would leave it in the second tab's, and a test
+  # that only searched every file would pass either way.
+  $logs = @(Get-ChildItem "$scratch\GTerminal\history" -Filter *.log -ErrorAction SilentlyContinue)
+  $texts = @{}
+  foreach ($l in $logs) { $texts[$l.FullName] = (Get-Content $l.FullName -Raw) }
+  # Which marker landed in which transcript, so a failure says where the
+  # keystrokes went rather than only that they went missing.
+  foreach ($k in $texts.Keys) {
+    $marks = @("first tab", "second tab", "ZZTOP", "ZTOP", "YYTOP", "YTOP", "XXTOP", "XTOP") |
+      Where-Object { $texts[$k] -match [regex]::Escape($_) }
+    Write-Host ("  transcript {0}: {1}" -f (Split-Path $k -Leaf), ($marks -join ", ")) -ForegroundColor DarkGray
+  }
+  $firstTab = $texts.Keys | Where-Object { $texts[$_] -match "first tab" } | Select-Object -First 1
+  if (-not $firstTab) {
+    Fail "switch" "no transcript for the first tab — the scene did not run as expected"
+  } else {
+    $t = $texts[$firstTab]
+    if ($t -match "ZZTOP") { Pass "the first keystroke survives a click-to-switch" }
+    elseif ($t -match "ZTOP") { Fail "switch-click" "the leading Z was dropped after clicking the tab" }
+    else { Fail "switch-click" "the marker never reached the tab that was clicked" }
+    # Ctrl+Tab moved on to the other tab, so its marker belongs there.
+    $secondTab = $texts.Keys | Where-Object { $texts[$_] -match "second tab" } | Select-Object -First 1
+    $t2 = if ($secondTab) { $texts[$secondTab] } else { "" }
+    if ($t2 -match "YYTOP") { Pass "and survives Ctrl+Tab" }
+    elseif ($t2 -match "YTOP") { Fail "switch-key" "the leading Y was dropped after Ctrl+Tab" }
+    else { Fail "switch-key" "the Ctrl+Tab marker never arrived" }
+    # The sidebar click sent focus back to the first tab, so re-read it.
+    $t3 = Get-Content $firstTab -Raw
+    if ($t3 -match "XXTOP") { Pass "and survives a click on a sidebar row" }
+    elseif ($t3 -match "XTOP") { Fail "switch-side" "the leading X was dropped after clicking the sidebar" }
+    else { Fail "switch-side" "the sidebar marker never reached the row that was clicked" }
+  }
+  Stop-App $ctx
+}
+
+# ══ scene: the restore prompt ══════════════════════════════════════════
+# Past a few sessions, start-up asks which to bring back. Seeded by
+# making sessions in the scratch daemon before the window ever opens.
+if (-not $Only -or $Only -eq "restore") {
+  Remove-Item "$scratch\GTerminal" -Recurse -Force -ErrorAction SilentlyContinue
+  New-Item -ItemType Directory -Force "$scratch\GTerminal" | Out-Null
+  Set-Content "$scratch\GTerminal\config.json" "{$baseCfg,`"restore_prompt`":true,`"restore_prompt_at`":3}"
+  $seedDaemon = Start-Process -FilePath $exe -ArgumentList "--daemon" -WindowStyle Hidden -PassThru
+  Start-Sleep -Seconds 2
+  $seedPort = [int](Get-Content "$scratch\GTerminal\daemon.port").Trim()
+  foreach ($i in 1..6) {
+    $c = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $seedPort)
+    $w = [System.IO.StreamWriter]::new($c.GetStream()); $w.NewLine = "`n"; $w.AutoFlush = $true
+    $rd = [System.IO.StreamReader]::new($c.GetStream())
+    $w.WriteLine('{"cmd":"create","cols":100,"rows":30}')
+    $null = $rd.ReadLine(); $c.Close()
+  }
+  # Start-App would wipe the scratch config and the sessions with it, so
+  # this scene launches the app itself.
+  $app2 = Start-Process -FilePath $exe -PassThru
+  $hw = [IntPtr]::Zero
+  foreach ($i in 1..60) {
+    Start-Sleep -Milliseconds 400
+    $app2.Refresh()
+    if ($app2.MainWindowHandle -ne 0) { $hw = $app2.MainWindowHandle; break }
+  }
+  if ($hw -eq [IntPtr]::Zero) { throw "the window never appeared" }
+  Set-Content $pidFile -Value (@($app2.Id, $seedDaemon.Id))
+  [void]$U::SetWindowPos($hw, [IntPtr]::Zero, 100, 60, $RECW, $RECH, 0x0004)
+  Start-Sleep -Seconds 2
+  [void]$U::SetForegroundWindow($hw)
+  $ctx2 = [pscustomobject]@{ App = $app2; Hwnd = $hw; Pids = @($app2.Id, $seedDaemon.Id) }
+  Record-Scene "restore" 24 $ctx2 {
+    Start-Sleep -Seconds 3          # dwell on the question: it is the point
+    # Untick two, then restore the rest.
+    Click $hw 288 257
+    Start-Sleep -Milliseconds 500
+    Click $hw 288 304
+    Start-Sleep -Seconds 2
+    Click $hw 813 544              # Restore N
+    Start-Sleep -Seconds 8         # the spinner, then the tabs
+  }
+  if ($U::IsWindowVisible($hw)) { Pass "restore scene: the window came through it" }
+  else { Fail "restore" "the window did not survive the scene" }
+  Stop-App $ctx2
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════
