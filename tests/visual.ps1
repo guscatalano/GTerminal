@@ -193,11 +193,22 @@ function Start-App {
     if ($app.MainWindowHandle -ne 0) { $hwnd = $app.MainWindowHandle; break }
   }
   if ($hwnd -eq [IntPtr]::Zero) { throw "the window never appeared" }
-  $ours = @($app.Id) + @(
-    Get-Process gterminal -ErrorAction SilentlyContinue |
-      Where-Object { $_.Id -ne $app.Id -and $_.StartTime -ge $app.StartTime.AddSeconds(-2) } |
-      Select-Object -ExpandProperty Id
-  )
+  # Find the daemon by asking which process is listening on the port it
+  # wrote, not by guessing from start times. The daemon can come up a
+  # second or two after the app, so a time window misses it — and a
+  # missed daemon is never cleaned up, which is how a few dozen of them
+  # accumulate over an afternoon of test runs.
+  $ours = @($app.Id)
+  foreach ($i in 1..20) {
+    Start-Sleep -Milliseconds 300
+    $pf = Join-Path $scratch "GTerminal\daemon.port"
+    if (-not (Test-Path $pf)) { continue }
+    $prt = 0
+    if (-not [int]::TryParse((Get-Content $pf -Raw).Trim(), [ref]$prt)) { continue }
+    $own = Get-NetTCPConnection -State Listen -LocalPort $prt -ErrorAction SilentlyContinue |
+      Select-Object -First 1 -ExpandProperty OwningProcess
+    if ($own) { $ours += [int]$own; break }
+  }
   Set-Content $pidFile -Value $ours
   # Pin the size and record a canvas to match, so the busiest state is
   # captured 1:1. Terminal text does not survive being scaled down.
