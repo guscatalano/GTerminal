@@ -7656,6 +7656,16 @@ async function main() {
   document.getElementById("settings-close")!.addEventListener("click", closeSettings);
   initFind();
   void applySummonHotkey();
+  // The window arriving is animated here rather than by moving the
+  // window: moving it during a show races the show itself and the window
+  // can fail to appear at all. Content that drops into place reads the
+  // same and cannot strand anyone's window off screen.
+  void listen("summoned", () => {
+    app.classList.remove("summoning");
+    void app.offsetWidth; // restart the animation on a repeat summon
+    app.classList.add("summoning");
+    window.setTimeout(() => app.classList.remove("summoning"), 260);
+  });
   window.addEventListener("keydown", (e) => {
     // Keystrokes inside a terminal are handled by that terminal's own
     // shortcut handler; letting them also reach this global handler

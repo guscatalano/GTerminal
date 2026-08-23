@@ -286,10 +286,12 @@ fn create_shortcut(path: String, workspace: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Slide the window in or out from the top edge, the way a quake console
-/// does. Appearing and vanishing instantly makes a summon feel like a
-/// glitch — a short slide says *this window came from somewhere*, which
-/// is the whole idea of a terminal that lives off screen.
+/// Slide the window out through the top edge on its way to the tray, the
+/// way a quake console does. Vanishing instantly makes it feel like a
+/// glitch; a short slide says the window went somewhere.
+///
+/// Only ever used for leaving. Coming back is animated in the frontend —
+/// see summon() for why.
 ///
 /// Movement rather than a fade: fading needs WS_EX_LAYERED, and layering
 /// a WebView2 window costs a composition path and can tear.
@@ -335,11 +337,16 @@ fn summon(app: &AppHandle) {
         let hidden = !win.is_visible().unwrap_or(true);
         let _ = win.show();
         let _ = win.set_focus();
-        // Only slide when it was actually away. Raising a window that was
-        // merely buried should not move it.
-        #[cfg(windows)]
+        // The window is never moved on the way *in*. Sliding it here —
+        // whether on this thread or a spawned one — races the show that
+        // was just requested, and the window fails to appear at all:
+        // measured at zero successes in six attempts. The arrival is
+        // animated in the frontend instead, where the window manager is
+        // not involved. Going out is a different matter: the window is
+        // already up and settled, so moving it is safe, and that half
+        // stayed in Rust.
         if hidden && animate() {
-            slide(&win, true);
+            let _ = win.emit("summoned", ());
         }
     }
 }
