@@ -92,10 +92,17 @@ function Esc-Json {
 }
 
 # One keystroke per write, no delay: that is what stresses ordering.
+#
+# Split by text element, not by char. A .NET char is a UTF-16 code unit,
+# so ToCharArray() cuts an emoji in half and sends each surrogate as its
+# own message — two payloads that are not valid text on their own, which
+# is a fault in the test rather than anything the app does. The frontend
+# sends whole strings from xterm's onData and never splits a pair.
 function Type-Text {
   param([string]$text)
-  foreach ($ch in $text.ToCharArray()) {
-    $script:w.WriteLine("{""cmd"":""write"",""data"":""$(Esc-Json ([string]$ch))""}")
+  $e = [System.Globalization.StringInfo]::GetTextElementEnumerator($text)
+  while ($e.MoveNext()) {
+    $script:w.WriteLine("{""cmd"":""write"",""data"":""$(Esc-Json ([string]$e.Current))""}")
   }
 }
 function Send-Key {
@@ -232,6 +239,82 @@ foreach ($spec in $specs) {
 
   Close-Shell $sess
 }
+
+# ── the paths expert users actually live on ───────────────────────────
+# Everything above is about a line of text arriving. These are the things
+# people do without thinking, where the stack (xterm → daemon → ConPTY)
+# has more ways to go wrong than the typing path does.
+$exp = Open-Shell "pwsh"
+$ESC = [string][char]27
+
+# Ctrl+C against a *running* command, not a half-typed line. This is the
+# key experts hit most and the one the matrix above does not cover: it
+# has to reach the child process, stop it, and leave the shell usable.
+Type-Text "Start-Sleep -Seconds 30"
+Start-Sleep -Seconds 1
+$null = Drain 400
+Send-Key "`r"
+Start-Sleep -Seconds 2          # let it actually start sleeping
+$null = Drain 400
+Send-Key ([string][char]3)
+Start-Sleep -Seconds 2
+$null = Drain 600
+$back = Run-Line "echo (555+1)"
+if ($back -like "*556*") { "PASS Ctrl+C interrupts a running command and returns the prompt" }
+else { $failures += "ctrl-c-running: shell did not come back. Got: $back" }
+
+# Up-arrow history recall. Experts navigate history far more than they
+# retype, and it is a different input path — an escape sequence, not a
+# character.
+$null = Run-Line "echo hist-marker-7"
+Send-Key "$ESC[A"
+Start-Sleep -Seconds 1
+$null = Drain 400
+Send-Key "`r"
+Start-Sleep -Seconds 2
+$recalled = Strip-Ansi (Drain 500)
+if ($recalled -like "*hist-marker-7*") { "PASS up-arrow recalls the previous command" }
+else { $failures += "history: up-arrow did not recall. Got: $recalled" }
+
+# Throughput: a burst of output must arrive whole and in order. Dropping
+# lines under load is the kind of fault that only shows up on a real
+# build log, which is exactly where it matters most.
+$bulk = Run-Line "1..2000 | ForEach-Object { `"bulk-`$_`" }" 8
+$hits = ([regex]::Matches($bulk, "bulk-\d+")).Count
+if ($bulk -like "*bulk-1*" -and $bulk -like "*bulk-2000*" -and $hits -ge 2000) {
+  "PASS 2000 lines of output arrived intact ($hits markers)"
+} else {
+  $failures += "throughput: expected 2000 markers with first and last present, saw $hits"
+}
+
+# Wide characters, emoji (surrogate pairs) and a combining accent. A
+# terminal that mangles these corrupts git logs and any CJK path, and the
+# daemon converts bytes to text on a chunk boundary it does not control.
+$uni = "CJK-" + [char]0x65E5 + [char]0x672C + [char]0x8A9E + "-emoji-" + [char]0xD83C + [char]0xDF89 + "-cafe" + [char]0x0301 + "-end"
+$uniOut = Run-Line "echo `"$uni`"" 3
+if ($uniOut -like "*$uni*") { "PASS wide, emoji and combining characters survive the round trip" }
+else { $failures += "unicode: round trip mangled. Got: $uniOut" }
+
+# Multi-line input runs line by line, as it arrives.
+#
+# This is not a bug to fix, it is the hazard the paste warning exists
+# for. PSReadLine does not implement bracketed paste — probed directly,
+# these sessions never see ESC[?2004h — so xterm has no bracketed-paste
+# mode to wrap a paste in, and every newline in pasted text submits a
+# command the moment it lands. Nothing between the terminal and the shell
+# can prevent that, which is why the only real protection is showing
+# people what they are about to paste before it goes in.
+Type-Text "echo (11+22)"
+Send-Key "`r"
+Type-Text "echo (33+44)"
+Send-Key "`r"
+Start-Sleep -Seconds 3
+$multi = Strip-Ansi (Drain 800)
+if ($multi -like "*33*" -and $multi -like "*77*") {
+  "PASS multi-line input runs line by line (what the paste warning guards)"
+} else { $failures += "multi-line: expected both 33 and 77. Got: $multi" }
+
+Close-Shell $exp
 
 # ── latency, measured on the default shell ────────────────────────────
 $latSess = Open-Shell "pwsh"

@@ -3508,14 +3508,18 @@ function initFind() {
 
 /// The one way text gets pasted into a session.
 ///
-/// Always via term.paste() rather than straight down the pipe, because
-/// xterm does two things there that matter. It wraps the text in
-/// bracketed-paste markers when the shell has asked for them, so the
-/// shell takes the whole clipboard as one pasted block — without that it
-/// reads the text as typing, which runs every line of a multi-line paste
-/// the moment it arrives and lets a pasted tab trigger completion, whose
-/// no-match beep is where the mystery beeping came from. It also folds
-/// CRLF to CR, so Windows line endings do not arrive as two Enters.
+/// Always via term.paste() rather than straight down the pipe, for two
+/// reasons. It folds CRLF to CR, so Windows line endings do not arrive as
+/// two Enters. And it wraps the text in bracketed-paste markers when the
+/// shell has asked for them.
+///
+/// PowerShell never asks: PSReadLine does not implement bracketed paste,
+/// and a session probed directly never sends ESC[?2004h (see
+/// tests/typing.ps1). So under PowerShell a multi-line paste still runs
+/// line by line as it arrives, and nothing on this side can stop it —
+/// which is why the paste warning is the real protection rather than a
+/// nicety. The wrapping is kept for shells that do ask, WSL and git-bash
+/// among them.
 function pasteText(id: number, text: string) {
   if (!text) return;
   if (pasteNeedsWarning(text, pasteLimits())) {
