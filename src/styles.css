@@ -1998,6 +1998,64 @@ input.set-control {
   }
 }
 
+/* ── paste confirmation ──────────────────────────────────────────────── */
+
+.paste-panel {
+  width: min(680px, 86vw);
+  max-height: 78vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border2);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+}
+
+.paste-title {
+  font: 600 15px "Segoe UI", sans-serif;
+  color: var(--text);
+}
+
+.paste-note {
+  font: 12px "Segoe UI", sans-serif;
+  color: var(--muted);
+}
+
+/* The preview is the whole point of the dialog, so it gets the room. */
+.paste-preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  font: 12px "Cascadia Mono", Consolas, monospace;
+  white-space: pre;
+  tab-size: 4;
+}
+
+.paste-more {
+  margin-top: 6px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.paste-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.paste-go {
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+}
+
 /* ── summon hotkey picker ────────────────────────────────────────────── */
 
 .hotkey-picker {

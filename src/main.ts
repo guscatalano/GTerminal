@@ -12,7 +12,14 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { register, unregisterAll } from "@tauri-apps/plugin-global-shortcut";
-import { routeCtrlKey, isBrowserAccelerator, accelerator } from "./keys";
+import {
+  routeCtrlKey,
+  isBrowserAccelerator,
+  accelerator,
+  pasteNeedsWarning,
+  pasteLineCount,
+} from "./keys";
+import type { PasteLimits } from "./keys";
 import "@xterm/xterm/css/xterm.css";
 import "./styles.css";
 
@@ -130,6 +137,9 @@ interface AppConfig {
   clickable_links?: boolean;
   summon_hotkey?: string;
   bell?: string;
+  paste_warn?: boolean;
+  paste_warn_lines?: number;
+  paste_warn_chars?: number;
   grace_minutes?: number;
   theme?: string;
   font_family?: string;
@@ -3425,10 +3435,105 @@ function initFind() {
 /// CRLF to CR, so Windows line endings do not arrive as two Enters.
 function pasteText(id: number, text: string) {
   if (!text) return;
+  if (pasteNeedsWarning(text, pasteLimits())) {
+    confirmPaste(id, text);
+    return;
+  }
+  deliverPaste(id, text);
+}
+
+function deliverPaste(id: number, text: string) {
   pushClip(text);
   const tab = tabs.get(id);
   if (tab) tab.term.paste(text);
   else invoke("write_session", { id, data: text }).catch(() => {});
+}
+
+function pasteLimits(): PasteLimits {
+  return {
+    enabled: config.paste_warn !== false,
+    lines: config.paste_warn_lines ?? 3,
+    chars: config.paste_warn_chars ?? 2000,
+  };
+}
+
+/// Show what is about to be pasted before it goes in. The preview is the
+/// point: the risk with a long paste is running something you did not
+/// read, so the dialog has to show the text rather than just count it.
+function confirmPaste(id: number, text: string) {
+  const lines = pasteLineCount(text);
+  const ov = document.createElement("div");
+  ov.className = "overlay";
+  ov.id = "paste-overlay";
+  const panel = document.createElement("div");
+  panel.className = "paste-panel";
+
+  const title = document.createElement("div");
+  title.className = "paste-title";
+  const size =
+    text.length >= 1024 ? `${(text.length / 1024).toFixed(1)} KB` : `${text.length} characters`;
+  title.textContent =
+    lines > 1 ? `Paste ${lines} lines? (${size})` : `Paste ${size}?`;
+
+  const note = document.createElement("div");
+  note.className = "paste-note";
+  note.textContent =
+    lines > 1
+      ? "Multiple lines can run as multiple commands. Check what is here before pasting."
+      : "Check what is here before pasting.";
+
+  const pre = document.createElement("pre");
+  pre.className = "paste-preview";
+  const shown = text.split(/\r\n|\r|\n/).slice(0, 12);
+  pre.textContent = shown.join("\n");
+  if (lines > shown.length) {
+    const more = document.createElement("div");
+    more.className = "paste-more";
+    more.textContent = `… ${lines - shown.length} more line${lines - shown.length === 1 ? "" : "s"}`;
+    pre.appendChild(more);
+  }
+
+  const row = document.createElement("div");
+  row.className = "paste-actions";
+  const cancel = document.createElement("button");
+  cancel.className = "set-control";
+  cancel.textContent = "Cancel";
+  const go = document.createElement("button");
+  go.className = "set-control paste-go";
+  go.textContent = "Paste";
+
+  const close = () => {
+    ov.remove();
+    window.removeEventListener("keydown", onKey, true);
+    tabs.get(id)?.term.focus();
+  };
+  const onKey = (e: KeyboardEvent) => {
+    e.stopPropagation();
+    if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      close();
+      deliverPaste(id, text);
+    }
+  };
+  cancel.addEventListener("click", close);
+  go.addEventListener("click", () => {
+    close();
+    deliverPaste(id, text);
+  });
+  ov.addEventListener("mousedown", (e) => {
+    if (e.target === ov) close();
+  });
+  window.addEventListener("keydown", onKey, true);
+
+  row.append(cancel, go);
+  panel.append(title, note, pre, row);
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+  go.focus();
 }
 
 /// Paste the system clipboard into a session.
@@ -5794,6 +5899,30 @@ function buildSettingsPage() {
     "Whether the terminal cursor blinks.",
     mkSelect([["on", "On"], ["off", "Off"]], effCursorBlink() ? "on" : "off", (v) => {
       config.cursor_blink = v === "on";
+      changed();
+    })
+  );
+  settingRow(
+    "Warn before big pastes",
+    "Show what is about to be pasted, and how much of it, before it goes into the terminal. Multiple lines can run as multiple commands — under cmd, which has no bracketed paste, they run the moment they arrive.",
+    mkSelect([["on", "On"], ["off", "Off"]], config.paste_warn !== false ? "on" : "off", (v) => {
+      config.paste_warn = v === "on";
+      changed();
+    })
+  );
+  settingRow(
+    "Warn at (lines)",
+    "Pastes of this many lines or more ask first.",
+    mkNumber(config.paste_warn_lines ?? 3, 2, 200, (v) => {
+      config.paste_warn_lines = v;
+      changed();
+    })
+  );
+  settingRow(
+    "Warn at (characters)",
+    "Pastes this long ask first, however few lines they are.",
+    mkNumber(config.paste_warn_chars ?? 2000, 100, 100000, (v) => {
+      config.paste_warn_chars = v;
       changed();
     })
   );

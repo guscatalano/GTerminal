@@ -11,7 +11,13 @@
 //
 // Node 24 strips types natively, so this imports the real module rather
 // than a copy of it.
-import { routeCtrlKey, isBrowserAccelerator, accelerator } from "../src/keys.ts";
+import {
+  routeCtrlKey,
+  isBrowserAccelerator,
+  accelerator,
+  pasteNeedsWarning,
+  pasteLineCount,
+} from "../src/keys.ts";
 
 let failed = 0;
 function check(name, got, want) {
@@ -163,6 +169,42 @@ check(
   "layout-independent (code wins over key)",
   accelerator({ ...press("Backquote", { altKey: true }), key: "plusminus" }),
   "Alt+Backquote"
+);
+
+// ── paste warning ──────────────────────────────────────────────────────
+const lim = (over = {}) => ({ enabled: true, lines: 3, chars: 2000, ...over });
+
+// A trailing newline is what every editor puts at the end of a file, and
+// it submits the one line rather than adding another — counting it would
+// make every single-command paste look like two.
+check("one line", pasteLineCount("git status"), 1);
+check("one line with a trailing newline", pasteLineCount("git status\n"), 1);
+check("CRLF counts once", pasteLineCount("git status\r\n"), 1);
+check("two lines", pasteLineCount("a\nb"), 2);
+check("two lines, trailing newline", pasteLineCount("a\nb\n"), 2);
+check("blank lines still count", pasteLineCount("a\n\nb"), 3);
+check("empty is nothing", pasteLineCount(""), 0);
+check("a lone newline is nothing", pasteLineCount("\n"), 0);
+
+check("a short command does not warn", pasteNeedsWarning("git status", lim()), false);
+check("two lines is under the default", pasteNeedsWarning("a\nb", lim()), false);
+check("three lines warns", pasteNeedsWarning("a\nb\nc", lim()), true);
+check(
+  "one very long line warns on length alone",
+  pasteNeedsWarning("x".repeat(2000), lim()),
+  true
+);
+check(
+  "just under the character limit does not",
+  pasteNeedsWarning("x".repeat(1999), lim()),
+  false
+);
+check("empty never warns", pasteNeedsWarning("", lim()), false);
+check("disabled never warns", pasteNeedsWarning("a\nb\nc\nd", lim({ enabled: false })), false);
+check(
+  "thresholds are honoured",
+  pasteNeedsWarning("a\nb", lim({ lines: 2 })),
+  true
 );
 
 if (failed) {

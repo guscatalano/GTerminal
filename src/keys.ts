@@ -41,6 +41,33 @@ export function routeCtrlKey(e: KeyEventLike, ctx: KeyContext): KeyAction {
   return "pass";
 }
 
+export interface PasteLimits {
+  enabled: boolean;
+  /// Warn at or above this many lines. A pasted command that arrives as
+  /// several lines can run several commands.
+  lines: number;
+  /// Warn at or above this many characters, however few lines it is.
+  chars: number;
+}
+
+/// How many commands a paste could turn into. A single trailing newline
+/// is what any editor adds to the end of a file and just submits the one
+/// line, so it does not count as another.
+export function pasteLineCount(text: string): number {
+  const body = text.replace(/(\r\n|\r|\n)$/, "");
+  if (!body) return 0;
+  return body.split(/\r\n|\r|\n/).length;
+}
+
+/// Whether a paste is big enough to be worth confirming. Long or
+/// multi-line clipboard content is the classic way to run something you
+/// did not read — worse under cmd, which has no bracketed paste, so the
+/// lines execute as they arrive.
+export function pasteNeedsWarning(text: string, limits: PasteLimits): boolean {
+  if (!limits.enabled || !text) return false;
+  return pasteLineCount(text) >= limits.lines || text.length >= limits.chars;
+}
+
 /// Turn a key press into a Tauri accelerator string ("Alt+Space",
 /// "Control+Shift+Backquote"), or null when it is not usable on its own —
 /// a bare modifier, or a plain key with nothing held, which would swallow
