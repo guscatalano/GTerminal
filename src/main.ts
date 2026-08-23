@@ -3318,6 +3318,11 @@ function copyText(text: string) {
 /// startup there is no history to disambiguate against, so this reads
 /// the session itself.
 function sessionLabel(s: SessionInfo): string {
+  // What is running beats where it is running: half a dozen shells in a
+  // home directory all read "crimson" otherwise, which tells you nothing
+  // about which one to keep.
+  const running = s.running?.filter((n) => !/^(pwsh|powershell|cmd|conhost)(\.exe)?$/i.test(n));
+  if (running?.length) return running.join(", ");
   const leaf = (s.cwd ?? "").replace(/[\\/]+$/, "").split(/[\\/]/).pop();
   return leaf || s.shell || `session ${s.id}`;
 }
@@ -3346,11 +3351,31 @@ function chooseRestore(list: SessionInfo[]): Promise<Set<number>> {
     const note = document.createElement("div");
     note.className = "restore-note";
     note.textContent =
-      "They are all still running. Anything you leave out stays in the background and can be reopened from the sidebar.";
+      "They are all still running. Anything you leave out stays in the background and can be reopened from the sidebar. Enter restores the ticked ones, Esc starts with none.";
 
     const rows = document.createElement("div");
     rows.className = "restore-list";
     const boxes = new Map<number, HTMLInputElement>();
+    // Idle shells in the same folder are genuinely alike, so numbering
+    // the repeats is the only honest way to tell them apart — better
+    // than six identical rows and a guess.
+    const seen = new Map<string, number>();
+    const suffix = new Map<number, string>();
+    for (const s of list) {
+      const base = sessionLabel(s);
+      const n = (seen.get(base) ?? 0) + 1;
+      seen.set(base, n);
+      suffix.set(s.id, n > 1 ? ` (${n})` : "");
+    }
+    const ages = new Map<number, string>();
+    const now = Date.now();
+    for (const s of list) {
+      const mins = Math.max(0, Math.round((now - s.created_ms) / 60000));
+      ages.set(
+        s.id,
+        mins < 1 ? "just now" : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`
+      );
+    }
     for (const s of list) {
       const row = document.createElement("label");
       row.className = "restore-row";
@@ -3362,11 +3387,11 @@ function chooseRestore(list: SessionInfo[]): Promise<Set<number>> {
       main.className = "restore-main";
       const name = document.createElement("div");
       name.className = "restore-name";
-      name.textContent = sessionLabel(s);
+      name.textContent = sessionLabel(s) + (suffix.get(s.id) ?? "");
       const sub = document.createElement("div");
       sub.className = "restore-sub";
       const running = s.running?.length ? ` — ${s.running.join(", ")}` : "";
-      sub.textContent = `${s.shell || "shell"} · ${s.cwd ?? ""}${running}`;
+      sub.textContent = `${ages.get(s.id)} · ${s.shell || "shell"} · ${s.cwd ?? ""}${running}`;
       sub.title = s.cwd ?? "";
       main.append(name, sub);
       row.append(cb, main);
@@ -3415,11 +3440,14 @@ function chooseRestore(list: SessionInfo[]): Promise<Set<number>> {
         e.preventDefault();
         finish(new Set([...boxes].filter(([, b]) => b.checked).map(([id]) => id)));
       }
-      // Escape is not "cancel" here — there is nothing to cancel, and
-      // silently opening nothing would look like the app lost everything.
+      // Escape opens none. Dismissing a dialog should do the quiet thing,
+      // not the expensive one — and restoring everything on Escape is a
+      // trap, because the natural way to wave a dialog away then gives
+      // you the slow start you were trying to skip. Nothing is lost:
+      // they are all still in the sidebar.
       if (e.key === "Escape") {
         e.preventDefault();
-        finish(new Set(list.map((s) => s.id)));
+        finish(new Set());
       }
     };
     none.addEventListener("click", () => {
@@ -3442,10 +3470,15 @@ function chooseRestore(list: SessionInfo[]): Promise<Set<number>> {
   });
 }
 
-/// Progress while sessions come back. Restoring several is slow enough
-/// that an unexplained pause looks like a hang — and the window is
-/// already up by then, so there is somewhere to show it.
-function showRestoreProgress(total: number) {
+/// The boot overlay: up from the moment the window is, and handed over to
+/// the restore once there is something to count.
+///
+/// Put up before anything is awaited. Between the window appearing and
+/// the first session attaching there is real work — config, theme,
+/// listeners, asking the daemon what it has — and with an empty window
+/// on screen for two or three seconds it reads as the app having hung
+/// before it started.
+function showRestoreProgress(total = 0) {
   const ov = document.createElement("div");
   ov.className = "overlay restore-progress";
   const box = document.createElement("div");
@@ -3463,16 +3496,43 @@ function showRestoreProgress(total: number) {
   ov.appendChild(box);
   document.body.appendChild(ov);
   let done = 0;
+  let count = total;
   const paint = (label: string) => {
-    text.textContent = total > 1 ? `Restoring ${done + 1} of ${total} — ${label}` : `Restoring ${label}`;
-    fill.style.width = `${Math.round((done / total) * 100)}%`;
+    if (count <= 0) {
+      // Nothing to count yet: say what is happening and let the spinner
+      // carry it rather than showing a progress bar that cannot move.
+      text.textContent = label || "Starting…";
+      bar.hidden = true;
+      return;
+    }
+    bar.hidden = false;
+    text.textContent =
+      count > 1 ? `Restoring ${Math.min(done + 1, count)} of ${count} — ${label}` : `Restoring ${label}`;
+    fill.style.width = `${Math.round((done / count) * 100)}%`;
   };
   paint("");
   return {
+    /// Indeterminate message while there is nothing to count.
+    say(label: string) {
+      if (count <= 0) paint(label);
+    },
+    /// Switch to a determinate bar once the work is known.
+    begin(n: number) {
+      count = n;
+      done = 0;
+      paint("");
+    },
     step(label: string) {
       paint(label);
       done++;
-      fill.style.width = `${Math.round((done / total) * 100)}%`;
+      if (count > 0) fill.style.width = `${Math.round((done / count) * 100)}%`;
+    },
+    /// Out of the way while the user is being asked something.
+    hide() {
+      ov.hidden = true;
+    },
+    show() {
+      ov.hidden = false;
     },
     done() {
       ov.remove();
@@ -7742,6 +7802,10 @@ async function main() {
   // The window starts hidden (tauri.conf visible:false) so users never
   // see the webview's white pre-paint flash; show once themed.
   void getCurrentWindow().show();
+  // Up before anything else is awaited, so the window is never blank and
+  // wondering.
+  const boot = showRestoreProgress();
+  boot.say("Starting…");
   launchInfo = await invoke<LaunchInfo>("launch_info").catch(() => null);
   await listen<{ id: number; data: string }>("pty-output", (event) => {
     const tab = tabs.get(event.payload.id);
@@ -8047,11 +8111,14 @@ async function main() {
   // for. Let them choose — nothing is lost either way, since what they
   // leave out is still running and still in the sidebar.
   if (config.restore_prompt !== false && adoptable.length > restorePromptAt()) {
+    boot.hide();
     const picked = await chooseRestore(adoptable);
+    boot.show();
     adoptable = adoptable.filter((s) => picked.has(s.id));
   }
   const alive = new Set(adoptable.map((s) => s.id));
-  const progress = adoptable.length ? showRestoreProgress(adoptable.length) : undefined;
+  const progress = boot;
+  boot.begin(adoptable.length);
 
   // Rebuild saved pane trees first, in the saved tab order. Any leaf whose
   // session is gone is pruned out, and a tab whose sessions have all gone
