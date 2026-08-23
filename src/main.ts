@@ -3959,6 +3959,10 @@ async function createTab(
     // 24-bit colors apps emit that assume a dark background.
     minimumContrastRatio: 4.5,
     allowProposedApi: true,
+    // Without a width the overview ruler is not rendered at all, and every
+    // decoration that targets it — failed commands, find matches — is
+    // registered into nothing and silently invisible.
+    overviewRuler: { width: 14 },
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
