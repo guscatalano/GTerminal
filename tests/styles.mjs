@@ -33,6 +33,38 @@ check(
 const hides = [...ts.matchAll(/\.hidden\s*=\s*(?!=)/g)].length;
 check(`the code sets .hidden somewhere (${hides} sites)`, hides > 0, "no .hidden assignments found");
 
+// ── the box FitAddon measures ──────────────────────────────────────────
+// FitAddon picks the row count from getComputedStyle(parent).height and
+// subtracts only the *terminal element's* padding. .pane-body is that
+// parent, and its padding is the parent's, so the addon never sees it.
+// Under the global `* { box-sizing: border-box }` the reported height
+// already includes that padding, so the terminal is handed it as usable
+// space it does not have — measured live, that was 35 rows of 19px laid
+// out in a 648px box, with the last row sliced by the status bar.
+//
+// So: if .pane-body has padding, it must be content-box. Widening the
+// padding does not help — it is the thing being double-counted, and
+// making it bigger makes the overflow bigger.
+const paneBody = /\.pane-body\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+check(".pane-body rule exists", paneBody !== "", "could not find the .pane-body rule");
+const hasPadding = /(^|[;{\s])padding(-top|-bottom)?\s*:/.test(paneBody);
+const isContentBox = /box-sizing\s*:\s*content-box/.test(paneBody);
+check(
+  ".pane-body padding is not double-counted by FitAddon",
+  !hasPadding || isContentBox,
+  "it has padding, so it needs `box-sizing: content-box` — under border-box the height FitAddon reads includes that padding and the terminal overflows by exactly that many pixels"
+);
+
+// The fit is measured from .pane-body, so that is the box whose resizes
+// matter. Watching .pane instead misses everything that resizes the body
+// without resizing the pane — the status bar appearing during startup, a
+// name bar appearing when a tab splits — and leaves a stale row count.
+check(
+  "the resize observer watches the box the fit is measured from",
+  /observer\.observe\(paneBody\)/.test(ts),
+  "expected observer.observe(paneBody); watching .pane misses resizes of the body itself"
+);
+
 if (failed) {
   console.log(`${failed} style test(s) failed`);
   process.exit(1);
