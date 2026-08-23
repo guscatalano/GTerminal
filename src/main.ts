@@ -3332,6 +3332,9 @@ async function summonToggle() {
 /// changes; unregisterAll first so an old binding cannot linger.
 async function applySummonHotkey() {
   await unregisterAll().catch(() => {});
+  // The tray advertises the key, so it has to be told when it changes —
+  // otherwise it goes on naming one that is no longer bound.
+  void invoke("refresh_tray").catch(() => {});
   const combo = config.summon_hotkey;
   if (!combo) return true;
   try {

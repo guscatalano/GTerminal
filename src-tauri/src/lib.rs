@@ -311,28 +311,73 @@ fn close_hides() -> bool {
         == "hide"
 }
 
-/// Tell the user once that the app is still running. Closing a window and
-/// having the process stay alive is a surprise exactly once, and a silent
-/// surprise is the kind people report as a bug.
-fn note_first_hide(app: &AppHandle) {
-    let cfg = mux::read_config();
-    if cfg.get("tray_notice_shown").and_then(|v| v.as_bool()) == Some(true) {
-        return;
+/// Spell an accelerator the way a person reads it. "Control" and
+/// "Backquote" are how the shortcut has to be written for registration;
+/// they are not what anyone calls those keys.
+fn pretty_hotkey(accel: &str) -> String {
+    accel
+        .replace("Control", "Ctrl")
+        .replace("Super", "Win")
+        .replace("Backquote", "`")
+        .replace("BracketLeft", "[")
+        .replace("BracketRight", "]")
+        .replace("Backslash", "\\")
+        .replace("Semicolon", ";")
+        .replace("Quote", "'")
+        .replace("Comma", ",")
+        .replace("Period", ".")
+        .replace("Slash", "/")
+        .replace("Minus", "-")
+        .replace("Equal", "=")
+}
+
+fn summon_label() -> Option<String> {
+    mux::read_config()
+        .get("summon_hotkey")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(pretty_hotkey)
+}
+
+/// Tooltip and menu text for the tray. Once the window is hidden the tray
+/// is the only place left to ask "how do I get it back", so the answer
+/// lives there permanently rather than in a notice shown once, at the one
+/// moment nobody is looking at the tray.
+fn tray_text() -> (String, String) {
+    match summon_label() {
+        Some(key) => (
+            format!("GTerminal — press {key} to show"),
+            format!("Show GTerminal\t{key}"),
+        ),
+        None => (
+            "GTerminal — no summon hotkey set".into(),
+            "Show GTerminal".into(),
+        ),
     }
-    if let Some(tray) = app.tray_by_id("main") {
-        let hint = mux::read_config()
-            .get("summon_hotkey")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(|s| format!(" — {s} brings it back"))
-            .unwrap_or_default();
-        let _ = tray.set_tooltip(Some(&format!("GTerminal is still running{hint}")));
-    }
-    let mut next = cfg;
-    if let Some(obj) = next.as_object_mut() {
-        obj.insert("tray_notice_shown".into(), Value::Bool(true));
-        let _ = mux::write_config(&next);
-    }
+}
+
+fn apply_tray_text(app: &AppHandle) -> Result<(), String> {
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+    let Some(tray) = app.tray_by_id("main") else {
+        return Ok(());
+    };
+    let (tip, show_label) = tray_text();
+    let show = MenuItem::with_id(app, "show", show_label, true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    let quit = MenuItem::with_id(app, "quit", "Quit GTerminal", true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    let sep = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
+    let menu = Menu::with_items(app, &[&show, &sep, &quit]).map_err(|e| e.to_string())?;
+    tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
+    tray.set_tooltip(Some(&tip)).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Called by the frontend whenever the hotkey setting changes, so the
+/// tray never advertises a key that is no longer bound.
+#[tauri::command]
+fn refresh_tray(app: AppHandle) -> Result<(), String> {
+    apply_tray_text(&app)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -357,14 +402,15 @@ pub fn run() {
             {
                 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
                 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-                let show = MenuItem::with_id(app, "show", "Show GTerminal", true, None::<&str>)?;
+                let (tip, show_label) = tray_text();
+                let show = MenuItem::with_id(app, "show", show_label, true, None::<&str>)?;
                 let quit = MenuItem::with_id(app, "quit", "Quit GTerminal", true, None::<&str>)?;
                 let menu = Menu::with_items(
                     app,
                     &[&show, &PredefinedMenuItem::separator(app)?, &quit],
                 )?;
                 let mut tray = TrayIconBuilder::with_id("main")
-                    .tooltip("GTerminal")
+                    .tooltip(&tip)
                     .menu(&menu)
                     // Left-click summons; the menu is the right-click job,
                     // or the left click could never do anything else.
@@ -401,7 +447,7 @@ pub fn run() {
                         if close_hides() {
                             api.prevent_close();
                             let _ = closing.hide();
-                            note_first_hide(&handle);
+                            let _ = apply_tray_text(&handle);
                         }
                     }
                 });
@@ -449,6 +495,7 @@ pub fn run() {
             history_read,
             launch_info,
             create_shortcut,
+            refresh_tray,
             stats::system_stats,
             stats::perf_counters,
             stats::perf_objects,
@@ -457,4 +504,33 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pretty_hotkey;
+
+    /// Once the window is hidden the tray is the only place left to ask
+    /// how to get it back, so the key it names has to be the key people
+    /// see on their keyboard — not the accelerator spelling.
+    #[test]
+    fn hotkeys_are_spelled_for_humans() {
+        assert_eq!(pretty_hotkey("Alt+Space"), "Alt+Space");
+        assert_eq!(pretty_hotkey("Control+Backquote"), "Ctrl+`");
+        assert_eq!(pretty_hotkey("Control+Shift+Backquote"), "Ctrl+Shift+`");
+        assert_eq!(pretty_hotkey("Super+Backquote"), "Win+`");
+        assert_eq!(pretty_hotkey("Control+Alt+T"), "Ctrl+Alt+T");
+        assert_eq!(pretty_hotkey("F12"), "F12");
+        assert_eq!(pretty_hotkey("Alt+BracketLeft"), "Alt+[");
+        assert_eq!(pretty_hotkey("Control+Minus"), "Ctrl+-");
+    }
+
+    /// "Control" is a substring of nothing else here, but "Quote" is a
+    /// substring of "Backquote" — replacing in the wrong order turns
+    /// Backquote into Back'.
+    #[test]
+    fn backquote_survives_the_quote_rule() {
+        assert_eq!(pretty_hotkey("Alt+Backquote"), "Alt+`");
+        assert_eq!(pretty_hotkey("Alt+Quote"), "Alt+'");
+    }
 }
