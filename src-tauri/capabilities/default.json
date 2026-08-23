@@ -21,6 +21,7 @@
     "core:window:allow-unminimize",
     "core:window:allow-is-minimized",
     "core:window:allow-request-user-attention",
+    "core:window:allow-set-title",
     "global-shortcut:default"
   ]
 }

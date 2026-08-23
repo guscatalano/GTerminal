@@ -1806,16 +1806,16 @@ input.set-control {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-  /* The bottom padding is slack, not decoration. FitAddon floors rows
-     against the height in CSS pixels, but each row is rounded to device
-     pixels when painted, and across forty rows at a fractional
-     line-height (or non-100% display scaling) that rounding adds up to a
-     pixel or two more than it was fitted to. With no slack the last row
-     ends up either painted over the status bar or clipped by the rule
-     below — the same bug either way. FitAddon reads this padding out of
-     the available height, so widening it drops the borderline row
-     instead of half-drawing it. */
-  padding: 8px 4px 9px 10px;
+  padding: 8px 4px 6px 10px;
+  /* Deliberately not border-box, against the global rule above.
+     FitAddon sizes the terminal from getComputedStyle(parent).height and
+     subtracts only the *terminal element's* padding — the padding here is
+     the parent's, so it never sees it. Under border-box that height
+     includes this padding, so every pixel of it became a pixel the
+     terminal thought it had and did not: 35 rows of 19px laid out in a
+     648px box, with the last row sliced by the status bar. content-box
+     makes the reported height the real one. */
+  box-sizing: content-box;
   overflow: hidden;
 }
 

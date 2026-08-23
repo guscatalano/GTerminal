@@ -4171,12 +4171,19 @@ async function createTab(
   });
   term.attachCustomKeyEventHandler(makeShortcutHandler(() => id));
 
-  // Every pane of the visible tab needs refitting, not just the focused
-  // one — a split resizes its neighbours too.
-  const observer = new ResizeObserver(() => {
-    if (paneTab.get(id) === activeTabKey()) fitTab(tab);
-  });
-  observer.observe(pane);
+  // Watch the box the fit is actually measured from, not the pane around
+  // it. Things resize .pane-body without touching .pane — the status bar
+  // appearing at startup, a name bar appearing when the tab splits — and
+  // watching the outer element misses every one of them, leaving a row
+  // count from before the change: one row too many, half of it hidden
+  // behind the status bar.
+  //
+  // No active-tab guard either. It skipped the refit when the status bar
+  // was applied during startup, before any tab was active, and nothing
+  // resized afterwards to correct it. fitTab already no-ops on a pane
+  // with no size, which is what an inactive tab is.
+  const observer = new ResizeObserver(() => fitTab(tab));
+  observer.observe(paneBody);
 
   // Click anywhere in a pane to focus it.
   pane.addEventListener("pointerdown", () => {
