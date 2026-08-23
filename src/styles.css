@@ -2003,6 +2003,152 @@ input.set-control {
   }
 }
 
+/* ── restore picker and progress ─────────────────────────────────────── */
+
+.restore-panel {
+  width: min(620px, 88vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px 22px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border2);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+}
+
+.restore-title {
+  font: 600 16px "Segoe UI", sans-serif;
+  color: var(--text);
+}
+
+.restore-note {
+  font: 12px "Segoe UI", sans-serif;
+  color: var(--muted);
+}
+
+.restore-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.restore-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+}
+
+.restore-row:last-child {
+  border-bottom: none;
+}
+
+.restore-row:hover {
+  background: var(--hover);
+}
+
+.restore-main {
+  min-width: 0;
+}
+
+.restore-name {
+  font: 13px "Segoe UI", sans-serif;
+  color: var(--text);
+}
+
+/* The path and the running programs, which is what tells one shell
+   from another when several sit in the same folder. */
+.restore-sub {
+  font: 11px "Cascadia Mono", Consolas, monospace;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.restore-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.restore-never {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 12px "Segoe UI", sans-serif;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.restore-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.restore-go {
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+}
+
+.restore-prog-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 26px 34px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border2);
+}
+
+.restore-spinner {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 3px solid color-mix(in srgb, var(--muted) 35%, transparent);
+  border-top-color: var(--accent);
+  animation: restore-spin 800ms linear infinite;
+}
+
+@keyframes restore-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.restore-prog-text {
+  font: 12px "Segoe UI", sans-serif;
+  color: var(--text);
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.restore-bar {
+  width: 300px;
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--muted) 30%, transparent);
+  overflow: hidden;
+}
+
+.restore-bar-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width 160ms ease-out;
+}
+
 /* ── paste confirmation ──────────────────────────────────────────────── */
 
 .paste-panel {

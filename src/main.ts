@@ -153,6 +153,8 @@ interface AppConfig {
   bell?: string;
   close_action?: string;
   summon_animation?: string;
+  restore_prompt?: boolean;
+  restore_prompt_at?: number;
   paste_warn?: boolean;
   paste_warn_lines?: number;
   paste_warn_chars?: number;
@@ -3310,6 +3312,174 @@ function copyText(text: string) {
   navigator.clipboard.writeText(text).catch(() => {});
 }
 
+// ── restoring sessions at startup ───────────────────────────────────────
+
+/// A name for a session before the label machinery has warmed up: at
+/// startup there is no history to disambiguate against, so this reads
+/// the session itself.
+function sessionLabel(s: SessionInfo): string {
+  const leaf = (s.cwd ?? "").replace(/[\\/]+$/, "").split(/[\\/]/).pop();
+  return leaf || s.shell || `session ${s.id}`;
+}
+
+function restorePromptAt(): number {
+  return config.restore_prompt_at ?? 3;
+}
+
+/// Ask which terminals to bring back. Restoring is not free — each one
+/// attaches, replays its scrollback and fits — so past a few of them the
+/// wait is long enough that it should be the user's choice rather than
+/// something they watch happen.
+///
+/// Nothing is lost by declining: unchosen sessions stay in the daemon and
+/// can be restored from the sidebar whenever they are wanted.
+function chooseRestore(list: SessionInfo[]): Promise<Set<number>> {
+  return new Promise((resolve) => {
+    const ov = document.createElement("div");
+    ov.className = "overlay";
+    const panel = document.createElement("div");
+    panel.className = "restore-panel";
+
+    const title = document.createElement("div");
+    title.className = "restore-title";
+    title.textContent = `Restore ${list.length} terminals?`;
+    const note = document.createElement("div");
+    note.className = "restore-note";
+    note.textContent =
+      "They are all still running. Anything you leave out stays in the background and can be reopened from the sidebar.";
+
+    const rows = document.createElement("div");
+    rows.className = "restore-list";
+    const boxes = new Map<number, HTMLInputElement>();
+    for (const s of list) {
+      const row = document.createElement("label");
+      row.className = "restore-row";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = true;
+      boxes.set(s.id, cb);
+      const main = document.createElement("div");
+      main.className = "restore-main";
+      const name = document.createElement("div");
+      name.className = "restore-name";
+      name.textContent = sessionLabel(s);
+      const sub = document.createElement("div");
+      sub.className = "restore-sub";
+      const running = s.running?.length ? ` — ${s.running.join(", ")}` : "";
+      sub.textContent = `${s.shell || "shell"} · ${s.cwd ?? ""}${running}`;
+      sub.title = s.cwd ?? "";
+      main.append(name, sub);
+      row.append(cb, main);
+      rows.appendChild(row);
+    }
+
+    const foot = document.createElement("div");
+    foot.className = "restore-foot";
+    const never = document.createElement("label");
+    never.className = "restore-never";
+    const neverBox = document.createElement("input");
+    neverBox.type = "checkbox";
+    const neverText = document.createElement("span");
+    neverText.textContent = "Don't ask again";
+    never.append(neverBox, neverText);
+
+    const actions = document.createElement("div");
+    actions.className = "restore-actions";
+    const none = document.createElement("button");
+    none.className = "set-control";
+    none.textContent = "None";
+    const all = document.createElement("button");
+    all.className = "set-control";
+    all.textContent = "All";
+    const go = document.createElement("button");
+    go.className = "set-control restore-go";
+    const count = () => [...boxes.values()].filter((b) => b.checked).length;
+    const relabel = () => (go.textContent = `Restore ${count()}`);
+    relabel();
+    rows.addEventListener("change", relabel);
+    actions.append(none, all, go);
+    foot.append(never, actions);
+
+    const finish = (ids: Set<number>) => {
+      if (neverBox.checked) {
+        config.restore_prompt = false;
+        saveConfig();
+      }
+      ov.remove();
+      window.removeEventListener("keydown", onKey, true);
+      resolve(ids);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      e.stopPropagation();
+      if (e.key === "Enter") {
+        e.preventDefault();
+        finish(new Set([...boxes].filter(([, b]) => b.checked).map(([id]) => id)));
+      }
+      // Escape is not "cancel" here — there is nothing to cancel, and
+      // silently opening nothing would look like the app lost everything.
+      if (e.key === "Escape") {
+        e.preventDefault();
+        finish(new Set(list.map((s) => s.id)));
+      }
+    };
+    none.addEventListener("click", () => {
+      for (const b of boxes.values()) b.checked = false;
+      relabel();
+    });
+    all.addEventListener("click", () => {
+      for (const b of boxes.values()) b.checked = true;
+      relabel();
+    });
+    go.addEventListener("click", () =>
+      finish(new Set([...boxes].filter(([, b]) => b.checked).map(([id]) => id)))
+    );
+    window.addEventListener("keydown", onKey, true);
+
+    panel.append(title, note, rows, foot);
+    ov.appendChild(panel);
+    document.body.appendChild(ov);
+    go.focus();
+  });
+}
+
+/// Progress while sessions come back. Restoring several is slow enough
+/// that an unexplained pause looks like a hang — and the window is
+/// already up by then, so there is somewhere to show it.
+function showRestoreProgress(total: number) {
+  const ov = document.createElement("div");
+  ov.className = "overlay restore-progress";
+  const box = document.createElement("div");
+  box.className = "restore-prog-box";
+  const spin = document.createElement("div");
+  spin.className = "restore-spinner";
+  const text = document.createElement("div");
+  text.className = "restore-prog-text";
+  const bar = document.createElement("div");
+  bar.className = "restore-bar";
+  const fill = document.createElement("div");
+  fill.className = "restore-bar-fill";
+  bar.appendChild(fill);
+  box.append(spin, text, bar);
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  let done = 0;
+  const paint = (label: string) => {
+    text.textContent = total > 1 ? `Restoring ${done + 1} of ${total} — ${label}` : `Restoring ${label}`;
+    fill.style.width = `${Math.round((done / total) * 100)}%`;
+  };
+  paint("");
+  return {
+    step(label: string) {
+      paint(label);
+      done++;
+      fill.style.width = `${Math.round((done / total) * 100)}%`;
+    },
+    done() {
+      ov.remove();
+    },
+  };
+}
+
 // ── find in terminal ────────────────────────────────────────────────────
 
 const findbar = document.getElementById("findbar")!;
@@ -3640,6 +3810,13 @@ function makeShortcutHandler(getId: () => number) {
       cycleTab(e.shiftKey ? -1 : 1);
       return false;
     }
+    // Ctrl+<n> jumps straight to a tab, and Ctrl+9 to the last one
+    // however many there are — the convention every browser and terminal
+    // shares, so it is what people try first. Cycling with Ctrl+Tab is
+    // fine for two tabs and useless for eight.
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key)) {
+      if (jumpToTab(Number(e.key))) return false;
+    }
     // Pane navigation. All of it is only swallowed while the tab is
     // actually split, so an unsplit terminal still receives these keys.
     const key = activeTabKey();
@@ -3724,6 +3901,19 @@ function closeTabViaKeyboard(id: number) {
     btn.classList.add("armed");
     window.setTimeout(() => btn.classList.remove("armed"), 2000);
   }
+}
+
+/// Jump to the nth tab in the strip. 9 means "the last one", which is
+/// what browsers do and what people expect when there are more than nine.
+/// Returns false when there is no such tab, so the key falls through to
+/// the shell rather than being swallowed for nothing.
+function jumpToTab(n: number): boolean {
+  const ids = orderedIds();
+  if (!ids.length) return false;
+  const target = n === 9 ? ids[ids.length - 1] : ids[n - 1];
+  if (target === undefined) return false;
+  setActive(target);
+  return true;
 }
 
 function cycleTab(dir: number) {
@@ -4010,7 +4200,13 @@ async function createTab(
   tabs.set(id, tab);
 
   button.addEventListener("mousedown", (e) => {
-    if (e.target !== close && e.target !== hide && e.target !== resize) setActive(id);
+    if (e.target !== close && e.target !== hide && e.target !== resize) {
+      // Keep focus out of the tab button — see the sidebar row for why:
+      // the browser's own focus-on-click lands after setActive has
+      // focused the terminal, and swallows the first keystroke.
+      e.preventDefault();
+      setActive(id);
+    }
   });
   // Dragging the right-edge handle resizes just this tab; the handle
   // stops propagation so the reorder drag below never starts from it.
@@ -5306,6 +5502,17 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
     const row = document.createElement("div");
     row.className = "side-row" + (isActive ? " active" : "");
     row.dataset.id = String(id);
+    // Do not let the click move focus here. The browser focuses whatever
+    // was clicked *after* the mousedown handlers run, which lands after
+    // setActive has already focused the terminal — so the terminal is
+    // focused, then unfocused, and only gets it back a frame later. Any
+    // key struck in that gap is lost, which is exactly one keystroke and
+    // always the first one after switching.
+    row.addEventListener("mousedown", (e) => {
+      if (e.target === row || (e.target as HTMLElement)?.closest(".side-label") === e.target) {
+        e.preventDefault();
+      }
+    });
     const d = document.createElement("span");
     d.className = `side-dot ${dotClass}`;
     d.textContent = dot;
@@ -6041,6 +6248,22 @@ function buildSettingsPage() {
         changed();
       }
     )
+  );
+  settingRow(
+    "Ask which terminals to restore",
+    "On start-up, when there are more than a few sessions to bring back, ask which ones instead of restoring them all. Restoring is not free — each one attaches, replays its scrollback and refits — so past a handful it is a wait worth having a say in. Anything you leave out keeps running and can be reopened from the sidebar.",
+    mkSelect([["on", "On"], ["off", "Off"]], config.restore_prompt !== false ? "on" : "off", (v) => {
+      config.restore_prompt = v === "on";
+      changed();
+    })
+  );
+  settingRow(
+    "Ask when more than",
+    "How many sessions it takes before that question is worth asking.",
+    mkNumber(restorePromptAt(), 1, 50, (v) => {
+      config.restore_prompt_at = v;
+      changed();
+    })
   );
   settingRow(
     "Summon animation",
@@ -7819,8 +8042,16 @@ async function main() {
   // Never re-adopt a session the user closed: attaching cancels its
   // pending kill, so an app restart would resurrect every tab still in
   // its grace window. They stay under "Closing soon" instead.
-  const adoptable = sessions.filter((s) => !s.expires_ms && !hidden.has(s.id));
+  let adoptable = sessions.filter((s) => !s.expires_ms && !hidden.has(s.id));
+  // Past a handful, restoring everything is a wait the user did not ask
+  // for. Let them choose — nothing is lost either way, since what they
+  // leave out is still running and still in the sidebar.
+  if (config.restore_prompt !== false && adoptable.length > restorePromptAt()) {
+    const picked = await chooseRestore(adoptable);
+    adoptable = adoptable.filter((s) => picked.has(s.id));
+  }
   const alive = new Set(adoptable.map((s) => s.id));
+  const progress = adoptable.length ? showRestoreProgress(adoptable.length) : undefined;
 
   // Rebuild saved pane trees first, in the saved tab order. Any leaf whose
   // session is gone is pruned out, and a tab whose sessions have all gone
@@ -7835,9 +8066,11 @@ async function main() {
     const leaves = leavesOf(tree).filter((l) => !placed.has(l));
     if (!leaves.length) continue;
     const owner = leaves[0];
+    progress?.step(sessionLabel(sessions.find((s) => s.id === owner) ?? ({} as SessionInfo)));
     if ((await createTab(owner)) === undefined) continue;
     placed.add(owner);
     for (const leaf of leaves.slice(1)) {
+      progress?.step(sessionLabel(sessions.find((s) => s.id === leaf) ?? ({} as SessionInfo)));
       if ((await createTab(leaf, undefined, undefined, undefined, owner)) === undefined) continue;
       placed.add(leaf);
       paneTab.set(leaf, owner);
@@ -7852,8 +8085,11 @@ async function main() {
   }
   // Anything the layouts didn't account for opens as its own tab.
   for (const s of adoptable) {
-    if (!placed.has(s.id)) await createTab(s.id);
+    if (placed.has(s.id)) continue;
+    progress?.step(sessionLabel(s));
+    await createTab(s.id);
   }
+  progress?.done();
   saveLayouts();
   // `--workspace <name>` (e.g. from a shortcut) opens every template the
   // named workspace lists, on top of whatever sessions were adopted.
