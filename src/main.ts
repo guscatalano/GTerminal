@@ -137,6 +137,7 @@ interface AppConfig {
   clickable_links?: boolean;
   summon_hotkey?: string;
   bell?: string;
+  close_action?: string;
   paste_warn?: boolean;
   paste_warn_lines?: number;
   paste_warn_chars?: number;
@@ -6007,12 +6008,25 @@ function buildSettingsPage() {
     );
   }
 
-  settingsSection("Keyboard and input");
+  settingsSection("Window");
+  settingRow(
+    "Close button",
+    "What the window's × does. Hiding to the tray keeps the summon hotkey working — a hotkey that stops the moment you close the window is not much use. Either way your sessions are untouched: they live in the background daemon, not in the window. The tray icon summons the window on click, and its menu has Quit.",
+    mkSelect(
+      [["hide", "Hide to tray"], ["quit", "Quit"]],
+      config.close_action ?? "hide",
+      (v) => {
+        config.close_action = v;
+        changed();
+      }
+    )
+  );
   settingRow(
     "Summon hotkey",
     "Press this from anywhere in Windows to bring GTerminal to the front, and again to send it away. Set it by pressing the combination, or pick one from the list — Windows keeps a few combinations to itself (Alt+Space opens a window's system menu) and never lets the app see them, so those have to be chosen rather than pressed.",
     mkHotkeyPicker()
   );
+  settingsSection("Keyboard and input");
   settingRow(
     "Ctrl+F finds",
     "Open the find bar with Ctrl+F as well as Ctrl+Shift+F. Full-screen programs still receive the key, where it pages forward in vim and less.",

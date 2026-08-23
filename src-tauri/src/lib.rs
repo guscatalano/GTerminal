@@ -286,6 +286,55 @@ fn create_shortcut(path: String, workspace: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Bring the window back from wherever it went — hidden, minimized, or
+/// merely buried. Focus, not visibility, is what decides: a window you
+/// can see but cannot type into still needs raising.
+fn summon(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        if win.is_minimized().unwrap_or(false) {
+            let _ = win.unminimize();
+        }
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+}
+
+/// The close button hides to the tray by default, so the summon hotkey
+/// keeps working once the window is out of the way — a hotkey that stops
+/// working when you close the window is not much of a hotkey. Read fresh
+/// from config each time so the setting takes effect without a restart.
+fn close_hides() -> bool {
+    mux::read_config()
+        .get("close_action")
+        .and_then(|v| v.as_str())
+        .unwrap_or("hide")
+        == "hide"
+}
+
+/// Tell the user once that the app is still running. Closing a window and
+/// having the process stay alive is a surprise exactly once, and a silent
+/// surprise is the kind people report as a bug.
+fn note_first_hide(app: &AppHandle) {
+    let cfg = mux::read_config();
+    if cfg.get("tray_notice_shown").and_then(|v| v.as_bool()) == Some(true) {
+        return;
+    }
+    if let Some(tray) = app.tray_by_id("main") {
+        let hint = mux::read_config()
+            .get("summon_hotkey")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| format!(" — {s} brings it back"))
+            .unwrap_or_default();
+        let _ = tray.set_tooltip(Some(&format!("GTerminal is still running{hint}")));
+    }
+    let mut next = cfg;
+    if let Some(obj) = next.as_object_mut() {
+        obj.insert("tray_notice_shown".into(), Value::Bool(true));
+        let _ = mux::write_config(&next);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if std::env::args().any(|a| a == "--daemon") {
@@ -303,7 +352,59 @@ pub fn run() {
             // white pre-paint never flashes; the frontend shows it once the
             // theme is applied. Backstop: if the frontend never boots (dead
             // dev server, JS error), reveal the window after 5s anyway.
+            // Tray icon: the app's only face once the window is hidden,
+            // and the thing that makes a hidden window discoverable at all.
+            {
+                use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+                use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+                let show = MenuItem::with_id(app, "show", "Show GTerminal", true, None::<&str>)?;
+                let quit = MenuItem::with_id(app, "quit", "Quit GTerminal", true, None::<&str>)?;
+                let menu = Menu::with_items(
+                    app,
+                    &[&show, &PredefinedMenuItem::separator(app)?, &quit],
+                )?;
+                let mut tray = TrayIconBuilder::with_id("main")
+                    .tooltip("GTerminal")
+                    .menu(&menu)
+                    // Left-click summons; the menu is the right-click job,
+                    // or the left click could never do anything else.
+                    .show_menu_on_left_click(false)
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "show" => summon(app),
+                        "quit" => app.exit(0),
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            summon(tray.app_handle());
+                        }
+                    });
+                if let Some(icon) = app.default_window_icon() {
+                    tray = tray.icon(icon.clone());
+                }
+                tray.build(app)?;
+            }
+
             if let Some(win) = app.get_webview_window("main") {
+                // Closing hides by default rather than ending the process,
+                // which is what keeps the summon hotkey alive. Sessions were
+                // never at stake either way — they live in the daemon.
+                let closing = win.clone();
+                let handle = app.handle().clone();
+                win.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        if close_hides() {
+                            api.prevent_close();
+                            let _ = closing.hide();
+                            note_first_hide(&handle);
+                        }
+                    }
+                });
                 // Turn off Edge's accelerator keys. WebView2 leaves them on
                 // by default, which in a terminal means Ctrl+F opens
                 // find-on-page over ours, Ctrl+P offers to print the app,
