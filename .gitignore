@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Recordings from 
+pm run test:visual — regenerated on demand, and a
+# fresh 1MB+ GIF per run has no business in the history.
+docs/visual/

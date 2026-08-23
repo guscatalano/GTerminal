@@ -13,7 +13,8 @@
     "test:keys": "node tests/keys.mjs",
     "test:layout": "node tests/layout.mjs",
     "test:typing": "pwsh -NoProfile -File tests/typing.ps1",
-    "test:lifecycle": "pwsh -NoProfile -File tests/lifecycle.ps1"
+    "test:lifecycle": "pwsh -NoProfile -File tests/lifecycle.ps1",
+    "test:visual": "pwsh -NoProfile -File tests/visual.ps1"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",
