@@ -149,7 +149,10 @@ Start-Sleep -Seconds 2
 Start-Sleep -Milliseconds 800
 
 # ── a command runs, and its output comes back ──
-Send-Text "echo hello from a visual test"
+# Quoted deliberately. `echo` is Write-Output, so unquoted words arrive
+# as separate arguments and print one per line — correct PowerShell, but
+# in a recording it reads as the terminal breaking on spaces.
+Send-Text 'echo "hello from a visual test"'
 Key $VK_RETURN
 Start-Sleep -Seconds 2
 
@@ -161,7 +164,7 @@ Start-Sleep -Seconds 2
 # ── split the pane: Ctrl+Shift+D ──
 Key 0x44 @([byte]$VK_CTRL, [byte]$VK_SHIFT)   # D
 Start-Sleep -Seconds 3
-Send-Text "echo second pane"
+Send-Text 'echo "second pane"'
 Key $VK_RETURN
 Start-Sleep -Seconds 2
 
