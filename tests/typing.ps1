@@ -25,6 +25,13 @@ $r = [System.IO.StreamReader]::new($script:stream)
 # the connection when it fires, so timeouts must never hit the socket.
 $script:acc = ""
 $script:buf = New-Object byte[] 65536
+$script:chars = New-Object char[] 131072
+# A stateful decoder, not Encoding.GetString per read. A socket read can
+# land in the middle of a multi-byte character, and decoding each chunk
+# independently turns that character into U+FFFD — which would look
+# exactly like the daemon corrupting it, and is the first thing this
+# harness must not do while testing for precisely that fault.
+$script:dec = [System.Text.Encoding]::UTF8.GetDecoder()
 function Read-Event {
   param($timeoutMs = 2000, [switch]$spin)
   $deadline = [DateTime]::UtcNow.AddMilliseconds($timeoutMs)
@@ -32,7 +39,8 @@ function Read-Event {
     if ($script:stream.DataAvailable) {
       $n = $script:stream.Read($script:buf, 0, $script:buf.Length)
       if ($n -eq 0) { return $null }
-      $script:acc += [System.Text.Encoding]::UTF8.GetString($script:buf, 0, $n)
+      $cn = $script:dec.GetChars($script:buf, 0, $n, $script:chars, 0)
+      $script:acc += [string]::new($script:chars, 0, $cn)
     } elseif ([DateTime]::UtcNow -gt $deadline) {
       return $null
     } elseif ($spin) {
@@ -58,6 +66,19 @@ function Drain {
     $out += $l + "`n"
   }
   $out
+}
+
+# The data payloads with nothing removed — for the tests that are about
+# the control sequences themselves rather than the text.
+function Raw-Data {
+  param($jsonLines)
+  $text = ""
+  foreach ($line in ($jsonLines -split "`n")) {
+    if ($line -match '"data":"') {
+      try { $text += ($line | ConvertFrom-Json).data } catch {}
+    }
+  }
+  $text
 }
 
 function Strip-Ansi {
@@ -136,6 +157,7 @@ function Open-Shell {
   $c.NoDelay = $true
   $script:stream = $c.GetStream()
   $script:acc = ""
+  $script:dec = [System.Text.Encoding]::UTF8.GetDecoder()
   $script:w = [System.IO.StreamWriter]::new($script:stream)
   $script:w.NewLine = "`n"; $script:w.AutoFlush = $true
   $script:w.WriteLine("{""cmd"":""attach"",""id"":$sid}")
@@ -314,7 +336,124 @@ if ($multi -like "*33*" -and $multi -like "*77*") {
   "PASS multi-line input runs line by line (what the paste warning guards)"
 } else { $failures += "multi-line: expected both 33 and 77. Got: $multi" }
 
+# Control sequences must pass through untouched. The alternate screen is
+# the one that matters: every full-screen program uses it, and a terminal
+# that mangles the enter/leave pair leaves you looking at the wrong
+# buffer with no way back.
+Type-Text '[Console]::Write([char]27 + "[?1049h" + "ALTMARK" + [char]27 + "[?1049l")'
+Start-Sleep -Seconds 1
+$null = Drain 400
+Send-Key "`r"
+Start-Sleep -Seconds 3
+$altRaw = Raw-Data (Drain 800)
+# -like reads [ as a character class, so these are plain substring checks.
+if ($altRaw.Contains("[?1049h") -and $altRaw.Contains("ALTMARK") -and $altRaw.Contains("[?1049l")) {
+  "PASS alternate-screen enter and leave pass through intact"
+} else { $failures += "alt-buffer: the 1049 pair did not survive" }
+$afterAlt = Run-Line "echo (900+9)"
+if ($afterAlt -like "*909*") { "PASS the shell is normal again after the alternate screen" }
+else { $failures += "alt-buffer: shell not usable afterwards. Got: $afterAlt" }
+
+# Carriage-return overwrite: progress bars (npm, cargo, pip) redraw a
+# line in place rather than printing new ones.
+Type-Text '[Console]::Write("prog-aaa" + [char]13 + "prog-bbb" + [char]13 + "prog-ccc")'
+Start-Sleep -Seconds 1
+$null = Drain 400
+Send-Key "`r"
+Start-Sleep -Seconds 3
+$prog = Raw-Data (Drain 800)
+# Only the final frame is required. ConPTY re-renders from a screen
+# buffer rather than forwarding bytes, so frames overwritten before the
+# next render are legitimately coalesced away — a progress bar that spins
+# a thousand times does not reach us a thousand times. What must never
+# happen is the last frame going missing, which is the one left on screen.
+if ($prog -like "*prog-ccc*") { "PASS the final carriage-return frame arrives" }
+else { $failures += "progress: the last redraw frame was lost" }
+
+# A resize mid-output. Splits resize panes constantly, and the pty is
+# being written to while it happens.
+Type-Text "1..1500 | ForEach-Object { `"rs-`$_`" }"
+Start-Sleep -Seconds 1
+$null = Drain 400
+Send-Key "`r"
+Start-Sleep -Milliseconds 500
+$script:w.WriteLine('{"cmd":"resize","cols":80,"rows":24}')
+Start-Sleep -Milliseconds 300
+$script:w.WriteLine('{"cmd":"resize","cols":132,"rows":40}')
+Start-Sleep -Milliseconds 300
+$script:w.WriteLine('{"cmd":"resize","cols":120,"rows":30}')
+Start-Sleep -Seconds 6
+$rs = Strip-Ansi (Drain 1000)
+$rsHits = ([regex]::Matches($rs, "rs-\d+")).Count
+if ($rsHits -ge 1500) { "PASS output survives resizes mid-stream ($rsHits markers)" }
+else { $failures += "resize: expected 1500 markers through the resizes, saw $rsHits" }
+
+# Multi-byte characters landing on a read boundary. The daemon turns pty
+# bytes into text one chunk at a time, and a character split across two
+# reads is the classic way to produce U+FFFD. 20k three-byte characters
+# make the seam a certainty rather than a coincidence.
+Type-Text "-join (1..20000 | ForEach-Object { [char]0x65E5 })"
+Start-Sleep -Seconds 1
+$null = Drain 400
+Send-Key "`r"
+Start-Sleep -Seconds 8
+$wide = Raw-Data (Drain 1500)
+$bad = ([regex]::Matches($wide, [string][char]0xFFFD)).Count
+$good = ([regex]::Matches($wide, [string][char]0x65E5)).Count
+if ($bad -eq 0 -and $good -ge 20000) {
+  "PASS 20k multi-byte characters crossed the read boundary intact"
+} else {
+  $failures += "utf8-boundary: $bad replacement chars, $good good ones (wanted 0 and 20000)"
+}
+
 Close-Shell $exp
+
+# ── detach and reattach: the scrollback has to come back ──────────────
+# Closing a window detaches rather than kills, so the replay on reattach
+# is the whole promise of the daemon. Output written while nobody is
+# attached must still be there.
+$det = Open-Shell "pwsh"
+$null = Run-Line "echo detach-marker-before"
+$script:w.WriteLine('{"cmd":"detach"}')
+Start-Sleep -Milliseconds 500
+$det.Client.Close()
+Start-Sleep -Seconds 1
+
+$re = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $port)
+$re.NoDelay = $true
+$script:stream = $re.GetStream()
+$script:acc = ""
+$script:dec = [System.Text.Encoding]::UTF8.GetDecoder()
+$script:w = [System.IO.StreamWriter]::new($script:stream)
+$script:w.NewLine = "`n"; $script:w.AutoFlush = $true
+$script:w.WriteLine("{""cmd"":""attach"",""id"":$($det.Id)}")
+$null = Read-Event
+Start-Sleep -Seconds 2
+$replay = Strip-Ansi (Drain 1500)
+if ($replay -like "*detach-marker-before*") { "PASS reattaching replays the scrollback" }
+else { $failures += "reattach: the earlier output was not replayed. Got: $replay" }
+$stillWorks = Run-Line "echo (700+7)"
+if ($stillWorks -like "*707*") { "PASS a reattached session still takes input" }
+else { $failures += "reattach: session not usable. Got: $stillWorks" }
+Close-Shell ([pscustomobject]@{ Id = $det.Id; Client = $re })
+
+# ── a shell that exits ends the session, and the daemon says so ───────
+# Closing a shell must tell the client, rather than leave it attached to
+# nothing. Ctrl+D is not the trigger on Windows — PSReadLine does not
+# bind it to EOF the way readline does — so this uses the exit that
+# PowerShell actually has.
+$eof = Open-Shell "pwsh"
+Type-Text "exit"
+Send-Key "`r"
+$sawExit = $false
+for ($i = 0; $i -lt 30; $i++) {
+  $ev = Read-Event -timeoutMs 500
+  if ($null -eq $ev) { continue }
+  if ($ev -like '*"ev":"exit"*') { $sawExit = $true; break }
+}
+if ($sawExit) { "PASS a shell that exits ends the session and the daemon reports it" }
+else { $failures += "exit: no exit event after the shell quit" }
+$eof.Client.Close()
 
 # ── latency, measured on the default shell ────────────────────────────
 $latSess = Open-Shell "pwsh"
