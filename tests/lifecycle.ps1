@@ -573,6 +573,89 @@ foreach ($sid in $many) {
   try { $null = Request2 $port "{""cmd"":""kill"",""id"":$sid}" 0 } catch {}
 }
 
+# ── the grace window, which is the whole "close never kills" promise ──
+# Closing a tab must not end the process. The first kill is soft: the
+# session keeps running, marked as closing, and attaching to it again
+# cancels the doom. Getting this wrong loses work silently.
+Set-Content "$env:LOCALAPPDATA\GTerminal\config.json" '{"grace_minutes": 5, "prediction": "off"}'
+$g1 = (Request2 $port '{"cmd":"create","cols":80,"rows":24}').id
+$null = Request2 $port "{""cmd"":""kill"",""id"":$g1}"
+Start-Sleep -Seconds 1
+$after = @((Request2 $port '{"cmd":"list"}').sessions | Where-Object { $_.id -eq $g1 })
+if ($after.Count -eq 1) { Pass "a closed session survives its grace window" }
+else { Fail "grace" "the session vanished on the first kill" }
+if ($after[0].expires_ms) { Pass "and is marked as closing" }
+else { Fail "grace" "no expires_ms on a soft-killed session" }
+
+# Reattaching cancels the pending kill — this is the undo.
+$gc = New-Conn $port
+$gc.Writer.WriteLine("{""cmd"":""attach"",""id"":$g1}")
+$null = Read-Line2 $gc
+Start-Sleep -Seconds 1
+$revived = @((Request2 $port '{"cmd":"list"}').sessions | Where-Object { $_.id -eq $g1 })
+if ($revived.Count -eq 1 -and -not $revived[0].expires_ms) {
+  Pass "reattaching cancels the pending kill"
+} else { Fail "grace" "still marked for death after reattaching" }
+$gc.Client.Close()
+
+# The second kill is the real one.
+$null = Request2 $port "{""cmd"":""kill"",""id"":$g1}"
+$null = Request2 $port "{""cmd"":""kill"",""id"":$g1}"
+Start-Sleep -Seconds 2
+$gone = @((Request2 $port '{"cmd":"list"}').sessions | Where-Object { $_.id -eq $g1 })
+if ($gone.Count -eq 0) { Pass "killing twice ends the session for real" }
+else { Fail "grace" "session survived a hard kill" }
+
+# ── writing to a session that is gone ──
+# A window can hold a stale id across a kill; the daemon has to say no
+# rather than fall over, because it is holding everyone else's sessions.
+$keep = (Request2 $port '{"cmd":"create","cols":80,"rows":24}').id
+$stale = New-Conn $port
+$stale.Writer.WriteLine("{""cmd"":""write"",""id"":$g1,""data"":""hello""}")
+$stale.Writer.WriteLine("{""cmd"":""resize"",""id"":$g1,""cols"":80,""rows"":24}")
+Start-Sleep -Seconds 1
+try { $stale.Client.Close() } catch {}
+$alive2 = @((Request2 $port '{"cmd":"list"}').sessions | Where-Object { $_.id -eq $keep })
+if ($alive2.Count -eq 1) { Pass "writing to a dead session does not disturb the living" }
+else { Fail "stale-write" "the daemon lost a session after a write to a dead id" }
+
+# ── rapid create and kill ──
+# Windows open and close tabs fast; a race in the session map shows up as
+# a daemon that stops answering rather than as an error.
+$burst = @()
+foreach ($i in 1..10) { $burst += (Request2 $port '{"cmd":"create","cols":80,"rows":24}').id }
+foreach ($b in $burst) { $null = Request2 $port "{""cmd"":""kill"",""id"":$b}" }
+foreach ($b in $burst) { try { $null = Request2 $port "{""cmd"":""kill"",""id"":$b}" 0 } catch {} }
+Start-Sleep -Seconds 2
+$stillThere = Request2 $port '{"cmd":"list"}'
+if ($null -ne $stillThere) { Pass "the daemon survives ten sessions opened and closed in a burst" }
+else { Fail "burst" "daemon stopped answering after a create/kill burst" }
+
+# ── absurd resizes ──
+# A zero-column terminal is a division by zero waiting to happen, and a
+# hundred-thousand-column one is an allocation. Neither may take the
+# daemon down.
+$rz = (Request2 $port '{"cmd":"create","cols":80,"rows":24}').id
+$rc = New-Conn $port
+$rc.Writer.WriteLine("{""cmd"":""attach"",""id"":$rz}")
+$null = Read-Line2 $rc
+$rc.Writer.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')
+Start-Sleep -Seconds 4
+foreach ($dim in '{"cols":0,"rows":0}', '{"cols":1,"rows":1}', '{"cols":9999,"rows":9999}', '{"cols":120,"rows":30}') {
+  $rc.Writer.WriteLine("{""cmd"":""resize""," + $dim.Substring(1))
+  Start-Sleep -Milliseconds 300
+}
+Start-Sleep -Seconds 1
+$rc.Writer.WriteLine('{"cmd":"write","data":"echo resize-survivor\r"}')
+Start-Sleep -Seconds 3
+if ((Drain2 $rc 800) -like "*resize-survivor*") { Pass "a session survives absurd resizes" }
+else { Fail "resize-extremes" "the session stopped responding after extreme resizes" }
+$rc.Client.Close()
+foreach ($k in @($keep, $rz)) {
+  $null = Request2 $port "{""cmd"":""kill"",""id"":$k}"
+  try { $null = Request2 $port "{""cmd"":""kill"",""id"":$k}" 0 } catch {}
+}
+
 # ════ cleanup ════
 foreach ($d in $script:daemons) {
   if (Get-Process -Id $d -ErrorAction SilentlyContinue) { Stop-DaemonTree $d }

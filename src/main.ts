@@ -22,6 +22,7 @@ import {
 import type { PasteLimits } from "./keys";
 import { autoTitle, SHELLS, BORING_TITLE } from "./titles";
 import { fmtBytes, fmtRate, fmtDuration, pct, fmtSize, clipPreview } from "./format";
+import { adoptable as adoptableOf, inSavedOrder, shouldAsk, tabForNumber } from "./restore";
 import { BlockTracker } from "./blocks";
 import type { Block } from "./blocks";
 import {
@@ -3927,9 +3928,7 @@ function closeTabViaKeyboard(id: number) {
 /// Returns false when there is no such tab, so the key falls through to
 /// the shell rather than being swallowed for nothing.
 function jumpToTab(n: number): boolean {
-  const ids = orderedIds();
-  if (!ids.length) return false;
-  const target = n === 9 ? ids[ids.length - 1] : ids[n - 1];
+  const target = tabForNumber(orderedIds(), n);
   if (target === undefined) return false;
   setActive(target);
   return true;
@@ -8026,19 +8025,15 @@ async function main() {
   saveCustomBadges();
   // Restore last session's tab order; unknown sessions go to the end.
   const savedOrder: number[] = JSON.parse(localStorage.getItem("gterm-order") ?? "[]");
-  const rank = (id: number) => {
-    const i = savedOrder.indexOf(id);
-    return i === -1 ? Number.MAX_SAFE_INTEGER : i;
-  };
-  sessions.sort((a, b) => rank(a.id) - rank(b.id) || a.created_ms - b.created_ms);
+  const ordered = inSavedOrder(sessions, savedOrder);
   // Never re-adopt a session the user closed: attaching cancels its
   // pending kill, so an app restart would resurrect every tab still in
   // its grace window. They stay under "Closing soon" instead.
-  let adoptable = sessions.filter((s) => !s.expires_ms && !hidden.has(s.id));
+  let adoptable = adoptableOf(ordered, hidden);
   // Past a handful, restoring everything is a wait the user did not ask
   // for. Let them choose — nothing is lost either way, since what they
   // leave out is still running and still in the sidebar.
-  if (config.restore_prompt !== false && adoptable.length > restorePromptAt()) {
+  if (shouldAsk(adoptable.length, config.restore_prompt !== false, restorePromptAt())) {
     boot.hide();
     const picked = await chooseRestore(adoptable);
     boot.show();

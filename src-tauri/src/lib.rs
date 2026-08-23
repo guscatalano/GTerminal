@@ -395,17 +395,21 @@ fn summon_label() -> Option<String> {
 /// is the only place left to ask "how do I get it back", so the answer
 /// lives there permanently rather than in a notice shown once, at the one
 /// moment nobody is looking at the tray.
-fn tray_text() -> (String, String) {
-    match summon_label() {
-        Some(key) => (
-            format!("GTerminal — press {key} to show"),
-            format!("Show GTerminal\t{key}"),
+fn tray_strings(key: Option<&str>) -> (String, String) {
+    match key {
+        Some(k) => (
+            format!("GTerminal — press {k} to show"),
+            format!("Show GTerminal\t{k}"),
         ),
         None => (
             "GTerminal — no summon hotkey set".into(),
             "Show GTerminal".into(),
         ),
     }
+}
+
+fn tray_text() -> (String, String) {
+    tray_strings(summon_label().as_deref())
 }
 
 fn apply_tray_text(app: &AppHandle) -> Result<(), String> {
@@ -564,7 +568,29 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::pretty_hotkey;
+    use super::{pretty_hotkey, tray_strings};
+
+    /// Once the window is hidden the tray is the only place left to ask
+    /// how to get it back, so it has to answer — and say so plainly when
+    /// there is no answer, rather than implying a key that does nothing.
+    #[test]
+    fn the_tray_says_how_to_get_the_window_back() {
+        let (tip, item) = tray_strings(Some("Alt+Space"));
+        assert!(tip.contains("Alt+Space"), "tooltip must name the key: {tip}");
+        assert!(item.contains("Alt+Space"), "menu item must name the key: {item}");
+        assert!(item.starts_with("Show GTerminal"), "menu item is still an action: {item}");
+        // A tab between label and key is what puts the key in the
+        // accelerator column rather than in the middle of the label.
+        assert!(item.contains('\t'), "key belongs in its own column: {item:?}");
+    }
+
+    #[test]
+    fn with_no_hotkey_it_says_so() {
+        let (tip, item) = tray_strings(None);
+        assert!(tip.contains("no summon hotkey"), "{tip}");
+        assert_eq!(item, "Show GTerminal");
+        assert!(!item.contains('\t'), "no key means no accelerator column: {item:?}");
+    }
 
     /// Once the window is hidden the tray is the only place left to ask
     /// how to get it back, so the key it names has to be the key people
