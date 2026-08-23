@@ -20,6 +20,8 @@ import {
   pasteLineCount,
 } from "./keys";
 import type { PasteLimits } from "./keys";
+import { BlockTracker } from "./blocks";
+import type { Block } from "./blocks";
 import "@xterm/xterm/css/xterm.css";
 import "./styles.css";
 
@@ -34,6 +36,7 @@ interface Tab {
   shellB: HTMLElement;
   webgl?: WebglAddon;
   search: SearchAddon;
+  blocks: BlockTracker;
 }
 
 interface SessionInfo {
@@ -3348,6 +3351,53 @@ async function applySummonHotkey() {
   }
 }
 
+// ── command blocks ──────────────────────────────────────────────────────
+
+/// Scroll to the prompt above or below the top of the view. Measuring
+/// from viewportY rather than the cursor means this walks the scrollback
+/// you are looking at, not the one the shell is writing to.
+function jumpPrompt(dir: -1 | 1) {
+  const tab = activeId === null ? undefined : tabs.get(activeId);
+  if (!tab) return;
+  const from = tab.term.buffer.active.viewportY;
+  const target = dir < 0 ? tab.blocks.prevPrompt(from) : tab.blocks.nextPrompt(from);
+  if (target === undefined) return;
+  tab.term.scrollToLine(target);
+}
+
+/// Which buffer row a pointer is over. xterm does not expose this, so it
+/// comes from the row height and the scroll position.
+function lineAtPointer(tab: Tab, clientY: number): number | undefined {
+  const el = tab.term.element;
+  if (!el || tab.term.rows === 0) return undefined;
+  const r = el.getBoundingClientRect();
+  const rowHeight = r.height / tab.term.rows;
+  if (rowHeight <= 0) return undefined;
+  const row = Math.floor((clientY - r.top) / rowHeight);
+  if (row < 0 || row >= tab.term.rows) return undefined;
+  return tab.term.buffer.active.viewportY + row;
+}
+
+/// The text of a block. Without the command, the first row is skipped —
+/// that is the prompt and the command echoed onto it, which is exactly
+/// what you do not want when copying an error to paste elsewhere.
+function blockText(tab: Tab, b: Block, withCommand: boolean): string {
+  const buf = tab.term.buffer.active;
+  const first = withCommand ? b.prompt.line : (b.input?.line ?? b.prompt.line) + 1;
+  const last = b.end && !b.end.isDisposed ? b.end.line - 1 : buf.baseY + buf.cursorY;
+  const out: string[] = [];
+  for (let i = first; i <= last; i++) {
+    out.push(buf.getLine(i)?.translateToString(true) ?? "");
+  }
+  return out.join("\n").replace(/\s+$/, "");
+}
+
+function copyText(text: string) {
+  if (!text) return;
+  pushClip(text);
+  navigator.clipboard.writeText(text).catch(() => {});
+}
+
 // ── find in terminal ────────────────────────────────────────────────────
 
 const findbar = document.getElementById("findbar")!;
@@ -3684,6 +3734,11 @@ function makeShortcutHandler(getId: () => number) {
       : e.key === "ArrowUp" ? "up"
       : e.key === "ArrowDown" ? "down"
       : undefined;
+    // Prompt-to-prompt navigation: skip a build log in one keystroke.
+    if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      jumpPrompt(e.key === "ArrowUp" ? -1 : 1);
+      return false;
+    }
     if (split && arrow && e.altKey && e.ctrlKey && e.shiftKey) {
       movePaneDir(arrow);
       return false;
@@ -3909,6 +3964,29 @@ async function createTab(
   term.loadAddon(fit);
   const search = new SearchAddon();
   term.loadAddon(search);
+  // Command blocks. The shell marks its prompts and exit codes with
+  // OSC 133; xterm hands us the payload and we anchor it to a marker,
+  // which follows the row as the scrollback moves and disposes itself
+  // when the row is trimmed. Returning true means we consumed it, so the
+  // marks never reach the screen.
+  const blocks = new BlockTracker();
+  term.parser.registerOscHandler(133, (data) => {
+    const marker = term.registerMarker(0);
+    if (!marker) return true;
+    blocks.feed(data, marker);
+    // Mark failures in the overview ruler — the scrollbar — rather than
+    // in the text, where a decoration would sit on the first column of
+    // output. Failures only: marking every command makes a barcode and
+    // the failures stop standing out.
+    const done = blocks.lastClosed();
+    if (data.startsWith("D") && done?.exit !== undefined && done.exit !== 0) {
+      term.registerDecoration({
+        marker: done.prompt as ReturnType<Terminal["registerMarker"]> & object,
+        overviewRulerOptions: { color: "#e06c75", position: "left" },
+      });
+    }
+    return true;
+  });
   search.onDidChangeResults(({ resultIndex, resultCount }) => {
     if (findId !== id) return;
     findCount.textContent =
@@ -4008,7 +4086,7 @@ async function createTab(
     tabFocus.set(id, id);
   }
 
-  const tab: Tab = { id, term, fit, pane, button, label, icon, shellB, webgl, search };
+  const tab: Tab = { id, term, fit, pane, button, label, icon, shellB, webgl, search, blocks };
   tabs.set(id, tab);
 
   button.addEventListener("mousedown", (e) => {
@@ -4158,6 +4236,26 @@ async function createTab(
           term.focus();
         },
       });
+      // The command you right-clicked on. Copying an error usually means
+      // copying its output without the prompt line, or the command
+      // together with what it printed — the two things people otherwise
+      // do by hand with a careful mouse drag.
+      const self = tabs.get(id);
+      const row = self ? lineAtPointer(self, y) : undefined;
+      const blk = self && row !== undefined ? self.blocks.blockAt(row) : undefined;
+      if (self && blk) {
+        const status =
+          blk.exit === undefined ? "" : blk.exit === 0 ? " (succeeded)" : ` (exit ${blk.exit})`;
+        items.push("sep");
+        items.push({
+          label: `Copy output${status}`,
+          action: () => copyText(blockText(self, blk, false)),
+        });
+        items.push({
+          label: "Copy command and output",
+          action: () => copyText(blockText(self, blk, true)),
+        });
+      }
       const paneKey = paneTab.get(id);
       if (paneKey !== undefined && isSplit(paneKey)) {
         // Arranging is a mode now, not eight menu rows: the presets and

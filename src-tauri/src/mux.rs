@@ -43,13 +43,36 @@ const MODE_RESET: &str =
 /// prompt also emits OSC 9;9 with the current directory — the same
 /// convention Windows Terminal uses for cwd tracking. Also mirrors $pwd
 /// into $global:__gtpwd for the predictor (class methods can't see $pwd).
-const PROMPT_CMD: &str = r#"$global:__gtp = $function:prompt; $function:prompt = { $global:__gtpwd = "$pwd"; "$(& $global:__gtp)" + [char]27 + ']9;9;' + "$pwd" + [char]7 }"#;
+const PROMPT_CMD: &str = r#"$global:__gtp = $function:prompt; $global:__gtbid = -1; $global:__gta = $false; $function:prompt = { $__ok = $?; $__x = $LASTEXITCODE; $global:__gtpwd = "$pwd"; $__e = [char]27; $__b = [char]7; $__pre = ''; $__h = Get-History -Count 1; if ($__h -and $__h.Id -ne $global:__gtbid) { $global:__gtbid = $__h.Id; if ($global:__gta) { $__c = if ($__ok) { 0 } elseif ($__x -is [int] -and $__x -ne 0) { $__x } else { 1 }; $__pre = "$__e]133;D;$__c$__b" } }; $global:__gta = $true; $__pre + "$__e]133;A$__b" + "$(& $global:__gtp)" + "$__e]9;9;$pwd$__b" + "$__e]133;B$__b" }"#;
 
 /// PROMPT_CMD plus command logging: each prompt appends the command that
 /// just ran (cwd TAB commandline) to commands.log — the data source for
 /// the per-directory predictor. Used when history recording is enabled.
-const PROMPT_CMD_LOG: &str = r#"$global:__gtp = $function:prompt; $global:__gtlog = Join-Path $env:LOCALAPPDATA 'GTerminal\commands.log'; $function:prompt = { $global:__gtpwd = "$pwd"; $__gh = Get-History -Count 1; if ($__gh -and $__gh.Id -ne $global:__gthid) { $global:__gthid = $__gh.Id; try { Add-Content -LiteralPath $global:__gtlog -Value ("$pwd" + [char]9 + ($__gh.CommandLine -replace "[`r`n]+", ' ')) -ErrorAction SilentlyContinue } catch {} }; "$(& $global:__gtp)" + [char]27 + ']9;9;' + "$pwd" + [char]7 }"#;
+const PROMPT_CMD_LOG: &str = r#"$global:__gtp = $function:prompt; $global:__gtlog = Join-Path $env:LOCALAPPDATA 'GTerminal\commands.log'; $global:__gtbid = -1; $global:__gta = $false; $function:prompt = { $__ok = $?; $__x = $LASTEXITCODE; $global:__gtpwd = "$pwd"; $__e = [char]27; $__b = [char]7; $__pre = ''; $__h = Get-History -Count 1; if ($__h -and $__h.Id -ne $global:__gtbid -and $global:__gta) { $global:__gtbid = $__h.Id; $__c = if ($__ok) { 0 } elseif ($__x -is [int] -and $__x -ne 0) { $__x } else { 1 }; $__pre = "$__e]133;D;$__c$__b"; try { Add-Content -LiteralPath $global:__gtlog -Value ("$pwd" + [char]9 + ($__h.CommandLine -replace "[`r`n]+", ' ')) -ErrorAction SilentlyContinue } catch {} }; $global:__gta = $true; $__pre + "$__e]133;A$__b" + "$(& $global:__gtp)" + "$__e]9;9;$pwd$__b" + "$__e]133;B$__b" }"#;
 
+/// OSC 133 shell integration, appended to whichever prompt hook is in
+/// use. Emitted from the prompt because that is the only place PowerShell
+/// gives us that runs between commands:
+///
+///   D;<code>  closes the command that just ran — it arrives at the *top
+///             of the next prompt*, which is the first moment the shell
+///             can know how it went
+///   A         this prompt starts here
+///   B         the prompt has finished printing; typing starts here
+///
+/// C (output starts) is deliberately absent: PowerShell has no
+/// about-to-execute hook, and a mark we cannot place honestly is worse
+/// than no mark.
+///
+/// The exit code is not simply $LASTEXITCODE, which only native
+/// executables set — a failing cmdlet leaves it stale from whatever ran
+/// before, so reading it alone reports failures as successes, or blames
+/// an innocent command for an old failure. $? decides first;
+/// $LASTEXITCODE is only trusted to supply the number.
+///
+/// The history id check distinguishes "a command finished" from "the
+/// prompt was redrawn" — pressing Enter on an empty line runs nothing and
+/// must not close a block.
 /// A real PSReadLine predictor plugin (ICommandPredictor) fed by
 /// commands.log: suggests full commands you've run before, ranked by
 /// frequency and recency with a strong boost for the current directory.

@@ -385,6 +385,63 @@ $n2.Client.Close()
 $null = Request2 $port "{""cmd"":""kill"",""id"":$id9}"
 try { $null = Request2 $port "{""cmd"":""kill"",""id"":$id9}" 0 } catch {}
 
+# ── OSC 133 command blocks: marks, and honest exit codes ──
+# The frontend's parsing is unit-tested (tests/blocks.mjs); this covers the
+# half that lives in PowerShell, where the risk is. Exit codes especially:
+# $LASTEXITCODE is only set by native executables, so a naive hook reports
+# a failing cmdlet as a success, or blames it for an older failure.
+Set-Content "$env:LOCALAPPDATA\GTerminal\config.json" '{"grace_minutes": 5, "prediction": "off"}'
+$id12 = (Request2 $port '{"cmd":"create","cols":110,"rows":30}').id
+$b1 = New-Conn $port
+$b1.Writer.WriteLine("{""cmd"":""attach"",""id"":$id12}")
+$null = Read-Line2 $b1
+$b1.Writer.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')
+Start-Sleep -Seconds 5
+$firstPrompt = Drain2 $b1 2000
+if ($firstPrompt -like "*]133;A*" -and $firstPrompt -like "*]133;B*") {
+  Pass "prompt emits OSC 133 A and B marks"
+} else { Fail "osc133-ab" "no 133;A / 133;B in the first prompt" }
+# The very first prompt closes nothing, so it must not claim a command ran.
+if ($firstPrompt -like "*]133;D*") {
+  Fail "osc133-phantom" "first prompt emitted a D for a command that never ran"
+} else { Pass "the first prompt emits no D" }
+
+# A native command with a real exit code.
+$b1.Writer.WriteLine('{"cmd":"write","data":"cmd /c exit 3\r"}')
+Start-Sleep -Seconds 3
+$out133 = Drain2 $b1 2000
+if ($out133 -like "*]133;D;3*") { Pass "native exit code reported as 133;D;3" }
+else { Fail "osc133-native" "expected 133;D;3 after 'cmd /c exit 3'" }
+
+# Success is 0.
+$b1.Writer.WriteLine('{"cmd":"write","data":"echo gterm-ok\r"}')
+Start-Sleep -Seconds 3
+$okOut = Drain2 $b1 2000
+if ($okOut -like "*]133;D;0*") { Pass "a successful command reports 133;D;0" }
+else { Fail "osc133-ok" "expected 133;D;0 after a successful command" }
+
+# A failing *cmdlet* sets no $LASTEXITCODE. Reading that variable alone
+# would report the previous command's 0 here, marking a failure green.
+$b1.Writer.WriteLine('{"cmd":"write","data":"Get-Item C:\\gterm-does-not-exist-xyz\r"}')
+Start-Sleep -Seconds 3
+$cmdletOut = Drain2 $b1 2000
+if ($cmdletOut -like "*]133;D;0*") {
+  Fail "osc133-cmdlet" "failing cmdlet reported as success — `$? is being ignored"
+} elseif ($cmdletOut -like "*]133;D;*") {
+  Pass "a failing cmdlet reports a non-zero code"
+} else { Fail "osc133-cmdlet" "no D mark after a failing cmdlet" }
+
+# Enter on an empty line runs nothing, so nothing may be closed.
+$b1.Writer.WriteLine('{"cmd":"write","data":"\r"}')
+Start-Sleep -Seconds 2
+$emptyOut = Drain2 $b1 2000
+if ($emptyOut -like "*]133;D*") {
+  Fail "osc133-empty" "empty Enter emitted a D for a command that never ran"
+} else { Pass "an empty line closes no block" }
+$b1.Client.Close()
+$null = Request2 $port "{""cmd"":""kill"",""id"":$id12}"
+try { $null = Request2 $port "{""cmd"":""kill"",""id"":$id12}" 0 } catch {}
+
 # ════ cleanup ════
 foreach ($d in $script:daemons) {
   if (Get-Process -Id $d -ErrorAction SilentlyContinue) { Stop-DaemonTree $d }
