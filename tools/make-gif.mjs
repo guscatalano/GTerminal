@@ -11,19 +11,46 @@
 import { readFileSync, writeFileSync, readdirSync } from "fs";
 import { join } from "path";
 
-const dir = process.argv[2];
-const out = process.argv[3] ?? "out.gif";
+// A GIF of a native-resolution recording would be enormous — every frame
+// is stored whole, so it scales with pixels × frames. The video is the
+// full-quality artefact; the GIF is the one you can paste somewhere, so
+// it gets to be smaller and choppier on purpose.
+//   node tools/make-gif.mjs <frames> [out.gif] [--scale=0.5] [--every=2]
+const args = process.argv.slice(2);
+const flag = (name, def) => {
+  const hit = args.find((a) => a.startsWith(`--${name}=`));
+  return hit ? Number(hit.split("=")[1]) : def;
+};
+const positional = args.filter((a) => !a.startsWith("--"));
+const dir = positional[0];
+const out = positional[1] ?? "out.gif";
+const scale = flag("scale", 1);
+const every = Math.max(1, flag("every", 1));
 if (!dir) {
-  console.error("usage: node tools/make-gif.mjs <frames-folder> [out.gif]");
+  console.error("usage: node tools/make-gif.mjs <frames-folder> [out.gif] [--scale=] [--every=]");
   process.exit(1);
 }
 const meta = JSON.parse(readFileSync(join(dir, "meta.json"), "utf8"));
-const files = readdirSync(dir).filter((f) => f.endsWith(".bgra")).sort();
+const files = readdirSync(dir)
+  .filter((f) => f.endsWith(".bgra"))
+  .sort()
+  .filter((_, i) => i % every === 0);
 if (!files.length) {
   console.error("no frames in " + dir);
   process.exit(1);
 }
-const { width: W, height: H, stride, delayMs } = meta;
+const srcW = meta.width, srcH = meta.height, stride = meta.stride;
+const W = Math.max(2, Math.round(srcW * scale) & ~1);
+const H = Math.max(2, Math.round(srcH * scale) & ~1);
+const delayMs = meta.delayMs * every;
+
+/// Nearest-neighbour, deliberately. A blur would invent colours, and the
+/// palette has 256 slots to spend on the ones actually in the recording.
+function sample(f, x, y) {
+  const sx = Math.min(srcW - 1, Math.round((x * srcW) / W));
+  const sy = Math.min(srcH - 1, Math.round((y * srcH) / H));
+  return sy * stride + sx * 4;
+}
 
 // ── palette ────────────────────────────────────────────────────────────
 // One global palette for the whole recording, so frames can be written
@@ -37,7 +64,7 @@ function buildPalette(frames) {
     for (const f of frames) {
       for (let y = 0; y < H && !overflow; y++) {
         for (let x = 0; x < W; x++) {
-          const i = y * stride + x * 4;
+          const i = sample(f, x, y);
           const key =
             ((f[i + 2] >> shift) << (bits * 2)) | ((f[i + 1] >> shift) << bits) | (f[i] >> shift);
           if (!seen.has(key)) {
@@ -67,7 +94,7 @@ function toIndices(f) {
   const px = Buffer.alloc(W * H);
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
-      const i = y * stride + x * 4;
+      const i = sample(f, x, y);
       const key =
         ((f[i + 2] >> shift) << (bits * 2)) | ((f[i + 1] >> shift) << bits) | (f[i] >> shift);
       px[y * W + x] = index.get(key) ?? 0;

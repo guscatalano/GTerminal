@@ -10,10 +10,33 @@
 # its daemon, sessions and config never touch the ones you are using. The
 # hotkey it claims is deliberately obscure so it cannot fight the one your
 # own window has registered.
+param(
+  # Skip the countdown. For unattended runs only — the point of the
+  # countdown is that a person is usually sitting there.
+  [switch]$Yes
+)
 $ErrorActionPreference = "Stop"
 $repo = Split-Path $PSScriptRoot -Parent
 $exe = Join-Path $repo "src-tauri\target\debug\gterminal.exe"
 if (-not (Test-Path $exe)) { Write-Error "build first: cargo build in src-tauri" }
+
+# This test takes the foreground and types into whatever has focus. If
+# someone is using the machine, their typing lands in the recording and
+# the test's keystrokes land in their work — both are ruined, and the
+# only warning they get is their window jumping to the front. So: say so,
+# and give them time to stop it.
+if (-not $Yes) {
+  Write-Host ""
+  Write-Host "  This test takes over the keyboard and the foreground window" -ForegroundColor Yellow
+  Write-Host "  for about 45 seconds. It opens its own GTerminal window and" -ForegroundColor Yellow
+  Write-Host "  types into it. Do not use the machine while it runs." -ForegroundColor Yellow
+  Write-Host ""
+  foreach ($s in 5..1) {
+    Write-Host "`r  starting in $s - press Ctrl+C to cancel " -NoNewline -ForegroundColor Yellow
+    Start-Sleep -Seconds 1
+  }
+  Write-Host "`r  starting                                   "
+}
 
 $failures = @()
 function Pass { param($n) "PASS $n" }
@@ -107,10 +130,19 @@ $ourPids = @($app.Id) + @(
 Set-Content $pidFile -Value $ourPids
 Start-Sleep -Seconds 6      # let the shell reach its first prompt
 
+# Pin the window to a known size, and record a canvas that size: the
+# largest state the run reaches is then captured 1:1 rather than scaled
+# down to fit a canvas measured from whatever size it happened to open
+# at. Terminal text is small — anything less than native is unreadable.
+$RECW = 1280; $RECH = 800
+[void]$U::SetWindowPos($hwnd, [IntPtr]::Zero, 100, 80, $RECW, $RECH, 0x0004)
+Start-Sleep -Seconds 2
+
 $frames = Join-Path $env:TEMP "gterm-visual-frames"
 $rec = Start-Process pwsh -PassThru -WindowStyle Hidden -ArgumentList @(
   "-NoProfile", "-File", (Join-Path $repo "tools\record-window.ps1"),
-  "-ProcessId", $app.Id, "-Seconds", "38", "-Fps", "10", "-Scale", "0.6", "-Out", $frames
+  "-ProcessId", $app.Id, "-Seconds", "38", "-Fps", "10",
+  "-Width", $RECW, "-Height", $RECH, "-Quality", "94", "-Out", $frames
 )
 Start-Sleep -Seconds 2
 [void]$U::SetForegroundWindow($hwnd)
@@ -148,9 +180,10 @@ Key $VK_ESC
 Start-Sleep -Seconds 1
 
 # ── resize: the fit path, which decides how many rows the shell gets ──
-[void]$U::SetWindowPos($hwnd, [IntPtr]::Zero, 120, 120, 900, 560, 0x0004)
+# Both sizes stay inside the canvas, so nothing is ever scaled up.
+[void]$U::SetWindowPos($hwnd, [IntPtr]::Zero, 100, 80, 980, 620, 0x0004)
 Start-Sleep -Seconds 2
-[void]$U::SetWindowPos($hwnd, [IntPtr]::Zero, 120, 120, 1240, 780, 0x0004)
+[void]$U::SetWindowPos($hwnd, [IntPtr]::Zero, 100, 80, $RECW, $RECH, 0x0004)
 Start-Sleep -Seconds 2
 if ($U::IsWindowVisible($hwnd)) { Pass "the window survives being resized" }
 else { Fail "resize" "the window vanished during resize" }
@@ -186,7 +219,10 @@ New-Item -ItemType Directory -Force $outDir | Out-Null
 $avi = Join-Path $outDir "window.avi"
 $gif = Join-Path $outDir "window.gif"
 node (Join-Path $repo "tools\make-avi.mjs") $frames $avi
-node (Join-Path $repo "tools\make-gif.mjs") $frames $gif
+# The GIF is the paste-into-a-message version: half size, every other
+# frame. At native resolution it would be tens of megabytes, since a GIF
+# stores every frame whole.
+node (Join-Path $repo "tools\make-gif.mjs") $frames $gif --scale=0.5 --every=2
 
 # ── cleanup: the app first, then whatever daemon it started ──
 try { Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue } catch {}

@@ -152,6 +152,7 @@ interface AppConfig {
   summon_hotkey?: string;
   bell?: string;
   close_action?: string;
+  summon_animation?: string;
   paste_warn?: boolean;
   paste_warn_lines?: number;
   paste_warn_chars?: number;
@@ -6037,6 +6038,18 @@ function buildSettingsPage() {
       config.close_action ?? "hide",
       (v) => {
         config.close_action = v;
+        changed();
+      }
+    )
+  );
+  settingRow(
+    "Summon animation",
+    "Slide the window in from the top edge when it is summoned, and back out when it hides — the way a quake console does. Appearing and vanishing instantly reads as a glitch; a short slide says the window came from somewhere. Off makes it instant.",
+    mkSelect(
+      [["slide", "Slide"], ["none", "Instant"]],
+      config.summon_animation ?? "slide",
+      (v) => {
+        config.summon_animation = v;
         changed();
       }
     )

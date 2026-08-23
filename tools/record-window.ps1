@@ -14,7 +14,14 @@ param(
   [string]$Title = "GTerminal",
   [double]$Seconds = 6,
   [int]$Fps = 8,
-  [double]$Scale = 0.5,
+  [double]$Scale = 1.0,
+  # Canvas size. Leave at 0 to take it from the window at start-up; set it
+  # when the window will grow during the recording, so the biggest state
+  # is captured 1:1 instead of being shrunk to fit a canvas sized for the
+  # smallest one.
+  [int]$Width = 0,
+  [int]$Height = 0,
+  [int]$Quality = 92,
   [string]$Out = "$env:TEMP\gterm-recording"
 )
 $ErrorActionPreference = "Stop"
@@ -51,8 +58,8 @@ $r = New-Object 'GTerm.Rec+RECT'
 # hidden and restored. So the window is measured every frame and drawn
 # scaled to fit, centred, rather than assumed to stay the size it started.
 # Getting this wrong looks like torn, doubled frames rather than an error.
-$canvasW = [int]([math]::Round(($r.R - $r.L) * $Scale))
-$canvasH = [int]([math]::Round(($r.B - $r.T) * $Scale))
+$canvasW = if ($Width -gt 0) { $Width } else { [int]([math]::Round(($r.R - $r.L) * $Scale)) }
+$canvasH = if ($Height -gt 0) { $Height } else { [int]([math]::Round(($r.B - $r.T) * $Scale)) }
 if ($canvasW % 2) { $canvasW-- }; if ($canvasH % 2) { $canvasH-- }
 $w = $canvasW; $h = $canvasH
 
@@ -70,7 +77,7 @@ $jpeg = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() |
   Where-Object { $_.MimeType -eq 'image/jpeg' }
 $jpegParams = New-Object System.Drawing.Imaging.EncoderParameters 1
 $jpegParams.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter(
-  [System.Drawing.Imaging.Encoder]::Quality, [int64]82)
+  [System.Drawing.Imaging.Encoder]::Quality, [int64]$Quality)
 
 $src = $null; $gSrc = $null; $srcW = 0; $srcH = 0
 $sw = [System.Diagnostics.Stopwatch]::StartNew()

@@ -286,6 +286,44 @@ fn create_shortcut(path: String, workspace: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Slide the window in or out from the top edge, the way a quake console
+/// does. Appearing and vanishing instantly makes a summon feel like a
+/// glitch — a short slide says *this window came from somewhere*, which
+/// is the whole idea of a terminal that lives off screen.
+///
+/// Movement rather than a fade: fading needs WS_EX_LAYERED, and layering
+/// a WebView2 window costs a composition path and can tear.
+#[cfg(windows)]
+fn slide(win: &tauri::WebviewWindow, appearing: bool) {
+    use std::time::Duration;
+    let Ok(pos) = win.outer_position() else { return };
+    let Ok(size) = win.outer_size() else { return };
+    let h = size.height as i32;
+    let steps = 10;
+    let total = Duration::from_millis(110);
+    for i in 0..=steps {
+        // Ease out: most of the distance early, so it reads as quick
+        // rather than slow, at the same overall duration.
+        let t = i as f64 / steps as f64;
+        let eased = 1.0 - (1.0 - t) * (1.0 - t);
+        let frac = if appearing { 1.0 - eased } else { eased };
+        let y = pos.y - (frac * h as f64) as i32;
+        let _ = win.set_position(tauri::PhysicalPosition::new(pos.x, y));
+        std::thread::sleep(total / (steps as u32 + 1));
+    }
+    // Always finish exactly where it started, so repeated summons cannot
+    // walk the window up the screen a few pixels at a time.
+    let _ = win.set_position(pos);
+}
+
+fn animate() -> bool {
+    mux::read_config()
+        .get("summon_animation")
+        .and_then(|v| v.as_str())
+        .unwrap_or("slide")
+        != "none"
+}
+
 /// Bring the window back from wherever it went — hidden, minimized, or
 /// merely buried. Focus, not visibility, is what decides: a window you
 /// can see but cannot type into still needs raising.
@@ -294,8 +332,15 @@ fn summon(app: &AppHandle) {
         if win.is_minimized().unwrap_or(false) {
             let _ = win.unminimize();
         }
+        let hidden = !win.is_visible().unwrap_or(true);
         let _ = win.show();
         let _ = win.set_focus();
+        // Only slide when it was actually away. Raising a window that was
+        // merely buried should not move it.
+        #[cfg(windows)]
+        if hidden && animate() {
+            slide(&win, true);
+        }
     }
 }
 
@@ -446,6 +491,10 @@ pub fn run() {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         if close_hides() {
                             api.prevent_close();
+                            #[cfg(windows)]
+                            if animate() {
+                                slide(&closing, false);
+                            }
                             let _ = closing.hide();
                             let _ = apply_tray_text(&handle);
                         }
