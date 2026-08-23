@@ -22,6 +22,17 @@ import {
 import type { PasteLimits } from "./keys";
 import { BlockTracker } from "./blocks";
 import type { Block } from "./blocks";
+import {
+  leavesOf,
+  replaceLeaf,
+  dropLeaf,
+  pruneTree,
+  evenChain,
+  tiled,
+  moveWithin,
+  dropSideAt,
+} from "./layout";
+import type { LayoutNode, DropSide } from "./layout";
 import "@xterm/xterm/css/xterm.css";
 import "./styles.css";
 
@@ -2231,10 +2242,6 @@ function orderedIds(): number[] {
 // closes while others remain, the key moves to a surviving leaf, taking
 // the per-tab state (order, group, width) with it.
 
-type LayoutNode =
-  | { kind: "leaf"; id: number }
-  | { kind: "split"; dir: "row" | "col"; ratio: number; a: LayoutNode; b: LayoutNode };
-
 const layouts = new Map<number, LayoutNode>(); // tabKey -> tree
 const paneTab = new Map<number, number>(); // session -> tabKey
 const tabFocus = new Map<number, number>(); // tabKey -> focused session
@@ -2242,26 +2249,6 @@ const tabRoots = new Map<number, HTMLElement>(); // tabKey -> container in #pane
 
 /// Smallest a pane may be dragged to, in pixels.
 const MIN_PANE = 90;
-
-function leavesOf(n: LayoutNode): number[] {
-  return n.kind === "leaf" ? [n.id] : [...leavesOf(n.a), ...leavesOf(n.b)];
-}
-
-function replaceLeaf(n: LayoutNode, id: number, repl: LayoutNode): LayoutNode {
-  if (n.kind === "leaf") return n.id === id ? repl : n;
-  return { ...n, a: replaceLeaf(n.a, id, repl), b: replaceLeaf(n.b, id, repl) };
-}
-
-/// Remove a leaf and collapse the split that held it; null when the tree
-/// was nothing but that leaf.
-function dropLeaf(n: LayoutNode, id: number): LayoutNode | null {
-  if (n.kind === "leaf") return n.id === id ? null : n;
-  const a = dropLeaf(n.a, id);
-  const b = dropLeaf(n.b, id);
-  if (!a) return b;
-  if (!b) return a;
-  return { ...n, a, b };
-}
 
 function treeOf(key: number): LayoutNode {
   return layouts.get(key) ?? { kind: "leaf", id: key };
@@ -2509,8 +2496,6 @@ function toggleZoom() {
   refreshChrome();
 }
 
-type DropSide = "left" | "right" | "top" | "bottom" | "swap";
-
 /// Panes of a tab in reading order — top to bottom, left to right — which
 /// is the order the numbers overlay and the layout presets both use.
 function panesInOrder(key: number): number[] {
@@ -2525,30 +2510,9 @@ function panesInOrder(key: number): number[] {
 /// Removing the source can collapse a split, so the target is re-found in
 /// the pruned tree rather than in the original.
 function movePaneWithin(key: number, src: number, target: number, side: DropSide) {
-  if (src === target) return;
-  const tree = treeOf(key);
-  if (side === "swap") {
-    const swap = (n: LayoutNode): LayoutNode =>
-      n.kind === "leaf"
-        ? { kind: "leaf", id: n.id === src ? target : n.id === target ? src : n.id }
-        : { ...n, a: swap(n.a), b: swap(n.b) };
-    layouts.set(key, swap(tree));
-  } else {
-    const without = dropLeaf(tree, src);
-    if (!without) return;
-    const dir: "row" | "col" = side === "left" || side === "right" ? "row" : "col";
-    const first = side === "left" || side === "top";
-    layouts.set(
-      key,
-      replaceLeaf(without, target, {
-        kind: "split",
-        dir,
-        ratio: 0.5,
-        a: { kind: "leaf", id: first ? src : target },
-        b: { kind: "leaf", id: first ? target : src },
-      })
-    );
-  }
+  const moved = moveWithin(treeOf(key), src, target, side);
+  if (!moved) return;
+  layouts.set(key, moved);
   renderLayout(key);
   fitPanes(key);
   focusPane(src);
@@ -2670,33 +2634,6 @@ function mergeTabInto(srcKey: number, dstKey: number) {
 
 // ── layout presets ──────────────────────────────────────────────────────
 
-/// Even chain of leaves in one direction: ratios shrink so every pane
-/// ends up the same size.
-function evenChain(ids: number[], dir: "row" | "col"): LayoutNode {
-  if (ids.length === 1) return { kind: "leaf", id: ids[0] };
-  return {
-    kind: "split",
-    dir,
-    ratio: 1 / ids.length,
-    a: { kind: "leaf", id: ids[0] },
-    b: evenChain(ids.slice(1), dir),
-  };
-}
-
-/// Balanced split, alternating direction — roughly square cells.
-function tiled(ids: number[], dir: "row" | "col" = "row"): LayoutNode {
-  if (ids.length === 1) return { kind: "leaf", id: ids[0] };
-  const half = Math.ceil(ids.length / 2);
-  const next = dir === "row" ? "col" : "row";
-  return {
-    kind: "split",
-    dir,
-    ratio: half / ids.length,
-    a: tiled(ids.slice(0, half), next),
-    b: tiled(ids.slice(half), next),
-  };
-}
-
 type PresetKind = "even-cols" | "even-rows" | "main-stack" | "quad";
 
 function applyPreset(kind: PresetKind) {
@@ -2766,23 +2703,6 @@ function focusPaneByNumber(n: number) {
 }
 
 // ── dragging a pane ─────────────────────────────────────────────────────
-
-/// Which part of a pane the pointer is over: the middle means "swap", the
-/// outer bands mean "put it on that side".
-function dropSideAt(r: DOMRect, x: number, y: number): DropSide {
-  const fx = (x - r.left) / r.width;
-  const fy = (y - r.top) / r.height;
-  if (fx > 0.3 && fx < 0.7 && fy > 0.3 && fy < 0.7) return "swap";
-  // Nearest edge measured in fractions, so tall and wide panes behave alike.
-  const d: Array<[DropSide, number]> = [
-    ["left", fx],
-    ["right", 1 - fx],
-    ["top", fy],
-    ["bottom", 1 - fy],
-  ];
-  d.sort((a, b) => a[1] - b[1]);
-  return d[0][0];
-}
 
 /// Drag a pane by its grip onto another pane to rearrange it, or onto the
 /// tab strip to give it a tab of its own. Pointer events rather than HTML5
@@ -3096,15 +3016,6 @@ function loadLayouts(): Record<string, { root: LayoutNode; focus: number }> {
 }
 
 /// Keep only leaves whose sessions exist; returns null if none survive.
-function pruneTree(n: LayoutNode, alive: Set<number>): LayoutNode | null {
-  if (n.kind === "leaf") return alive.has(n.id) ? n : null;
-  const a = pruneTree(n.a, alive);
-  const b = pruneTree(n.b, alive);
-  if (!a) return b;
-  if (!b) return a;
-  return { ...n, a, b };
-}
-
 /// Hand a tab's identity to another of its panes, carrying the per-tab
 /// state that is keyed by session id.
 function retagTab(oldKey: number, newKey: number) {

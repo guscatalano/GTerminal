@@ -442,6 +442,137 @@ $b1.Client.Close()
 $null = Request2 $port "{""cmd"":""kill"",""id"":$id12}"
 try { $null = Request2 $port "{""cmd"":""kill"",""id"":$id12}" 0 } catch {}
 
+# ── protocol robustness: one bad client must not cost anyone else ──
+# Every window is a client of the same daemon, and every session in every
+# window lives inside it. A frame the daemon does not expect has to be
+# answered or ignored, never taken as a reason to fall over — the blast
+# radius of a daemon crash is every session the user has open.
+Set-Content "$env:LOCALAPPDATA\GTerminal\config.json" '{"grace_minutes": 5, "prediction": "off"}'
+$guard = (Request2 $port '{"cmd":"create","cols":80,"rows":24}').id
+$junk = New-Conn $port
+$junk.Writer.WriteLine('this is not json at all')
+$junk.Writer.WriteLine('{"cmd":')                       # truncated json
+$junk.Writer.WriteLine('{"cmd":"nonsense","id":1}')     # unknown command
+$junk.Writer.WriteLine('{"cmd":"attach","id":999999}')  # no such session
+$junk.Writer.WriteLine('{"cmd":"kill","id":999999}')
+$junk.Writer.WriteLine('{"cmd":"write","id":999999,"data":"x"}')
+$junk.Writer.WriteLine('{"cmd":"resize","id":999999,"cols":0,"rows":0}')
+$junk.Writer.WriteLine('{"cmd":"resize","id":999999,"cols":100000,"rows":100000}')
+$junk.Writer.WriteLine('{}')                            # no command at all
+$junk.Writer.WriteLine('[]')                            # right json, wrong shape
+Start-Sleep -Seconds 2
+try { $junk.Client.Close() } catch {}
+
+# The daemon must still be answering, and the session it was holding must
+# still be there.
+$after = Request2 $port '{"cmd":"list"}'
+if ($null -ne $after -and ($after.sessions | Where-Object { $_.id -eq $guard })) {
+  Pass "daemon survives malformed frames with its sessions intact"
+} else {
+  Fail "protocol" "daemon stopped answering, or lost a session, after junk input"
+}
+$still = (Request2 $port '{"cmd":"create","cols":80,"rows":24}').id
+if ($still) { Pass "daemon still accepts new sessions after junk input" }
+else { Fail "protocol" "create failed after junk input" }
+foreach ($k in @($guard, $still)) {
+  $null = Request2 $port "{""cmd"":""kill"",""id"":$k}"
+  try { $null = Request2 $port "{""cmd"":""kill"",""id"":$k}" 0 } catch {}
+}
+
+# ── many sessions at once, and all of them restored correctly ──
+# A window full of tabs is a window full of sessions. What matters is not
+# just that they all start, but that each one comes back as *itself* on
+# reattach: the failure worth catching is a mix-up, where a tab is
+# restored with someone else's scrollback.
+$N = 12
+$many = @()
+foreach ($i in 1..$N) {
+  $sid = (Request2 $port "{""cmd"":""create"",""cols"":100,""rows"":30}").id
+  if ($sid) { $many += $sid }
+}
+if ($many.Count -eq $N) { Pass "$N sessions created" }
+else { Fail "many-create" "only $($many.Count) of $N sessions were created" }
+
+$list = Request2 $port '{"cmd":"list"}'
+$listed = @($list.sessions | Where-Object { $many -contains $_.id }).Count
+if ($listed -eq $N) { Pass "all $N sessions are listed" }
+else { Fail "many-list" "list reported $listed of $N" }
+
+# Attach to all of them at once — that is what a window with twelve tabs
+# does — then give each a marker of its own.
+$conns = @{}
+foreach ($sid in $many) {
+  $c = New-Conn $port
+  $c.Writer.WriteLine("{""cmd"":""attach"",""id"":$sid}")
+  $null = Read-Line2 $c
+  $c.Writer.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')
+  $conns[$sid] = $c
+}
+Start-Sleep -Seconds 6          # one wait for all twelve, not twelve waits
+foreach ($sid in $many) {
+  $null = Drain2 $conns[$sid] 200
+  $conns[$sid].Writer.WriteLine("{""cmd"":""write"",""data"":""echo marker-$sid\r""}")
+}
+Start-Sleep -Seconds 4
+$ownMarker = 0
+foreach ($sid in $many) {
+  $txt = Drain2 $conns[$sid] 400
+  # its own marker, and nobody else's
+  $others = @($many | Where-Object { $_ -ne $sid -and $txt -like "*marker-$_ *" }).Count
+  if ($txt -like "*marker-$sid*" -and $others -eq 0) { $ownMarker++ }
+}
+if ($ownMarker -eq $N) { Pass "all $N sessions ran and returned their own output" }
+else { Fail "many-run" "only $ownMarker of $N had their own marker and no one else's" }
+
+# Detach every one of them, the way closing a window does.
+foreach ($sid in $many) {
+  $conns[$sid].Writer.WriteLine('{"cmd":"detach"}')
+}
+Start-Sleep -Seconds 1
+foreach ($sid in $many) { try { $conns[$sid].Client.Close() } catch {} }
+Start-Sleep -Seconds 2
+
+$survivors = @((Request2 $port '{"cmd":"list"}').sessions | Where-Object { $many -contains $_.id }).Count
+if ($survivors -eq $N) { Pass "all $N sessions survive being detached" }
+else { Fail "many-detach" "$survivors of $N survived the detach" }
+
+# Reattach all of them and check each replays its own scrollback. A
+# restored tab showing another tab's history is the failure this is for.
+$reconns = @{}
+foreach ($sid in $many) {
+  $c = New-Conn $port
+  $c.Writer.WriteLine("{""cmd"":""attach"",""id"":$sid}")
+  $null = Read-Line2 $c
+  $reconns[$sid] = $c
+}
+Start-Sleep -Seconds 3
+$restored = 0
+foreach ($sid in $many) {
+  $txt = Drain2 $reconns[$sid] 500
+  $others = @($many | Where-Object { $_ -ne $sid -and $txt -like "*marker-$_ *" }).Count
+  if ($txt -like "*marker-$sid*" -and $others -eq 0) { $restored++ }
+}
+if ($restored -eq $N) { Pass "all $N sessions replay their own scrollback on reattach" }
+else { Fail "many-restore" "only $restored of $N replayed their own history" }
+
+# And they still work afterwards.
+$usable = 0
+foreach ($sid in $many) {
+  $reconns[$sid].Writer.WriteLine("{""cmd"":""write"",""data"":""echo back-$sid\r""}")
+}
+Start-Sleep -Seconds 4
+foreach ($sid in $many) {
+  if ((Drain2 $reconns[$sid] 400) -like "*back-$sid*") { $usable++ }
+}
+if ($usable -eq $N) { Pass "all $N restored sessions still take input" }
+else { Fail "many-usable" "only $usable of $N accepted input after restore" }
+
+foreach ($sid in $many) {
+  try { $reconns[$sid].Client.Close() } catch {}
+  $null = Request2 $port "{""cmd"":""kill"",""id"":$sid}"
+  try { $null = Request2 $port "{""cmd"":""kill"",""id"":$sid}" 0 } catch {}
+}
+
 # ════ cleanup ════
 foreach ($d in $script:daemons) {
   if (Get-Process -Id $d -ErrorAction SilentlyContinue) { Stop-DaemonTree $d }
