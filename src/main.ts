@@ -3213,6 +3213,34 @@ function mkHotkeyPicker(): HTMLElement {
   clearBtn.className = "set-control hotkey-clear";
   clearBtn.textContent = "Clear";
 
+  // Windows keeps some combinations for itself and never dispatches them
+  // to the page — Alt+Space opens the focused window's system menu, so
+  // pressing it here does nothing at all. RegisterHotKey *can* claim
+  // them globally; they just cannot be captured by listening. So the
+  // common ones are offered as a list as well.
+  const presets: Array<[string, string]> = [
+    ["", "Choose…"],
+    ["Alt+Space", "Alt+Space"],
+    ["Control+Backquote", "Ctrl+`"],
+    ["Alt+Backquote", "Alt+`"],
+    ["Control+Shift+Backquote", "Ctrl+Shift+`"],
+    ["F12", "F12"],
+    ["Control+Alt+T", "Ctrl+Alt+T"],
+    ["Super+Backquote", "Win+`"],
+  ];
+  const pick = document.createElement("select");
+  pick.className = "set-control hotkey-preset";
+  for (const [value, label] of presets) {
+    const o = document.createElement("option");
+    o.value = value;
+    o.textContent = label;
+    pick.appendChild(o);
+  }
+  pick.addEventListener("change", () => {
+    if (pick.value) void commit(pick.value);
+    pick.value = "";
+  });
+
   let capturing = false;
   const render = () => {
     shown.textContent = config.summon_hotkey || "None";
@@ -3220,6 +3248,7 @@ function mkHotkeyPicker(): HTMLElement {
     setBtn.textContent = capturing ? "Press keys…" : "Set";
     setBtn.classList.toggle("armed", capturing);
     clearBtn.hidden = !config.summon_hotkey;
+    pick.value = "";
   };
 
   const commit = async (combo: string | null) => {
@@ -3229,7 +3258,7 @@ function mkHotkeyPicker(): HTMLElement {
     if (!ok) {
       // Registration is the only place a clash shows up, so say so
       // rather than leaving a hotkey that silently does nothing.
-      shown.textContent = `${combo} — already taken`;
+      shown.textContent = `${combo} — could not register`;
       shown.classList.add("bad");
       window.setTimeout(() => {
         shown.classList.remove("bad");
@@ -3266,7 +3295,7 @@ function mkHotkeyPicker(): HTMLElement {
   });
   clearBtn.addEventListener("click", () => void commit(null));
 
-  wrap.append(shown, setBtn, clearBtn);
+  wrap.append(shown, setBtn, pick, clearBtn);
   render();
   return wrap;
 }
@@ -5910,71 +5939,6 @@ function buildSettingsPage() {
     })
   );
   settingRow(
-    "Warn before big pastes",
-    "Show what is about to be pasted, and how much of it, before it goes into the terminal. Multiple lines can run as multiple commands — under cmd, which has no bracketed paste, they run the moment they arrive.",
-    mkSelect([["on", "On"], ["off", "Off"]], config.paste_warn !== false ? "on" : "off", (v) => {
-      config.paste_warn = v === "on";
-      changed();
-    })
-  );
-  settingRow(
-    "Warn at (lines)",
-    "Pastes of this many lines or more ask first.",
-    mkNumber(config.paste_warn_lines ?? 3, 2, 200, (v) => {
-      config.paste_warn_lines = v;
-      changed();
-    })
-  );
-  settingRow(
-    "Warn at (characters)",
-    "Pastes this long ask first, however few lines they are.",
-    mkNumber(config.paste_warn_chars ?? 2000, 100, 100000, (v) => {
-      config.paste_warn_chars = v;
-      changed();
-    })
-  );
-  settingRow(
-    "Terminal bell",
-    "The beeping, off by default. Most of it is PowerShell's own bell — it rings on a tab-completion with no match, an unbound key, backspace at the start of a line — and the shell plays it directly, so only the shell can silence it. This sets that per session without touching your PowerShell profile, and applies to sessions started after the change. Flash washes the pane that rang instead of making a sound.",
-    mkSelect(
-      [["audible", "Beep"], ["visual", "Flash"], ["none", "Silent"]],
-      config.bell ?? "none",
-      (v) => {
-        config.bell = v;
-        changed();
-      }
-    )
-  );
-  settingRow(
-    "Summon hotkey",
-    "Press this from anywhere in Windows to bring GTerminal to the front, and again to send it away. Click Set and press the combination you want — it needs a modifier (or a function key), since a bare key would be taken from every other program on the machine.",
-    mkHotkeyPicker()
-  );
-  settingRow(
-    "Clickable links",
-    "Ctrl+click URLs in terminal output to open them in your browser. Takes effect for sessions opened after the change.",
-    mkSelect([["on", "On"], ["off", "Off"]], config.clickable_links !== false ? "on" : "off", (v) => {
-      config.clickable_links = v === "on";
-      changed();
-    })
-  );
-  settingRow(
-    "Ctrl+F finds",
-    "Open the find bar with Ctrl+F as well as Ctrl+Shift+F. Full-screen programs still receive the key, where it pages forward in vim and less.",
-    mkSelect([["on", "On"], ["off", "Off"]], effCtrlFFind() ? "on" : "off", (v) => {
-      config.ctrl_f_find = v === "on";
-      changed();
-    })
-  );
-  settingRow(
-    "Ctrl+V pastes",
-    "Paste with Ctrl+V as well as Ctrl+Shift+V. Most shells never implement Ctrl+V themselves — bash reads it as quoted-insert, cmd ignores it, PowerShell only pastes in its Windows edit mode — so without this, whether Ctrl+V works depends on the shell. Full-screen programs still receive the key, where it means vim's visual block.",
-    mkSelect([["on", "On"], ["off", "Off"]], effCtrlVPaste() ? "on" : "off", (v) => {
-      config.ctrl_v_paste = v === "on";
-      changed();
-    })
-  );
-  settingRow(
     "Tab width (px)",
     "Maximum width of tabs in the tab bar. Ctrl+scroll over the tab bar also resizes. Dragging one tab's edge sizes just that tab.",
     mkNumber(config.tab_width ?? 220, 110, 400, (v) => {
@@ -6042,6 +6006,73 @@ function buildSettingsPage() {
       })
     );
   }
+
+  settingsSection("Keyboard and input");
+  settingRow(
+    "Summon hotkey",
+    "Press this from anywhere in Windows to bring GTerminal to the front, and again to send it away. Set it by pressing the combination, or pick one from the list — Windows keeps a few combinations to itself (Alt+Space opens a window's system menu) and never lets the app see them, so those have to be chosen rather than pressed.",
+    mkHotkeyPicker()
+  );
+  settingRow(
+    "Ctrl+F finds",
+    "Open the find bar with Ctrl+F as well as Ctrl+Shift+F. Full-screen programs still receive the key, where it pages forward in vim and less.",
+    mkSelect([["on", "On"], ["off", "Off"]], effCtrlFFind() ? "on" : "off", (v) => {
+      config.ctrl_f_find = v === "on";
+      changed();
+    })
+  );
+  settingRow(
+    "Ctrl+V pastes",
+    "Paste with Ctrl+V as well as Ctrl+Shift+V. Most shells never implement Ctrl+V themselves — bash reads it as quoted-insert, cmd ignores it, PowerShell only pastes in its Windows edit mode — so without this, whether Ctrl+V works depends on the shell. Full-screen programs still receive the key, where it means vim's visual block.",
+    mkSelect([["on", "On"], ["off", "Off"]], effCtrlVPaste() ? "on" : "off", (v) => {
+      config.ctrl_v_paste = v === "on";
+      changed();
+    })
+  );
+  settingRow(
+    "Warn before big pastes",
+    "Show what is about to be pasted, and how much of it, before it goes into the terminal. Multiple lines can run as multiple commands — under cmd, which has no bracketed paste, they run the moment they arrive.",
+    mkSelect([["on", "On"], ["off", "Off"]], config.paste_warn !== false ? "on" : "off", (v) => {
+      config.paste_warn = v === "on";
+      changed();
+    })
+  );
+  settingRow(
+    "Warn at (lines)",
+    "Pastes of this many lines or more ask first.",
+    mkNumber(config.paste_warn_lines ?? 3, 2, 200, (v) => {
+      config.paste_warn_lines = v;
+      changed();
+    })
+  );
+  settingRow(
+    "Warn at (characters)",
+    "Pastes this long ask first, however few lines they are.",
+    mkNumber(config.paste_warn_chars ?? 2000, 100, 100000, (v) => {
+      config.paste_warn_chars = v;
+      changed();
+    })
+  );
+  settingRow(
+    "Clickable links",
+    "Ctrl+click URLs in terminal output to open them in your browser. Takes effect for sessions opened after the change.",
+    mkSelect([["on", "On"], ["off", "Off"]], config.clickable_links !== false ? "on" : "off", (v) => {
+      config.clickable_links = v === "on";
+      changed();
+    })
+  );
+  settingRow(
+    "Terminal bell",
+    "The beeping, off by default. Most of it is PowerShell's own bell — it rings on a tab-completion with no match, an unbound key, backspace at the start of a line — and the shell plays it directly, so only the shell can silence it. This sets that per session without touching your PowerShell profile, and applies to sessions started after the change. Flash washes the pane that rang instead of making a sound.",
+    mkSelect(
+      [["audible", "Beep"], ["visual", "Flash"], ["none", "Silent"]],
+      config.bell ?? "none",
+      (v) => {
+        config.bell = v;
+        changed();
+      }
+    )
+  );
 
   settingsSection("Status bar");
   settingRow(
