@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "app": "tauri build --debug --no-bundle",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "pwsh -NoProfile -File tests/typing.ps1 && pwsh -NoProfile -File tests/lifecycle.ps1 && node tests/contrast.mjs && node tests/keys.mjs && node tests/blocks.mjs && node tests/layout.mjs && node tests/titles.mjs && node tests/format.mjs && node tests/restore.mjs && node tests/styles.mjs && cargo test --manifest-path src-tauri/Cargo.toml --lib",

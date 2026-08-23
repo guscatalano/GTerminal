@@ -4557,9 +4557,26 @@ function removeTab(id: number, closeWindowIfLast = true) {
 // Closing a tab starts its grace window: the session lands in "Closing
 // soon" with a countdown, restorable (from the sidebar, ⟳ menu, or
 // Ctrl+Shift+Z) until the timer runs out — then it actually dies.
-function closeTab(id: number) {
+async function closeTab(id: number) {
   invoke("kill_session", { id }).catch(() => {});
-  removeTab(id);
+  // Closing the last tab closes the window, and close means hide — which
+  // is right when there is nothing left, but not when sessions are still
+  // parked or counting down in the daemon. Hiding then strands them
+  // behind a window that appears to have vanished: you close one tab of
+  // six and the app disappears with the other five still running. Hiding
+  // a tab already avoids this by opening a fresh one; closing one now
+  // does the same, and only really closes the window when the daemon has
+  // nothing else to come back to.
+  const key = paneTab.get(id) ?? id;
+  const wasLastTab = tabCount() === 1 && leavesOf(treeOf(key)).length === 1;
+  removeTab(id, false);
+  if (wasLastTab) {
+    const others = (await invoke<SessionInfo[]>("list_sessions").catch(() => [])).filter(
+      (s) => s.id !== id
+    );
+    if (others.length) await createTab();
+    else await getCurrentWindow().close();
+  }
   window.setTimeout(() => refreshChrome(), 500);
 }
 

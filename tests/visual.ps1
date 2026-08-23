@@ -42,6 +42,15 @@ $bundle = Get-ChildItem (Join-Path $repo "dist") -Filter *.js -Recurse -ErrorAct
 if ($bundle -and $bundle.LastWriteTime -gt (Get-Item $exe).LastWriteTime) {
   Write-Host "WARNING: $exe predates dist\$($bundle.Name) — run cargo build, or you are testing stale UI code." -ForegroundColor Yellow
 }
+# A dev-profile binary from plain `cargo build` does not carry the UI at
+# all: tauri.conf.json points it at devUrl, so it loads the frontend from
+# the vite dev server. With no server listening the window comes up blank
+# and every scene fails for a reason that has nothing to do with the app.
+# `npm run tauri build -- --debug --no-bundle` embeds it instead.
+if (-not (Get-NetTCPConnection -State Listen -LocalPort 1420 -ErrorAction SilentlyContinue)) {
+  Write-Host "  note: nothing is serving on :1420. If this binary came from plain 'cargo build'," -ForegroundColor DarkYellow
+  Write-Host "        its window will be blank — use a 'tauri build --debug' binary via -Exe." -ForegroundColor DarkYellow
+}
 
 $failures = @()
 function Pass { param($n) Write-Host "PASS $n" -ForegroundColor Green }
@@ -105,7 +114,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -307,6 +316,77 @@ function Start-App {
   [pscustomobject]@{ App = $app; Hwnd = $hwnd; Pids = $ours }
 }
 
+# Ask the scratch daemon what it is holding. "Was this session restored?"
+# is not a question a screenshot can answer — restoring means *attaching*,
+# and only the daemon knows who is attached. Every restore assertion below
+# goes through here rather than through pixels.
+function Daemon-Sessions {
+  $pf = Join-Path $scratch "GTerminal\daemon.port"
+  if (-not (Test-Path $pf)) { return @() }
+  $port = 0
+  if (-not [int]::TryParse((Get-Content $pf -Raw).Trim(), [ref]$port)) { return @() }
+  try {
+    $c = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $port)
+    $w = [System.IO.StreamWriter]::new($c.GetStream()); $w.NewLine = "`n"; $w.AutoFlush = $true
+    $rd = [System.IO.StreamReader]::new($c.GetStream())
+    $w.WriteLine('{"cmd":"list"}')
+    $line = $rd.ReadLine()
+    $c.Close()
+    return @(($line | ConvertFrom-Json).sessions)
+  } catch { return @() }
+}
+
+# Sessions for a restore scene to find: a daemon of its own, started before
+# the window exists, with N shells already in it.
+function Seed-Daemon {
+  param([int]$count, [string]$config)
+  Remove-Item "$scratch\GTerminal" -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item $env:WEBVIEW2_USER_DATA_FOLDER -Recurse -Force -ErrorAction SilentlyContinue
+  New-Item -ItemType Directory -Force "$scratch\GTerminal" | Out-Null
+  Set-Content "$scratch\GTerminal\config.json" $config
+  $d = Start-Process -FilePath $exe -ArgumentList "--daemon" -WindowStyle Hidden -PassThru
+  foreach ($i in 1..40) {
+    Start-Sleep -Milliseconds 200
+    if (Test-Path "$scratch\GTerminal\daemon.port") { break }
+  }
+  Start-Sleep -Milliseconds 400
+  $port = [int](Get-Content "$scratch\GTerminal\daemon.port" -Raw).Trim()
+  $ids = @()
+  foreach ($i in 1..$count) {
+    $c = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $port)
+    $w = [System.IO.StreamWriter]::new($c.GetStream()); $w.NewLine = "`n"; $w.AutoFlush = $true
+    $rd = [System.IO.StreamReader]::new($c.GetStream())
+    $w.WriteLine('{"cmd":"create","cols":100,"rows":30}')
+    $ids += ($rd.ReadLine() | ConvertFrom-Json).id
+    $c.Close()
+  }
+  [pscustomobject]@{ Daemon = $d; Port = $port; Ids = $ids }
+}
+
+# Launch the window against a profile that is already seeded — Start-App
+# wipes it, which would take the sessions the scene is about with it.
+function Start-AppSeeded {
+  param($seed)
+  $app = Start-Process -FilePath $exe -PassThru
+  $hwnd = [IntPtr]::Zero
+  foreach ($i in 1..60) {
+    Start-Sleep -Milliseconds 400
+    $app.Refresh()
+    if ($app.MainWindowHandle -ne 0) {
+      $probe = New-Object 'GTerm.Vis+RECT'
+      [void]$U::GetWindowRect($app.MainWindowHandle, [ref]$probe)
+      if (($probe.R - $probe.L) -gt 200) { $hwnd = $app.MainWindowHandle; break }
+    }
+  }
+  if ($hwnd -eq [IntPtr]::Zero) { throw "the window never appeared" }
+  $pids = @($app.Id, $seed.Daemon.Id)
+  Set-Content $pidFile -Value $pids
+  [void]$U::SetWindowPos($hwnd, [IntPtr]::Zero, 100, 60, $RECW, $RECH, 0x0004)
+  Start-Sleep -Seconds 2
+  [void]$U::SetForegroundWindow($hwnd)
+  [pscustomobject]@{ App = $app; Hwnd = $hwnd; Pids = $pids }
+}
+
 function Stop-App {
   param($ctx)
   foreach ($id in $ctx.Pids) { Stop-Process -Id ([int]$id) -Force -ErrorAction SilentlyContinue }
@@ -504,47 +584,74 @@ if (-not $Only -or $Only -eq "switch") {
 # Past a few sessions, start-up asks which to bring back. Seeded by
 # making sessions in the scratch daemon before the window ever opens.
 if (-not $Only -or $Only -eq "restore") {
-  Remove-Item "$scratch\GTerminal" -Recurse -Force -ErrorAction SilentlyContinue
-  New-Item -ItemType Directory -Force "$scratch\GTerminal" | Out-Null
-  Set-Content "$scratch\GTerminal\config.json" "{$baseCfg,`"restore_prompt`":true,`"restore_prompt_at`":3}"
-  $seedDaemon = Start-Process -FilePath $exe -ArgumentList "--daemon" -WindowStyle Hidden -PassThru
-  Start-Sleep -Seconds 2
-  $seedPort = [int](Get-Content "$scratch\GTerminal\daemon.port").Trim()
-  foreach ($i in 1..6) {
-    $c = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $seedPort)
-    $w = [System.IO.StreamWriter]::new($c.GetStream()); $w.NewLine = "`n"; $w.AutoFlush = $true
-    $rd = [System.IO.StreamReader]::new($c.GetStream())
-    $w.WriteLine('{"cmd":"create","cols":100,"rows":30}')
-    $null = $rd.ReadLine(); $c.Close()
+  $cfg = "{$baseCfg,`"restore_prompt`":true,`"restore_prompt_at`":3}"
+  $seed = Seed-Daemon 6 $cfg
+  $ctx2 = Start-AppSeeded $seed
+  $hw = $ctx2.Hwnd
+  Record-Scene "restore" 30 $ctx2 {
+    Start-Sleep -Seconds 4          # dwell on the question: it is the point
+    Key $VK_RETURN                  # Enter restores everything ticked
+    Start-Sleep -Seconds 12         # the spinner, then six tabs
   }
-  # Start-App would wipe the scratch config and the sessions with it, so
-  # this scene launches the app itself.
-  $app2 = Start-Process -FilePath $exe -PassThru
-  $hw = [IntPtr]::Zero
-  foreach ($i in 1..60) {
-    Start-Sleep -Milliseconds 400
-    $app2.Refresh()
-    if ($app2.MainWindowHandle -ne 0) { $hw = $app2.MainWindowHandle; break }
-  }
-  if ($hw -eq [IntPtr]::Zero) { throw "the window never appeared" }
-  Set-Content $pidFile -Value (@($app2.Id, $seedDaemon.Id))
-  [void]$U::SetWindowPos($hw, [IntPtr]::Zero, 100, 60, $RECW, $RECH, 0x0004)
-  Start-Sleep -Seconds 2
-  [void]$U::SetForegroundWindow($hw)
-  $ctx2 = [pscustomobject]@{ App = $app2; Hwnd = $hw; Pids = @($app2.Id, $seedDaemon.Id) }
-  Record-Scene "restore" 24 $ctx2 {
-    Start-Sleep -Seconds 3          # dwell on the question: it is the point
-    # Untick two, then restore the rest.
-    Click $hw 288 257
-    Start-Sleep -Milliseconds 500
-    Click $hw 288 304
+  $now = Daemon-Sessions
+  $attached = @($now | Where-Object { $seed.Ids -contains $_.id -and $_.attached })
+  if ($attached.Count -eq 6) { Pass "Enter restores all six, and all six actually attach" }
+  else { Fail "restore-all" "expected 6 attached, got $($attached.Count)" }
+  if ($U::IsWindowVisible($hw)) { Pass "and the window is still up afterwards" }
+  else { Fail "restore-all" "the window did not survive the restore" }
+
+  # Closing several tabs should put every one of them in "Closing soon" —
+  # the reported symptom was that only one of them landed there. Driven by
+  # keyboard (Ctrl+Shift+W twice arms and then closes) so it does not
+  # depend on where a close button happens to be drawn.
+  foreach ($i in 1..3) {
+    Key 0x57 @([byte]$VK_CTRL, [byte]$VK_SHIFT)
+    Start-Sleep -Milliseconds 300
+    Key 0x57 @([byte]$VK_CTRL, [byte]$VK_SHIFT)
     Start-Sleep -Seconds 2
-    Click $hw 813 544              # Restore N
-    Start-Sleep -Seconds 8         # the spinner, then the tabs
   }
-  if ($U::IsWindowVisible($hw)) { Pass "restore scene: the window came through it" }
-  else { Fail "restore" "the window did not survive the scene" }
+  Start-Sleep -Seconds 2
+  $after = Daemon-Sessions
+  $closing = @($after | Where-Object { $seed.Ids -contains $_.id -and $_.expires_ms })
+  if ($closing.Count -eq 3) { Pass "closing three tabs puts all three in Closing soon" }
+  else { Fail "close-three" "expected 3 closing, got $($closing.Count)" }
+  if ($U::IsWindowVisible($hw)) { Pass "and the window stays visible with tabs left" }
+  else { Fail "close-three" "the window disappeared while three tabs were still open" }
   Stop-App $ctx2
+}
+
+# ══ scene: restoring nothing ═══════════════════════════════════════════
+# "Restore 0 still restored them", reported twice. A screenshot cannot
+# settle it — restoring means *attaching*, so the daemon is the witness.
+# Escape is the gesture under test: it used to restore everything, which
+# is the opposite of what waving a dialog away should do.
+if (-not $Only -or $Only -eq "restore-none") {
+  $cfg = "{$baseCfg,`"restore_prompt`":true,`"restore_prompt_at`":3}"
+  $seed = Seed-Daemon 5 $cfg
+  $ctx3 = Start-AppSeeded $seed
+  $hw3 = $ctx3.Hwnd
+  Record-Scene "restore-none" 26 $ctx3 {
+    Start-Sleep -Seconds 4
+    Key $VK_ESC                     # Escape opens none
+    Start-Sleep -Seconds 6
+    # One fresh tab is what you are left with. Closing it used to take the
+    # whole window with it — close means hide — stranding five sessions
+    # behind a window that looked like it had crashed.
+    Key 0x57 @([byte]$VK_CTRL, [byte]$VK_SHIFT)
+    Start-Sleep -Milliseconds 300
+    Key 0x57 @([byte]$VK_CTRL, [byte]$VK_SHIFT)
+    Start-Sleep -Seconds 5
+  }
+  $now3 = Daemon-Sessions
+  $wrongly = @($now3 | Where-Object { $seed.Ids -contains $_.id -and $_.attached })
+  if ($wrongly.Count -eq 0) { Pass "Escape restores none of them" }
+  else { Fail "restore-none" "$($wrongly.Count) session(s) were restored anyway" }
+  $survived = @($now3 | Where-Object { $seed.Ids -contains $_.id })
+  if ($survived.Count -eq 5) { Pass "and the five it skipped are still there to come back to" }
+  else { Fail "restore-none" "only $($survived.Count) of 5 skipped sessions survived" }
+  if ($U::IsWindowVisible($hw3)) { Pass "closing the last tab keeps the window, with sessions left" }
+  else { Fail "close-last" "the window vanished, stranding the other sessions" }
+  Stop-App $ctx3
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════

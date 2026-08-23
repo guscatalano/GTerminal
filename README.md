@@ -69,10 +69,17 @@ Requires Rust (1.85+) and Node.
 
 ```sh
 npm install
-npm run tauri dev     # run
+npm run tauri dev     # run against the vite dev server (live reload)
+npm run app           # standalone debug build, UI baked in
 npm run tauri build   # package installer
 npm run test:typing   # typing correctness + echo latency regression test
 ```
+
+`npm run tauri dev` and a plain `cargo build` both produce a binary that
+loads its UI from the dev server on :1420 — editing `src/` reloads a
+running window, and with no server up the window is blank. Use `npm run
+app` for a binary that carries the frontend inside it: that is the one to
+use day to day, and the one the visual tests need (`-Exe`).
 
 `npm test` runs both suites against isolated daemons (scratch state dirs, never your real sessions):
 

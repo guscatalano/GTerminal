@@ -656,6 +656,73 @@ foreach ($k in @($keep, $rz)) {
   try { $null = Request2 $port "{""cmd"":""kill"",""id"":$k}" 0 } catch {}
 }
 
+# ── closing several sessions in a row ──
+# Reported from real use: closing a handful of tabs left only *one* of them
+# under "Closing soon" and the rest unaccounted for. Each close is its own
+# soft kill, so every one of them should get its own grace window — and the
+# daemon must not treat a set of doomed sessions as an empty one and exit.
+$many = @()
+foreach ($i in 1..4) { $many += (Request2 $port '{"cmd":"create","cols":80,"rows":24}').id }
+foreach ($m in $many) { $null = Request2 $port "{""cmd"":""kill"",""id"":$m}" }
+Start-Sleep -Seconds 1
+$after = @(Get-Sessions $port)
+$doomed = @($after | Where-Object { $many -contains $_.id -and $_.expires_ms })
+if ($doomed.Count -eq 4) { Pass "closing four sessions puts all four in the grace window" }
+else {
+  $ids = ($doomed | ForEach-Object { $_.id }) -join ","
+  Fail "close-many" "expected 4 in the grace window, got $($doomed.Count) ($ids)"
+}
+$lost = @($many | Where-Object { $id = $_; -not ($after | Where-Object { $_.id -eq $id }) })
+if ($lost.Count -eq 0) { Pass "and none of them vanish from the list" }
+else { Fail "close-many" "sessions disappeared instead of closing soon: $($lost -join ',')" }
+
+# The daemon holds four doomed sessions and nothing attached. Exiting here
+# would take the grace window with it, and with it the whole point of it.
+Start-Sleep -Seconds 2
+if (@(Get-Sessions $port).Count -ge 4) { Pass "the daemon stays up while every session is closing" }
+else { Fail "close-many" "the daemon exited while sessions were still in their grace window" }
+
+# ── restoring one of them ──
+# Attaching cancels that session's pending kill and must leave the others
+# exactly as they were: undoing one close is not undoing all of them.
+$revive = New-Conn $port
+$revive.Writer.WriteLine("{""cmd"":""attach"",""id"":$($many[0])}")
+$null = Read-Line2 $revive
+Start-Sleep -Milliseconds 800
+$after2 = @(Get-Sessions $port)
+$one = $after2 | Where-Object { $_.id -eq $many[0] }
+if ($one -and -not $one.expires_ms) { Pass "attaching cancels that session's grace window" }
+else { Fail "revive" "the restored session is still marked as closing" }
+$others = @($after2 | Where-Object { $many[1..3] -contains $_.id -and $_.expires_ms })
+if ($others.Count -eq 3) { Pass "and leaves the other three closing" }
+else { Fail "revive" "restoring one session disturbed the others ($($others.Count) of 3 still closing)" }
+$revive.Writer.WriteLine('{"cmd":"detach"}')
+Start-Sleep -Milliseconds 400
+$revive.Client.Close()
+
+# ── a hard kill takes one, not the set ──
+$null = Request2 $port "{""cmd"":""kill"",""id"":$($many[1])}"
+Start-Sleep -Milliseconds 800
+$after3 = @(Get-Sessions $port)
+if (-not ($after3 | Where-Object { $_.id -eq $many[1] })) { Pass "a second kill ends that one session" }
+else { Fail "hard-kill" "the doomed session survived its second kill" }
+$survivors = @($after3 | Where-Object { $many[2..3] -contains $_.id -and $_.expires_ms })
+if ($survivors.Count -eq 2) { Pass "and the rest keep their grace windows" }
+else { Fail "hard-kill" "a hard kill took the other closing sessions with it" }
+
+# ── grace turned off ──
+# grace_minutes is read from config on every kill, so a user who sets it to
+# 0 gets an immediate close from then on, with no "Closing soon" stop.
+Set-Content "$env:LOCALAPPDATA\GTerminal\config.json" '{"grace_minutes": 0}'
+$instant = (Request2 $port '{"cmd":"create","cols":80,"rows":24}').id
+$null = Request2 $port "{""cmd"":""kill"",""id"":$instant}"
+Start-Sleep -Milliseconds 800
+if (-not (@(Get-Sessions $port) | Where-Object { $_.id -eq $instant })) {
+  Pass "grace_minutes 0 closes immediately, with no grace window"
+} else { Fail "grace-off" "the session lingered although the grace window is disabled" }
+Set-Content "$env:LOCALAPPDATA\GTerminal\config.json" '{"grace_minutes": 5}'
+foreach ($m in $many) { try { $null = Request2 $port "{""cmd"":""kill"",""id"":$m}" 0 } catch {} }
+
 # ════ cleanup ════
 foreach ($d in $script:daemons) {
   if (Get-Process -Id $d -ErrorAction SilentlyContinue) { Stop-DaemonTree $d }
