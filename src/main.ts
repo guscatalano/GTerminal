@@ -20,6 +20,8 @@ import {
   pasteLineCount,
 } from "./keys";
 import type { PasteLimits } from "./keys";
+import { autoTitle, SHELLS, BORING_TITLE } from "./titles";
+import { fmtBytes, fmtRate, fmtDuration, pct, fmtSize, clipPreview } from "./format";
 import { BlockTracker } from "./blocks";
 import type { Block } from "./blocks";
 import {
@@ -78,7 +80,6 @@ const ICON_RULES: Array<[RegExp, string]> = [
   [/^(dotnet|msbuild)$/i, "🟪"],
   [/^(cl|gcc|clang|cmake|make|ninja|link)$/i, "🔨"],
 ];
-const SHELLS = /^(pwsh|powershell|cmd|conhost)$/i;
 function iconFor(running: string[]): string {
   const progs = running.filter((n) => !SHELLS.test(n));
   for (const [re, icon] of ICON_RULES) {
@@ -385,9 +386,6 @@ function saveAiTitles() {
 // banner variant, default shell banners, or a bare filesystem path (the
 // cwd-based label handles directories better). A title that merely
 // CONTAINS a shell name (e.g. "Claude Code — pwsh") is kept.
-const BORING_TITLE =
-  /^(Administrator:\s*)?([A-Za-z]:\\[^|—-]*\\)?(pwsh|powershell|cmd)(\.exe)?$|^Windows PowerShell$|^Command Prompt$|^[A-Za-z]:\\\S*$/i;
-
 function cwdParts(id: number): string[] {
   const cwd = lastInfo.get(id)?.cwd;
   return cwd ? cwd.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean) : [];
@@ -406,55 +404,16 @@ function shellDisplayName(id: number): string {
 
 /// The automatic part of the label, governed by the "Title style" setting.
 function autoLabel(id: number): { text: string; fromCwd: boolean } {
-  const parts = cwdParts(id);
-  const tail = parts[parts.length - 1];
-  // The home directory's name (the username) makes a confusing label.
-  const isHome = parts.length === 3 && parts[1].toLowerCase() === "users";
-  const prog = (lastInfo.get(id)?.running ?? []).find((n) => !SHELLS.test(n));
-  const t = titles[id];
-  const interesting = t && !BORING_TITLE.test(t) ? t : "";
-  const dirLabel = () =>
-    tail && !isHome
-      ? { text: tail, fromCwd: true }
-      : { text: shellDisplayName(id), fromCwd: false };
-
-  switch (config.title_mode ?? "smart") {
-    case "dir":
-      return dirLabel();
-    case "program":
-      return { text: prog ?? shellDisplayName(id), fromCwd: false };
-    case "shelltitle":
-      if (interesting) return { text: interesting, fromCwd: false };
-      return dirLabel();
-    case "custom": {
-      const vals: Record<string, string> = {
-        program: prog ?? "",
-        folder: tail && !isHome ? tail : "",
-        parent: parts.length >= 2 ? parts[parts.length - 2] : "",
-        path: lastInfo.get(id)?.cwd ?? "",
-        shell: shellDisplayName(id),
-        title: interesting,
-      };
-      const rendered = (config.title_template ?? "{program} · {folder}")
-        .replace(/\{(\w+)\}/g, (_, k: string) => vals[k] ?? "")
-        .split("·")
-        .map((p) => p.trim())
-        .filter(Boolean)
-        .join(" · ");
-      return rendered
-        ? { text: rendered.slice(0, 60), fromCwd: false }
-        : { text: shellDisplayName(id), fromCwd: false };
-    }
-    default: {
-      // smart: shell-set title, else program · folder, else directory.
-      if (interesting) return { text: interesting, fromCwd: false };
-      if (prog) {
-        return { text: tail && !isHome ? `${prog} · ${tail}` : prog, fromCwd: false };
-      }
-      return dirLabel();
-    }
-  }
+  return autoTitle({
+    cwd: lastInfo.get(id)?.cwd ?? "",
+    running: lastInfo.get(id)?.running ?? [],
+    shellTitle: titles[id] ?? "",
+    shellName: shellDisplayName(id),
+    mode: config.title_mode ?? "smart",
+    template: config.title_template,
+  });
 }
+
 
 /// Badge strip for a session: the automatic shell badge (blue "PS" /
 /// dark ">_"), or the user's custom badges (up to 3) when set. `el` is a
@@ -4001,10 +3960,6 @@ function pushClip(text: string) {
   if (clipHist.length > CLIP_MAX) clipHist.length = CLIP_MAX;
   saveClipHist();
 }
-function clipPreview(text: string): string {
-  const t = text.replace(/\r?\n/g, " ⏎ ").replace(/\t/g, " ").trim();
-  return t.length > 46 ? t.slice(0, 45) + "…" : t;
-}
 
 /// Full clipboard-history viewer (from the terminal context menu):
 /// multi-line previews with paste / copy / remove per entry.
@@ -4754,9 +4709,6 @@ function fmtStamp(ms: number): string {
   });
 }
 
-function fmtSize(b: number): string {
-  return b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`;
-}
 
 function historyOpen(): boolean {
   return app.classList.contains("history-on");
@@ -7086,30 +7038,6 @@ interface StatusItemDef {
   detail?: (c: StatusCtx) => StatusDetail;
 }
 
-function fmtBytes(n: number): string {
-  if (!isFinite(n) || n <= 0) return "0B";
-  const u = ["B", "K", "M", "G", "T"];
-  let i = 0;
-  while (n >= 1024 && i < u.length - 1) {
-    n /= 1024;
-    i++;
-  }
-  return `${n >= 100 || i === 0 ? Math.round(n) : n.toFixed(1)}${u[i]}`;
-}
-function fmtRate(n: number): string {
-  return `${fmtBytes(n)}/s`;
-}
-function fmtDuration(s: number): string {
-  const d = Math.floor(s / 86400);
-  const h = Math.floor((s % 86400) / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  if (d) return `${d}d ${h}h`;
-  if (h) return `${h}h ${m}m`;
-  return `${m}m`;
-}
-function pct(n: number): string {
-  return `${Math.round(n)}%`;
-}
 
 const STATUS_BUILTINS: Record<string, StatusItemDef> = {
   clock: {
