@@ -46,42 +46,76 @@ if ($hwnd -eq [IntPtr]::Zero) { Write-Error "no window found (pid=$ProcessId tit
 
 $r = New-Object 'GTerm.Rec+RECT'
 [void]$U::GetWindowRect($hwnd, [ref]$r)
-$fullW = $r.R - $r.L; $fullH = $r.B - $r.T
-$w = [int]([math]::Round($fullW * $Scale)); $h = [int]([math]::Round($fullH * $Scale))
-# GIF frames are indexed; even dimensions keep the scaler simple.
-if ($w % 2) { $w-- }; if ($h % 2) { $h-- }
+# The canvas is fixed for the whole recording — every frame of a GIF or a
+# video has to be the same size — but the window is not: it gets resized,
+# hidden and restored. So the window is measured every frame and drawn
+# scaled to fit, centred, rather than assumed to stay the size it started.
+# Getting this wrong looks like torn, doubled frames rather than an error.
+$canvasW = [int]([math]::Round(($r.R - $r.L) * $Scale))
+$canvasH = [int]([math]::Round(($r.B - $r.T) * $Scale))
+if ($canvasW % 2) { $canvasW-- }; if ($canvasH % 2) { $canvasH-- }
+$w = $canvasW; $h = $canvasH
 
 Remove-Item $Out -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $Out | Out-Null
 
 $delayMs = [int](1000 / $Fps)
 $total = [int]($Seconds * $Fps)
-$full = New-Object System.Drawing.Bitmap $fullW, $fullH
-$small = New-Object System.Drawing.Bitmap $w, $h
-$gFull = [System.Drawing.Graphics]::FromImage($full)
-$gSmall = [System.Drawing.Graphics]::FromImage($small)
-$gSmall.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-$rect = New-Object System.Drawing.Rectangle 0, 0, $w, $h
+$canvas = New-Object System.Drawing.Bitmap $canvasW, $canvasH
+$gCanvas = [System.Drawing.Graphics]::FromImage($canvas)
+$gCanvas.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+$backdrop = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(18, 18, 20))
+$rect = New-Object System.Drawing.Rectangle 0, 0, $canvasW, $canvasH
+$jpeg = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() |
+  Where-Object { $_.MimeType -eq 'image/jpeg' }
+$jpegParams = New-Object System.Drawing.Imaging.EncoderParameters 1
+$jpegParams.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter(
+  [System.Drawing.Imaging.Encoder]::Quality, [int64]82)
 
+$src = $null; $gSrc = $null; $srcW = 0; $srcH = 0
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 $kept = 0
 for ($i = 0; $i -lt $total; $i++) {
   $due = $i * $delayMs
   while ($sw.ElapsedMilliseconds -lt $due) { Start-Sleep -Milliseconds 2 }
-  $dc = $gFull.GetHdc()
-  $ok = $U::PrintWindow($hwnd, $dc, 2)   # 2 = PW_RENDERFULLCONTENT
-  $gFull.ReleaseHdc($dc)
-  if (-not $ok) { continue }
-  $gSmall.DrawImage($full, 0, 0, $w, $h)
-  $data = $small.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly,
-                          [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-  $bytes = New-Object byte[] ($data.Stride * $h)
+
+  [void]$U::GetWindowRect($hwnd, [ref]$r)
+  $ww = $r.R - $r.L; $wh = $r.B - $r.T
+  $gCanvas.FillRectangle($backdrop, $rect)
+
+  if ($ww -gt 0 -and $wh -gt 0 -and $U::IsWindowVisible($hwnd)) {
+    if ($ww -ne $srcW -or $wh -ne $srcH) {
+      if ($gSrc) { $gSrc.Dispose() }; if ($src) { $src.Dispose() }
+      $src = New-Object System.Drawing.Bitmap $ww, $wh
+      $gSrc = [System.Drawing.Graphics]::FromImage($src)
+      $srcW = $ww; $srcH = $wh
+    }
+    $dc = $gSrc.GetHdc()
+    $ok = $U::PrintWindow($hwnd, $dc, 2)   # 2 = PW_RENDERFULLCONTENT
+    $gSrc.ReleaseHdc($dc)
+    if ($ok) {
+      # Fit inside the canvas, keeping the window's own aspect, so a
+      # resize reads as the window changing shape rather than the
+      # recording jumping.
+      $k = [math]::Min($canvasW / $ww, $canvasH / $wh)
+      $dw = [int]($ww * $k); $dh = [int]($wh * $k)
+      $gCanvas.DrawImage($src, [int](($canvasW - $dw) / 2), [int](($canvasH - $dh) / 2), $dw, $dh)
+    }
+  }
+
+  $data = $canvas.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly,
+                           [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  $bytes = New-Object byte[] ($data.Stride * $canvasH)
   [System.Runtime.InteropServices.Marshal]::Copy($data.Scan0, $bytes, 0, $bytes.Length)
-  $small.UnlockBits($data)
+  $canvas.UnlockBits($data)
   [System.IO.File]::WriteAllBytes((Join-Path $Out ("frame-{0:d4}.bgra" -f $kept)), $bytes)
+  # A JPEG of the same frame, for the AVI muxer. Cheap here, and it saves
+  # the encoder from needing a JPEG encoder of its own.
+  $canvas.Save((Join-Path $Out ("frame-{0:d4}.jpg" -f $kept)), $jpeg, $jpegParams)
   $kept++
 }
-$gSmall.Dispose(); $gFull.Dispose(); $small.Dispose(); $full.Dispose()
+if ($gSrc) { $gSrc.Dispose() }; if ($src) { $src.Dispose() }
+$gCanvas.Dispose(); $canvas.Dispose(); $backdrop.Dispose()
 
 @{ width = $w; height = $h; stride = $w * 4; frames = $kept; delayMs = $delayMs } |
   ConvertTo-Json | Set-Content (Join-Path $Out "meta.json")
