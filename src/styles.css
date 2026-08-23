@@ -1806,11 +1806,16 @@ input.set-control {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-  padding: 8px 4px 4px 10px;
-  /* A row is rows × cell height, and cell height is rounded — with a
-     fractional line-height the last row can end up a pixel or two taller
-     than the space it was fitted to. Nothing between here and #app clips,
-     so that remainder used to paint over the status bar. */
+  /* The bottom padding is slack, not decoration. FitAddon floors rows
+     against the height in CSS pixels, but each row is rounded to device
+     pixels when painted, and across forty rows at a fractional
+     line-height (or non-100% display scaling) that rounding adds up to a
+     pixel or two more than it was fitted to. With no slack the last row
+     ends up either painted over the status bar or clipped by the rule
+     below — the same bug either way. FitAddon reads this padding out of
+     the available height, so widening it drops the borderline row
+     instead of half-drawing it. */
+  padding: 8px 4px 9px 10px;
   overflow: hidden;
 }
 
