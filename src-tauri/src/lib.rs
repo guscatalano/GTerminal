@@ -132,6 +132,22 @@ fn attach_session(
     send_to(&state, id, Request::Resize { cols, rows })
 }
 
+/// A session's saved output, without starting anything.
+///
+/// Deliberately not an attach: attaching to a session whose shell has
+/// ended spawns a replacement, so a window that attached in order to show
+/// you the history would be starting processes on your behalf every time
+/// you glanced at one.
+#[tauri::command]
+fn peek_session(id: u32) -> Result<String, String> {
+    let stream = match mux::client::connect() {
+        Ok(s) => s,
+        Err(_) => mux::client::ensure()?,
+    };
+    let v = mux::client::request(stream, &Request::Peek { id })?;
+    Ok(v.get("data").and_then(Value::as_str).unwrap_or("").to_string())
+}
+
 #[tauri::command]
 fn write_session(state: State<PtyManager>, id: u32, data: String) -> Result<(), String> {
     send_to(&state, id, Request::Write { data })
@@ -594,6 +610,7 @@ pub fn run() {
             list_sessions,
             create_session,
             attach_session,
+            peek_session,
             write_session,
             resize_session,
             detach_session,

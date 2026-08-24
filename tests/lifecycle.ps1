@@ -203,6 +203,24 @@ Start-Sleep -Milliseconds 1500
 $f.Writer.WriteLine('{"cmd":"write","data":"echo reboot-marker-777\r"}')
 Start-Sleep -Seconds 6
 $f.Client.Close()
+
+# A session nobody ever typed into, going through the same "reboot" as the
+# one above. It holds its own prompt and a screenful of erase sequences —
+# nothing anyone would reopen to read, and reopening it only makes a new
+# shell in a folder, which a new tab already does. The distinction is
+# *typing*, not bytes written: the terminal answers the ESC[6n that every
+# session opens with, so "something was written" is true even here.
+$husk = (Request2 $port '{"cmd":"create","cols":100,"rows":30}').id
+$hc = New-Conn $port
+$hc.Writer.WriteLine("{""cmd"":""attach"",""id"":$husk}")
+$null = Read-Line2 $hc
+$hc.Writer.WriteLine('{"cmd":"write","data":"[1;1R"}')   # the terminal, not a person
+Start-Sleep -Seconds 6                                          # prompt renders, checkpoint flushes
+$hc.Client.Close()
+$huskRing = "$env:LOCALAPPDATA\GTerminal\sessions\$husk.ring"
+if (Test-Path $huskRing) { Pass "an untouched session checkpoints like any other" }
+else { Fail "husk" "nothing was checkpointed, so the restart proves nothing" }
+
 Stop-DaemonTree $daemon2
 Start-Sleep -Seconds 1
 if (-not (Test-Path "$env:LOCALAPPDATA\GTerminal\sessions\$id3.ring")) {
@@ -212,6 +230,14 @@ if (-not (Test-Path "$env:LOCALAPPDATA\GTerminal\sessions\$id3.ring")) {
 $port = Start-Daemon
 $s = Get-Sessions $port | Where-Object id -eq $id3
 if ($null -eq $s -or $s.alive) { Fail "reboot-cold" "cold session not offered after restart" } else { Pass "cold session offered after 'reboot'" }
+# The one nobody typed into does not come back, and does not leave its
+# checkpoint behind either — a file with no session is a phantom that
+# reappears every restart.
+if (Get-Sessions $port | Where-Object id -eq $husk) {
+  Fail "husk" "a shell nobody typed into came back after the restart"
+} else { Pass "a shell nobody typed into is dropped instead" }
+if (Test-Path $huskRing) { Fail "husk" "its checkpoint was left on disk" }
+else { Pass "and its checkpoint is deleted with it" }
 $g = New-Conn $port
 $g.Writer.WriteLine("{""cmd"":""attach"",""id"":$id3}")
 $null = Read-Line2 $g
@@ -655,6 +681,7 @@ foreach ($k in @($keep, $rz)) {
   $null = Request2 $port "{""cmd"":""kill"",""id"":$k}"
   try { $null = Request2 $port "{""cmd"":""kill"",""id"":$k}" 0 } catch {}
 }
+
 
 # ── closing several sessions in a row ──
 # Reported from real use: closing a handful of tabs left only *one* of them

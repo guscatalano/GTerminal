@@ -4052,7 +4052,14 @@ async function createTab(
   shell?: string,
   cwd?: string,
   title?: string,
-  splitFrom?: number
+  splitFrom?: number,
+  /// Show the session's saved output without starting a shell in it.
+  /// Left undefined it decides for itself: a session whose shell has
+  /// ended opens as a preview, because attaching to one *resurrects* it
+  /// and clicking a row to see what was in it should not start a
+  /// process. Pass false where the user has already said they want it
+  /// running — the boot restore, where they ticked it in the picker.
+  preview?: boolean
 ): Promise<number | undefined> {
   const pane = document.createElement("div");
   pane.className = "pane";
@@ -4149,11 +4156,13 @@ async function createTab(
   }
   fit.fit();
 
+  const ended = attachId !== undefined && lastInfo.get(attachId)?.alive === false;
+  const asPreview = attachId !== undefined && (preview ?? ended);
   let id: number;
   try {
     if (attachId !== undefined) {
       id = attachId;
-      await invoke("attach_session", { id, cols: term.cols, rows: term.rows });
+      if (!asPreview) await invoke("attach_session", { id, cols: term.cols, rows: term.rows });
     } else {
       id = await invoke<number>("create_session", {
         cols: term.cols,
@@ -4226,6 +4235,7 @@ async function createTab(
 
   const tab: Tab = { id, term, fit, pane, button, label, icon, shellB, webgl, search, blocks };
   tabs.set(id, tab);
+  if (asPreview) void showEndedPreview(id);
 
   button.addEventListener("mousedown", (e) => {
     if (e.target !== close && e.target !== hide && e.target !== resize) {
@@ -4571,7 +4581,85 @@ function removeTab(id: number, closeWindowIfLast = true) {
 // Closing a tab starts its grace window: the session lands in "Closing
 // soon" with a countdown, restorable (from the sidebar, ⟳ menu, or
 // Ctrl+Shift+Z) until the timer runs out — then it actually dies.
+/// Tabs showing an ended session's output with no shell behind them.
+const previewing = new Set<number>();
+
+/// Open an ended session read-only: its saved output, and the offer of a
+/// shell. Reading is not the same as reviving, and clicking a row in a
+/// list to see what was in it should not silently start a process.
+async function showEndedPreview(id: number) {
+  const tab = tabs.get(id);
+  if (!tab) return;
+  previewing.add(id);
+  tab.term.options.disableStdin = true;
+  // null is "could not read", which is not the same as "there was
+  // nothing" — a daemon too old to know the request answers the same way
+  // an empty session does, and saying "left no output" to someone whose
+  // output is sitting on disk is a lie the UI can easily avoid telling.
+  const text = await invoke<string>("peek_session", { id }).catch(() => null);
+  // The tab may have been closed while the daemon was answering.
+  if (!previewing.has(id) || !tabs.has(id)) return;
+  if (text) tab.term.write(text);
+  const bar = document.createElement("div");
+  bar.className = "preview-bar";
+  const note = document.createElement("span");
+  note.className = "preview-note";
+  note.textContent =
+    text === null
+      ? "This shell ended. Its saved output could not be read. Nothing is running here."
+      : text
+        ? "This shell ended — its output is kept. Nothing is running here."
+        : "This shell ended and left no output. Nothing is running here.";
+  const go = document.createElement("button");
+  go.className = "set-control preview-go";
+  go.textContent = "Start a shell here";
+  go.title = "Open a new shell in this session's folder, keeping the output above";
+  const shut = document.createElement("button");
+  shut.className = "set-control";
+  shut.textContent = "Close";
+  shut.title = "Close this view — the session stays where it was";
+  bar.append(note, go, shut);
+  tab.pane.appendChild(bar);
+  go.addEventListener("click", () => void instantiate(id));
+  shut.addEventListener("click", () => void closeTab(id));
+  fitTab(tab);
+}
+
+/// Give a previewed session a shell at last. The daemon replays the
+/// scrollback on attach, so what the preview drew is cleared first rather
+/// than left to appear twice.
+async function instantiate(id: number) {
+  const tab = tabs.get(id);
+  if (!tab || !previewing.has(id)) return;
+  previewing.delete(id);
+  tab.pane.querySelector(".preview-bar")?.remove();
+  fitTab(tab);
+  tab.term.reset();
+  tab.term.options.disableStdin = false;
+  try {
+    await invoke("attach_session", { id, cols: tab.term.cols, rows: tab.term.rows });
+  } catch (err) {
+    console.error("Failed to start a shell in", id, err);
+    previewing.add(id);
+    void showEndedPreview(id);
+    return;
+  }
+  tab.term.focus();
+  refreshChrome();
+}
+
 async function closeTab(id: number) {
+  // A preview never started anything, so closing it is not a close: the
+  // session stays exactly as it was, and killing it here would destroy
+  // the output the user opened it to read.
+  if (previewing.delete(id)) {
+    const key = paneTab.get(id) ?? id;
+    const wasLastTab = tabCount() === 1 && leavesOf(treeOf(key)).length === 1;
+    removeTab(id, false);
+    if (wasLastTab) await createTab();
+    refreshChrome();
+    return;
+  }
   invoke("kill_session", { id }).catch(() => {});
   // Closing the last tab closes the window, and close means hide — which
   // is right when there is nothing left, but not when sessions are still
@@ -8117,11 +8205,18 @@ async function main() {
     if (!leaves.length) continue;
     const owner = leaves[0];
     progress?.step(sessionLabel(sessions.find((s) => s.id === owner) ?? ({} as SessionInfo)));
-    if ((await createTab(owner)) === undefined) continue;
+    // Explicitly not a preview anywhere in here: these were ticked in the
+    // picker, which says outright that an ended one comes back as a new
+    // shell. Asking again once they are on screen is asking twice.
+    if ((await createTab(owner, undefined, undefined, undefined, undefined, false)) === undefined) {
+      continue;
+    }
     placed.add(owner);
     for (const leaf of leaves.slice(1)) {
       progress?.step(sessionLabel(sessions.find((s) => s.id === leaf) ?? ({} as SessionInfo)));
-      if ((await createTab(leaf, undefined, undefined, undefined, owner)) === undefined) continue;
+      if ((await createTab(leaf, undefined, undefined, undefined, owner, false)) === undefined) {
+        continue;
+      }
       placed.add(leaf);
       paneTab.set(leaf, owner);
     }
@@ -8137,7 +8232,7 @@ async function main() {
   for (const s of adoptable) {
     if (placed.has(s.id)) continue;
     progress?.step(sessionLabel(s));
-    await createTab(s.id);
+    await createTab(s.id, undefined, undefined, undefined, undefined, false);
   }
   progress?.done();
   saveLayouts();

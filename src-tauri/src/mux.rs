@@ -143,6 +143,13 @@ pub enum Request {
     },
     Kill { id: u32 },
     Attach { id: u32 },
+    /// Read a session's scrollback without attaching to it.
+    ///
+    /// Attaching to a session whose shell has ended *resurrects* it — a
+    /// new process, started for you because you looked. Peek is how the
+    /// window can show you what was in a session and let you decide
+    /// afterwards whether you want a shell in it.
+    Peek { id: u32 },
     Write { data: String },
     Resize { cols: u16, rows: u16 },
     Detach,
@@ -211,6 +218,134 @@ struct Meta {
     /// shell comes back after a reboot resurrection.
     #[serde(default)]
     shell: String,
+    /// Whether anyone ever typed into this session. See `worth_keeping`.
+    ///
+    /// Defaults to true so that records written before this existed are
+    /// kept: the flag is missing, not false, and deleting someone's
+    /// scrollback on the strength of a field we never wrote would be the
+    /// worst possible reading of "we are not sure".
+    #[serde(default = "yes")]
+    saw_input: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+#[cfg(test)]
+mod keep_tests {
+    use super::{is_typing, worth_keeping};
+
+    /// The reply xterm sends to the `ESC[6n` every session opens with. If
+    /// this counted as input, every session ever opened would look used
+    /// and nothing would ever be tidied away.
+    #[test]
+    fn the_terminals_own_replies_are_not_typing() {
+        assert!(!is_typing("\x1b[1;1R"), "cursor position report");
+        assert!(!is_typing("\x1b[?1;2c"), "device attributes");
+        assert!(!is_typing("\x1b]11;rgb:0d/11/17\x07"), "OSC colour reply");
+        assert!(!is_typing("\x1b]11;rgb:0d/11/17\x1b\\"), "OSC ended with ST");
+        assert!(!is_typing(""), "nothing at all");
+        assert!(!is_typing("\x1b[A"), "an arrow key leaves nothing behind");
+    }
+
+    #[test]
+    fn a_person_at_the_keyboard_counts() {
+        assert!(is_typing("l"), "one letter is someone using it");
+        assert!(is_typing("\r"), "so is a bare Enter");
+        assert!(is_typing("\t"), "and a Tab completion");
+        assert!(is_typing("échò"), "non-ASCII is still typing");
+        // Mixed: the reply arrives glued to the keystroke that followed.
+        assert!(is_typing("\x1b[1;1Rls\r"), "a reply followed by a command");
+        assert!(is_typing("\x1b[Ax"), "an arrow then a letter");
+    }
+
+    /// An unterminated sequence must not run off the end of the buffer or
+    /// swallow the rest of a chunk that does contain typing.
+    #[test]
+    fn a_truncated_escape_does_not_panic() {
+        assert!(!is_typing("\x1b"), "a lone ESC");
+        assert!(!is_typing("\x1b["), "CSI with nothing after it");
+        assert!(!is_typing("\x1b]0;title"), "OSC with no terminator");
+    }
+
+    #[test]
+    fn only_used_sessions_are_kept() {
+        assert!(worth_keeping(true), "typed into: keep it");
+        assert!(!worth_keeping(false), "never touched: nothing to come back for");
+    }
+}
+
+/// Whether a session whose shell has ended is worth keeping.
+///
+/// A shell that was opened and never typed into leaves a ring holding its
+/// own prompt and a screenful of erase sequences — nothing anyone would
+/// reopen to read, and reopening it just makes a new shell in a folder,
+/// which is what a new tab already does. Keeping those fills the list you
+/// go to when you actually lost something with things you never used.
+///
+/// Input is the signal, not the size of the ring: a bare cmd.exe prompt
+/// is 765 bytes of escape sequences, and the ring cannot tell a prompt
+/// the shell printed from output worth reading. Whether a key was ever
+/// pressed is unambiguous, and it is the same answer for every shell.
+fn worth_keeping(saw_input: bool) -> bool {
+    saw_input
+}
+
+/// Does this write look like a person typing, rather than the terminal
+/// answering the shell?
+///
+/// It cannot simply be "was anything written": xterm replies to the
+/// `ESC[6n` that every ConPTY session opens with, and sends more of the
+/// same on resize and focus. Those arrive as writes on the same path as
+/// keystrokes, so counting them would make every session that ever had a
+/// window open on it look used.
+///
+/// Escape sequences are skipped and what remains is judged: printable
+/// text, Enter, or Tab is a person. Bare control bytes are not — Ctrl+C
+/// into an idle shell leaves nothing behind worth reopening.
+fn is_typing(data: &str) -> bool {
+    let b = data.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == 0x1b {
+            i += 1;
+            match b.get(i) {
+                // CSI: parameters, then a final byte in @..~
+                Some(b'[') => {
+                    i += 1;
+                    while i < b.len() && !(0x40..=0x7e).contains(&b[i]) {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+                // OSC: runs to BEL or ST
+                Some(b']') => {
+                    while i < b.len() {
+                        if b[i] == 0x07 {
+                            break;
+                        }
+                        if b[i] == 0x1b && b.get(i + 1) == Some(&b'\\') {
+                            i += 1;
+                            break;
+                        }
+                        i += 1;
+                    }
+                    i += 1;
+                }
+                // ESC O P and friends: one more byte belongs to it
+                Some(_) => i += 1,
+                None => {}
+            }
+            continue;
+        }
+        let c = b[i];
+        if c == b'\r' || c == b'\n' || c == b'\t' || (0x20..0x7f).contains(&c) || c >= 0x80 {
+            return true;
+        }
+        i += 1;
+    }
+    false
 }
 
 struct Session {
@@ -227,6 +362,10 @@ struct Session {
     /// Typed into the shell once its first prompt renders (writing earlier
     /// gets dropped while ConPTY is still initializing).
     pending_input: Option<Vec<u8>>,
+    /// Set the first time anything is typed into this session. Decides
+    /// whether it is worth keeping once its shell ends — see
+    /// `worth_keeping`.
+    saw_input: bool,
     /// Soft-killed: the process is still running but will be killed for
     /// real at this time unless an attach cancels the doom.
     doomed_until: Option<u64>,
@@ -515,6 +654,14 @@ fn load_cold(state: &mut DaemonState) {
             continue;
         };
         NEXT_SESSION.fetch_max(meta.id + 1, Ordering::Relaxed);
+        // The daemon does not always get to tidy up on its way out — a
+        // reboot or a kill leaves whatever was on disk, including shells
+        // nobody ever typed into. Their id is still claimed above, so
+        // nothing is reused; only the husk goes.
+        if !worth_keeping(meta.saw_input) {
+            delete_persist(meta.id);
+            continue;
+        }
         state.cold.insert(
             meta.id,
             ColdSession {
@@ -544,6 +691,7 @@ fn spawn_flush_thread(sessions: Sessions) {
                             cwd: s.cwd.clone(),
                             running: Vec::new(),
                             shell: s.shell.clone(),
+                            saw_input: s.saw_input,
                         },
                         s.ring.clone(),
                         s.child_pid,
@@ -580,13 +728,15 @@ fn end_session(sessions: &Sessions, id: u32) {
         }
         let _ = s.child.kill();
         finish_history(&s, id);
-        if let Some(grace) = grace_ms() {
+        // A session nobody ever typed into has nothing to come back for.
+        if let Some(grace) = grace_ms().filter(|_| worth_keeping(s.saw_input)) {
             let meta = Meta {
                 id,
                 created_ms: s.created_ms,
                 cwd: s.cwd.clone(),
                 running: Vec::new(),
                 shell: s.shell.clone(),
+                saw_input: s.saw_input,
             };
             let _ = std::fs::create_dir_all(sessions_dir());
             let _ = std::fs::write(
@@ -944,9 +1094,35 @@ fn conn_loop(
                     }
                 }
             }
+            Request::Peek { id } => {
+                // A live session keeps its ring in memory; an ended one
+                // left it on disk, which is the case this exists for.
+                let live = sessions
+                    .lock()
+                    .unwrap()
+                    .live
+                    .get(&id)
+                    .map(|s| String::from_utf8_lossy(&s.ring).into_owned());
+                let data = match live {
+                    Some(text) => Some(text),
+                    None => std::fs::read(ring_path(id))
+                        .ok()
+                        .map(|b| String::from_utf8_lossy(&b).into_owned()),
+                };
+                match data {
+                    Some(text) => write_line(&mut out, &json!({"ok": true, "data": text}))?,
+                    None => write_line(
+                        &mut out,
+                        &json!({"ok": false, "error": "no scrollback for that session"}),
+                    )?,
+                }
+            }
             Request::Write { data } => {
                 if let Some(id) = *attached_id {
                     if let Some(s) = sessions.lock().unwrap().live.get_mut(&id) {
+                        if is_typing(&data) {
+                            s.saw_input = true;
+                        }
                         let _ = s.writer.write_all(data.as_bytes());
                     }
                 }
@@ -983,6 +1159,7 @@ fn start_session(
     created_ms: u64,
     shell: &str,
 ) -> Result<(), String> {
+    let ring_seed_was_empty = ring.is_empty();
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
@@ -1143,6 +1320,11 @@ fn start_session(
             dirty: true,
             pending_input: None,
             doomed_until: None,
+            // A non-empty ring here means this is a resurrection, and a
+            // session only survives to be resurrected if it was used —
+            // so it keeps that standing rather than having to earn it
+            // again with a keystroke it may never receive.
+            saw_input: !ring_seed_was_empty,
             transcript,
             transcript_len,
         },
