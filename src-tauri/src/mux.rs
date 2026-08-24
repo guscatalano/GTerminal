@@ -415,6 +415,12 @@ fn state_dir() -> PathBuf {
     PathBuf::from(base).join("GTerminal")
 }
 
+/// The state directory, for callers outside this module (the window
+/// offers to open it when someone is chasing a bug).
+pub fn state_dir_path() -> PathBuf {
+    state_dir()
+}
+
 fn port_file() -> PathBuf {
     state_dir().join("daemon.port")
 }

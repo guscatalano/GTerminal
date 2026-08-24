@@ -132,6 +132,48 @@ fn attach_session(
     send_to(&state, id, Request::Resize { cols, rows })
 }
 
+/// Where the logs live, so the window can offer to open the folder.
+#[tauri::command]
+fn logs_path() -> String {
+    mux::state_dir_path().to_string_lossy().into_owned()
+}
+
+/// Append one line to the UI event log.
+///
+/// The transcripts record what the *shell* printed. Nothing recorded what
+/// the window did — which menu opened, what was chosen, where a paste
+/// came from — so a report like "hovering Paste pastes" could not be
+/// checked against anything: the shell sees identical text whether it was
+/// clicked, hovered, or typed. This is that missing half.
+///
+/// Never the clipboard's contents: a log people are asked to send should
+/// not carry what they copied. Sizes and counts only.
+#[tauri::command]
+fn log_ui(line: String) -> Result<(), String> {
+    use std::io::Write;
+    let dir = mux::state_dir_path();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join("ui.log");
+    // Bounded, and trimmed to its newest half rather than deleted, so a
+    // long session cannot grow it without limit and a trim cannot throw
+    // away the entry someone is looking for.
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > UI_LOG_MAX) {
+        if let Ok(bytes) = std::fs::read(&path) {
+            let tail = &bytes[bytes.len() - (UI_LOG_MAX as usize) / 2..];
+            let start = tail.iter().position(|&b| b == b'\n').map(|p| p + 1).unwrap_or(0);
+            let _ = std::fs::write(&path, &tail[start..]);
+        }
+    }
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| e.to_string())?;
+    writeln!(f, "{line}").map_err(|e| e.to_string())
+}
+
+const UI_LOG_MAX: u64 = 2 * 1024 * 1024;
+
 /// Who the daemon is: protocol, version, pid. Empty fields mean a daemon
 /// old enough not to report them, which is itself the answer.
 #[tauri::command]
@@ -731,6 +773,8 @@ pub fn run() {
             peek_session,
             daemon_info,
             restart_daemon,
+            logs_path,
+            log_ui,
             summon_toggle,
             write_session,
             resize_session,

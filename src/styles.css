@@ -2574,3 +2574,34 @@ input.set-control {
 .pane .xterm .xterm-viewport {
   background-color: transparent !important;
 }
+
+/* The – on tabs, when someone has turned it off. Its own class rather
+   than nth-of-type: the close button is the same element type, and a
+   selector that counts children breaks the moment one is added. */
+#app.no-tab-hide .tab-hide {
+  display: none;
+}
+
+.setting-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.setting-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.setting-status {
+  color: var(--muted);
+  font: 11px "Segoe UI", sans-serif;
+  text-align: right;
+}
+
+.about-logs {
+  margin-left: 10px;
+  vertical-align: middle;
+}

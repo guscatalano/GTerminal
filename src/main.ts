@@ -2,7 +2,7 @@ import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl, openPath } from "@tauri-apps/plugin-opener";
 import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Terminal } from "@xterm/xterm";
 import type { ITheme } from "@xterm/xterm";
@@ -33,6 +33,10 @@ import type { SessionState } from "./restore";
 import { staleDaemon, shellsAtRisk, daemonNotice } from "./daemon";
 import type { DaemonInfo } from "./daemon";
 import { activates } from "./menus";
+import { visibilityReport } from "./controls";
+import type { ControlRect } from "./controls";
+import { formatEvent, describeText } from "./uilog";
+import type { UiEvent } from "./uilog";
 import { BlockTracker } from "./blocks";
 import type { Block } from "./blocks";
 import {
@@ -166,6 +170,12 @@ interface AppConfig {
   close_action?: string;
   summon_animation?: string;
   restore_prompt?: boolean;
+  /// Record what the window does (menus, pastes) to ui.log. On by
+  /// default: a diagnostic you have to switch on before reproducing is
+  /// one you never have when the bug first appears.
+  ui_log?: boolean;
+  /// Draw the – (hide) button on tabs.
+  tab_hide_button?: boolean;
   restore_prompt_at?: number;
   paste_warn?: boolean;
   paste_warn_lines?: number;
@@ -3635,8 +3645,9 @@ function initFind() {
 /// which is why the paste warning is the real protection rather than a
 /// nicety. The wrapping is kept for shells that do ask, WSL and git-bash
 /// among them.
-function pasteText(id: number, text: string) {
+function pasteText(id: number, text: string, source = "unknown") {
   if (!text) return;
+  logUi("paste", { id, source, ...describeText(text) });
   if (pasteNeedsWarning(text, pasteLimits())) {
     confirmPaste(id, text);
     return;
@@ -3739,10 +3750,10 @@ function confirmPaste(id: number, text: string) {
 }
 
 /// Paste the system clipboard into a session.
-function pasteClipboardInto(id: number) {
+function pasteClipboardInto(id: number, source = "keyboard") {
   navigator.clipboard
     .readText()
-    .then((text) => pasteText(id, text))
+    .then((text) => pasteText(id, text, source))
     .catch(() => {});
 }
 
@@ -3929,7 +3940,7 @@ function closeTabViaKeyboard(id: number) {
   }
   closeKeyId = id;
   closeKeyAt = now;
-  const btn = tabs.get(id)?.button.querySelectorAll<HTMLElement>(".tab-close")[1];
+  const btn = tabs.get(id)?.button.querySelector<HTMLElement>(".tab-x");
   if (btn) {
     btn.classList.add("armed");
     window.setTimeout(() => btn.classList.remove("armed"), 2000);
@@ -4018,7 +4029,7 @@ function openClipViewer(id: number, term: Terminal) {
     };
     acts.append(
       mkBtn("Paste", () => {
-        pasteText(id, text);
+        pasteText(id, text, "clipboard-history");
         closeClipViewer();
         term.focus();
       }),
@@ -4205,11 +4216,11 @@ async function createTab(
   splitBadge.className = "tab-split";
   splitBadge.hidden = true;
   const hide = document.createElement("button");
-  hide.className = "tab-close";
+  hide.className = "tab-close tab-hide";
   hide.textContent = "–";
   hide.title = "Hide tab — park it aside, still running (Ctrl+Shift+H)";
   const close = document.createElement("button");
-  close.className = "tab-close";
+  close.className = "tab-close tab-x";
   close.textContent = "×";
   close.title = "Close tab — restorable from Closing soon until its timer runs out (Ctrl+Shift+W ×2)";
   const resize = document.createElement("span");
@@ -4386,7 +4397,7 @@ async function createTab(
       // Focus returns to the terminal after every menu action so typing
       // (especially right after a paste) lands where it belongs.
       const writePaste = (text: string) => {
-        pasteText(id, text);
+        pasteText(id, text, "menu");
         term.focus();
       };
       if (current) {
@@ -5077,6 +5088,12 @@ function showContextMenu(x: number, y: number, items: CtxItem[]) {
   ctxMenu.classList.add("open");
   armMenu(ctxMenu);
   placeFloating(ctxMenu, x, y);
+  logUi("menu.open", {
+    x,
+    y,
+    items: items.filter((i) => i !== "sep").length,
+    first: items.find((i) => i !== "sep") ? (items.find((i) => i !== "sep") as { label: string }).label : null,
+  });
 }
 
 /// Position a floating element at a point, kept wholly inside the window.
@@ -5320,6 +5337,19 @@ function groupMenuItems(g: TabGroup, nameEl: HTMLElement): CtxItem[] {
 /// Two conditions, both required: the row must have received its own
 /// press, and the menu must have been up long enough that the click
 /// cannot belong to the gesture that opened it.
+/// Record what the window did. Fire and forget, and never allowed to
+/// throw: a log that can break the thing it is logging is worse than no
+/// log. See src/uilog.ts for what may and may not be written.
+function logUi(ev: string, fields: Record<string, unknown> = {}) {
+  if (config.ui_log === false) return;
+  try {
+    const line = formatEvent({ ev, ...fields } as UiEvent, new Date().toISOString());
+    void invoke("log_ui", { line }).catch(() => {});
+  } catch {
+    // A logging failure is not the user's problem.
+  }
+}
+
 const MENU_ARM_MS = 250;
 
 function armMenu(el: HTMLElement) {
@@ -5360,7 +5390,18 @@ function menuRow(
   });
   row.addEventListener("click", (e) => {
     if (killBtn && e.target === killBtn) return;
+    const menu = row.closest<HTMLElement>(".menu");
+    const since = Math.round(performance.now() - Number(menu?.dataset.armedAt ?? "0"));
     const ok = menuClickCounts(row, pressed);
+    // Both outcomes are recorded. A refusal is the interesting one: it is
+    // an activation nobody asked for, and without it in the log there is
+    // nothing to distinguish "the menu did something on its own" from
+    // "someone clicked and forgot".
+    logUi(ok ? "menu.choose" : "menu.refuse", {
+      label,
+      pressedOnRow: pressed,
+      sinceOpenMs: Number.isFinite(since) ? since : null,
+    });
     pressed = false;
     if (!ok) return;
     closeMenus();
@@ -5931,6 +5972,24 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
   }
 }
 
+/// The – button on tabs, and whether it is drawn at all.
+function applyTabHideButton() {
+  app.classList.toggle("no-tab-hide", config.tab_hide_button === false);
+}
+
+/// Measure the – buttons where they actually are. A control can be
+/// present and styled and still invisible because its tab clipped it, so
+/// this reports the geometry rather than the intent.
+function tabHideButtonRects(): ControlRect[] {
+  return [...tabbar.querySelectorAll<HTMLElement>(".tab")].map((tab) => {
+    const btn = tab.querySelector<HTMLElement>(".tab-hide");
+    if (!btn) return { width: 0, right: 0, ownerRight: 0, hidden: true };
+    const b = btn.getBoundingClientRect();
+    const t = tab.getBoundingClientRect();
+    return { width: b.width, right: b.right, ownerRight: t.right, hidden: btn.offsetParent === null };
+  });
+}
+
 function refreshChrome() {
   requestAnimationFrame(() => {
     if (renameActive) return; // rebuilt on commit instead
@@ -6176,6 +6235,48 @@ function settingsSection(title: string): HTMLElement {
   h.textContent = title;
   settingsList.appendChild(h);
   return h;
+}
+
+/// "Is the – button even there?" — a question the settings page can
+/// answer rather than leaving someone to squint at a tab.
+///
+/// Two things in one row on purpose: whether it is meant to be drawn, and
+/// whether it actually is. They come apart — a tab narrow enough clips
+/// the button while every setting still says it is on — and the report
+/// says which of those is happening.
+function settingsRow_TabHide() {
+  const wrap = document.createElement("div");
+  wrap.className = "setting-stack";
+  const sel = mkSelect(
+    [["on", "Show"], ["off", "Hide"]],
+    config.tab_hide_button === false ? "off" : "on",
+    (v) => {
+      config.tab_hide_button = v === "on";
+      saveConfig();
+      applyTabHideButton();
+      refreshChrome();
+      window.setTimeout(report, 60);
+    }
+  );
+  const status = document.createElement("div");
+  status.className = "setting-status";
+  const report = () => {
+    status.textContent = visibilityReport(tabHideButtonRects());
+  };
+  const check = document.createElement("button");
+  check.className = "set-control";
+  check.textContent = "Check now";
+  check.addEventListener("click", report);
+  const line = document.createElement("div");
+  line.className = "setting-inline";
+  line.append(sel, check);
+  wrap.append(line, status);
+  report();
+  settingRow(
+    "Hide button on tabs",
+    "The – on each tab parks it aside, still running. Measured where it actually is: a tab narrow enough will clip the button while this still says Show.",
+    wrap
+  );
 }
 
 function settingRow(title: string, desc: string, control: HTMLElement) {
@@ -7152,6 +7253,19 @@ function buildSettingsPage() {
     )
   );
 
+  settingRow(
+    "Log what this window does",
+    "Menus opening, what was chosen — or refused — and where each paste came from, in ui.log next to the transcripts. Sizes only: what you copied is never written down. Diagnostics you have to switch on before reproducing are the ones nobody has when a bug first appears.",
+    mkSelect(
+      [["on", "On"], ["off", "Off"]],
+      config.ui_log === false ? "off" : "on",
+      (v) => {
+        config.ui_log = v === "on";
+        saveConfig();
+      }
+    )
+  );
+  settingsRow_TabHide();
   settingsSection("About");
   const about = document.createElement("div");
   about.className = "about-block";
@@ -7161,6 +7275,21 @@ function buildSettingsPage() {
   getVersion()
     .then((v) => (aboutApp.textContent = `GTerminal ${v}`))
     .catch(() => {});
+  // Next to the version, because that is what someone reads out when
+  // reporting a problem — and the next thing they are asked for is the
+  // logs.
+  const logsBtn = document.createElement("button");
+  logsBtn.className = "set-control about-logs";
+  logsBtn.textContent = "Open logs folder";
+  logsBtn.title = "ui.log (what this window did), history (session transcripts), sessions (checkpoints)";
+  logsBtn.addEventListener("click", () => {
+    void (async () => {
+      const dir = await invoke<string>("logs_path").catch(() => "");
+      if (!dir) return;
+      await openPath(dir).catch(() => {});
+    })();
+  });
+  aboutApp.appendChild(logsBtn);
   const aboutBy = document.createElement("div");
   aboutBy.textContent = "Made by Gus Catalano";
   const aboutLinks = document.createElement("div");
@@ -8128,6 +8257,7 @@ async function main() {
   window.addEventListener("contextmenu", (e) => e.preventDefault());
   document.getElementById("settings-close")!.addEventListener("click", closeSettings);
   initFind();
+  applyTabHideButton();
   void applySummonHotkey();
   // Arriving and leaving are both a fade of the window itself now, done
   // with layered-window alpha in lib.rs. Animating the page instead left
