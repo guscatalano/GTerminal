@@ -62,31 +62,11 @@ function Fail { param($n, $d) $script:failures += "${n}: $d"; Write-Host "FAIL $
 # two minutes would type test commands into whatever they have open. -Yes
 # means unattended, which is a promise about the runner, not about the
 # machine — so it does not get to skip this. -Force does.
-$idleSig = @'
-[DllImport("user32.dll")] public static extern bool GetLastInputInfo(ref LASTINPUTINFO p);
-public struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
-'@
-$Idle = Add-Type -MemberDefinition $idleSig -Name Idle -Namespace GTerm -PassThru |
-  Where-Object { $_.Name -eq "Idle" }
-function Idle-Seconds {
-  $i = New-Object 'GTerm.Idle+LASTINPUTINFO'
-  $i.cbSize = 8
-  [void]$Idle::GetLastInputInfo([ref]$i)
-  [int](([Environment]::TickCount - $i.dwTime) / 1000)
-}
-$IDLE_REQUIRED = 120
-if (-not $Force) {
-  $idle = Idle-Seconds
-  if ($idle -lt $IDLE_REQUIRED) {
-    Write-Host ""
-    Write-Host "  Not running: the keyboard or mouse was used $idle second(s) ago." -ForegroundColor Yellow
-    Write-Host "  This test takes over the foreground and types for a couple of" -ForegroundColor Yellow
-    Write-Host "  minutes; anything you are working in would receive it." -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "  Run it when the machine is free, or pass -Force to override." -ForegroundColor Yellow
-    exit 2
-  }
-}
+#
+# The gate itself lives in lib/attended.ps1 so that one-off probes share
+# it rather than each quietly going without.
+. "$PSScriptRoot\lib\attended.ps1"
+Assert-Unattended -Force:$Force -What "The visual suite"
 
 # This test takes the foreground and types into whatever has focus. If
 # someone is using the machine, their typing lands in the recording and
@@ -114,7 +94,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -195,6 +175,36 @@ function Release-Modifiers {
 # prompt. A click in the middle of the terminal is what actually puts
 # focus where the keys are read.
 # A click at a point inside the window, in window coordinates.
+function Drag {
+  param($hwnd, $x1, $y1, $x2, $y2)
+  $r = New-Object 'GTerm.Vis+RECT'
+  [void]$U::GetWindowRect($hwnd, [ref]$r)
+  [void]$U::SetCursorPos(($r.L + $x1), ($r.T + $y1))
+  Start-Sleep -Milliseconds 120
+  $U::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+  # Moved in steps: one jump to the end looks like a click to a terminal
+  # that tracks selection by mousemove.
+  foreach ($i in 1..8) {
+    $x = $x1 + [int](($x2 - $x1) * $i / 8)
+    [void]$U::SetCursorPos(($r.L + $x), ($r.T + $y2))
+    Start-Sleep -Milliseconds 60
+  }
+  $U::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+  Start-Sleep -Milliseconds 300
+}
+
+function Right-Click {
+  param($hwnd, $x, $y)
+  $r = New-Object 'GTerm.Vis+RECT'
+  [void]$U::GetWindowRect($hwnd, [ref]$r)
+  [void]$U::SetCursorPos(($r.L + $x), ($r.T + $y))
+  Start-Sleep -Milliseconds 150
+  $U::mouse_event(0x0008, 0, 0, 0, [UIntPtr]::Zero)
+  Start-Sleep -Milliseconds 60
+  $U::mouse_event(0x0010, 0, 0, 0, [UIntPtr]::Zero)
+  Start-Sleep -Milliseconds 400
+}
+
 function Click {
   param($hwnd, $x, $y)
   $r = New-Object 'GTerm.Vis+RECT'
@@ -719,6 +729,34 @@ if (-not $Only -or $Only -eq "restore-again") {
   if ($again.Count -eq 0) { Pass "declining on a second run still restores nothing" }
   else { Fail "restore-again" "$($again.Count) of 5 came back from the saved layout" }
   Stop-App $ctx5
+}
+
+# ══ scene: copy from the right-click menu ══════════════════════════════
+# Select something, right-click *away* from it, and "Copy" has to still be
+# there. xterm drops the selection on a mousedown outside it and the menu
+# is built from the contextmenu event that follows, so the item vanished
+# at exactly the moment someone reached for it. Asserted through the
+# clipboard: what the menu actually copied, not what the menu looked like.
+if (-not $Only -or $Only -eq "copy") {
+  $ctx6 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`"}"
+  $h6 = $ctx6.Hwnd
+  Set-Clipboard -Value "clipboard-before-the-test"
+  Record-Scene "copy" 26 $ctx6 {
+    Run-Cmd 'echo COPYME-1234567890' 3
+    # Drag across the output line, then right-click somewhere else.
+    Drag ($h6) 20 62 320 62
+    Start-Sleep -Milliseconds 600
+    Right-Click ($h6) 600 300
+    Start-Sleep -Seconds 1
+    # First item in the menu, which is Copy whenever there is a selection.
+    Click ($h6) 640 312
+    Start-Sleep -Seconds 2
+  }
+  $got = try { Get-Clipboard -Raw } catch { "" }
+  if ($got -match "COPYME-1234567890") { Pass "right-clicking away from a selection still offers Copy" }
+  elseif ($got -match "clipboard-before-the-test") { Fail "copy" "the menu had no Copy to click - the clipboard never changed" }
+  else { Fail "copy" "something else was copied: $($got -replace '\s+', ' ')" }
+  Stop-App $ctx6
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════

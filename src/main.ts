@@ -4327,12 +4327,28 @@ async function createTab(
   // Right-click in the terminal opens a copy/paste menu. (The WebView2
   // default context menu is suppressed globally.)
   const paste = () => pasteClipboardInto(id);
+  // What was selected when the right button went down.
+  //
+  // xterm drops the selection on a mousedown outside it, and the menu is
+  // built from the contextmenu event that follows — so right-clicking
+  // anywhere but exactly on the highlighted text lost "Copy", which is
+  // the one moment someone is reaching for it. Capture phase, to read the
+  // selection before xterm's own handler has had it.
+  let selAtRightClick = "";
+  pane.addEventListener(
+    "mousedown",
+    (e) => {
+      if (e.button === 2) selAtRightClick = term.getSelection();
+    },
+    true
+  );
+
   pane.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     const x = e.clientX;
     const y = e.clientY;
     void (async () => {
-      const sel = term.getSelection();
+      const sel = term.getSelection() || selAtRightClick;
       // Never let the clipboard hold the menu hostage. readText() can hang
       // forever in WebView2 when another process has the clipboard locked —
       // and everything below is what builds the menu, so a stalled promise
