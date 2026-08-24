@@ -144,18 +144,35 @@ function Run-Line {
   Strip-Ansi (Drain 500)
 }
 
-# Every shell under test ends its first prompt with ">" — "PS C:\...>"
-# for both PowerShells, "C:\...>" for cmd — so that is the readiness
-# signal. Polled, with a deadline, because the alternative is a fixed
-# sleep that is simultaneously too long on a developer's machine and too
-# short on a cold runner.
-function Wait-Prompt {
-  param($seconds = 40)
+# Readiness is "a command runs", not "a prompt appeared".
+#
+# PowerShell draws its prompt before PSReadLine has finished initializing,
+# and keystrokes landing in that gap are dropped with no echo at all. A
+# loaded machine widens the gap to tens of seconds, and the symptom is
+# brutal to read: the first few tests after opening a shell see *nothing*
+# while later tests on the same session pass, so it looks like three
+# unrelated failures rather than one slow start.
+#
+# So the probe is arithmetic, the same trick the tests themselves use: its
+# answer shares no text with what was typed, which is the only way to
+# prove a command ran rather than merely echoed.
+function Wait-Ready {
+  param([string]$shell, $seconds = 60)
+  $probe = if ($shell -eq "cmd") { "set /a 6*7" } else { "echo (6*7)" }
+  $json = @{ cmd = "write"; data = "$probe`r" } | ConvertTo-Json -Compress
   $deadline = [DateTime]::UtcNow.AddSeconds($seconds)
-  $seen = ""
   while ([DateTime]::UtcNow -lt $deadline) {
-    $seen += Drain 250
-    if ($seen -match '>') { return $true }
+    $null = Drain 200
+    $script:w.WriteLine($json)
+    $seen = ""
+    $until = [DateTime]::UtcNow.AddSeconds(5)
+    while ([DateTime]::UtcNow -lt $until) {
+      $seen += Drain 300
+      if ($seen -match '42') {
+        $null = Drain 400   # leave nothing of the probe behind
+        return $true
+      }
+    }
   }
   $false
 }
@@ -179,14 +196,12 @@ function Open-Shell {
   $script:w.WriteLine("{""cmd"":""attach"",""id"":$sid}")
   $null = Read-Event
   $script:w.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')   # ConPTY cursor query
-  # Wait for the prompt rather than for a number someone picked. Five
-  # seconds is plenty on a warm machine and not always enough for Windows
-  # PowerShell on a cold CI runner — and when it is not, every test in
-  # that shell types into a session that is not listening yet and sees
-  # nothing, which reads as four unrelated failures with empty output
-  # rather than as "the shell had not started".
-  if (-not (Wait-Prompt)) {
-    Write-Host "  note: $shell showed no prompt within 40s" -ForegroundColor DarkYellow
+  # Wait until it demonstrably runs something, rather than for a number
+  # someone picked. Five seconds was plenty on a warm machine and not
+  # enough on a loaded one, and a shell that is not listening yet loses
+  # keystrokes silently.
+  if (-not (Wait-Ready $shell)) {
+    Write-Host "  note: $shell never ran a command within 60s; its tests will fail for that reason" -ForegroundColor DarkYellow
   }
   $null = Drain 800
   [pscustomobject]@{ Id = $sid; Client = $c }
