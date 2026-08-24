@@ -114,7 +114,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -653,6 +653,72 @@ if (-not $Only -or $Only -eq "restore-none") {
   if ($U::IsWindowVisible($hw3)) { Pass "closing the last tab keeps the window, with sessions left" }
   else { Fail "close-last" "the window vanished, stranding the other sessions" }
   Stop-App $ctx3
+}
+
+# ══ scene: the None button ═════════════════════════════════════════════
+# Escape is not the only way to decline, and it is not the way most people
+# do it: "None", then the button that now reads "Restore 0". Reported as
+# still restoring everything after the Escape path was fixed — a fix to
+# one gesture says nothing about the other, and this is the gesture the
+# report was actually about.
+if (-not $Only -or $Only -eq "restore-zero") {
+  $cfg = "{$baseCfg,`"restore_prompt`":true,`"restore_prompt_at`":3}"
+  $seed = Seed-Daemon 5 $cfg
+  $ctx4 = Start-AppSeeded $seed
+  $hw4 = $ctx4.Hwnd
+  Record-Scene "restore-zero" 26 $ctx4 {
+    Start-Sleep -Seconds 4
+    Click $hw4 798 556             # None — unticks every row
+    Start-Sleep -Seconds 2
+    Click $hw4 895 556             # the button, now reading "Restore 0"
+    Start-Sleep -Seconds 10
+  }
+  $now4 = Daemon-Sessions
+  $back = @($now4 | Where-Object { $seed.Ids -contains $_.id -and $_.attached })
+  if ($back.Count -eq 0) { Pass "None then Restore 0 restores nothing" }
+  else { Fail "restore-zero" "$($back.Count) of 5 came back anyway" }
+  $kept = @($now4 | Where-Object { $seed.Ids -contains $_.id })
+  if ($kept.Count -eq 5) { Pass "and all five are still waiting in the daemon" }
+  else { Fail "restore-zero" "only $($kept.Count) of 5 survived being declined" }
+  Stop-App $ctx4
+}
+
+# ══ scene: declining on a *second* run ═════════════════════════════════
+# The scenes above all decline on a virgin profile, where there is no
+# saved tab order and no saved pane layouts. Real use never looks like
+# that: by the time the question is worth asking you have started the app
+# before, and boot walks the saved layouts to rebuild split tabs. If that
+# walk does not respect the choice, declining restores everything anyway —
+# and a first-run test would never see it.
+if (-not $Only -or $Only -eq "restore-again") {
+  $cfg = "{$baseCfg,`"restore_prompt`":true,`"restore_prompt_at`":3}"
+  $seed = Seed-Daemon 5 $cfg
+  # First run: take them all, which is what writes the order and layouts.
+  $first = Start-AppSeeded $seed
+  Start-Sleep -Seconds 4
+  Key $VK_RETURN
+  Start-Sleep -Seconds 14
+  $tookAll = @(Daemon-Sessions | Where-Object { $seed.Ids -contains $_.id -and $_.attached })
+  if ($tookAll.Count -eq 5) { Pass "first run restores all five" }
+  else { Fail "restore-again" "first run attached $($tookAll.Count) of 5" }
+  Stop-App $first
+  Start-Sleep -Seconds 3
+
+  # Second run against the same profile — saved order and layouts intact.
+  $ctx5 = Start-AppSeeded $seed
+  $hw5 = $ctx5.Hwnd
+  Record-Scene "restore-again" 26 $ctx5 {
+    Start-Sleep -Seconds 4
+    Click $hw5 798 556             # None
+    Start-Sleep -Seconds 2
+    Click $hw5 895 556             # Restore 0
+    Start-Sleep -Seconds 10
+  }
+  $now5 = Daemon-Sessions
+  $again = @($now5 | Where-Object { $seed.Ids -contains $_.id -and $_.attached })
+  if ($again.Count -eq 0) { Pass "declining on a second run still restores nothing" }
+  else { Fail "restore-again" "$($again.Count) of 5 came back from the saved layout" }
+  Stop-App $ctx5
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════
