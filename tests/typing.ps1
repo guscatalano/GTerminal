@@ -144,6 +144,22 @@ function Run-Line {
   Strip-Ansi (Drain 500)
 }
 
+# Every shell under test ends its first prompt with ">" — "PS C:\...>"
+# for both PowerShells, "C:\...>" for cmd — so that is the readiness
+# signal. Polled, with a deadline, because the alternative is a fixed
+# sleep that is simultaneously too long on a developer's machine and too
+# short on a cold runner.
+function Wait-Prompt {
+  param($seconds = 40)
+  $deadline = [DateTime]::UtcNow.AddSeconds($seconds)
+  $seen = ""
+  while ([DateTime]::UtcNow -lt $deadline) {
+    $seen += Drain 250
+    if ($seen -match '>') { return $true }
+  }
+  $false
+}
+
 function Open-Shell {
   param([string]$shell)
   $ctl = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $port)
@@ -163,7 +179,15 @@ function Open-Shell {
   $script:w.WriteLine("{""cmd"":""attach"",""id"":$sid}")
   $null = Read-Event
   $script:w.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')   # ConPTY cursor query
-  Start-Sleep -Seconds 5
+  # Wait for the prompt rather than for a number someone picked. Five
+  # seconds is plenty on a warm machine and not always enough for Windows
+  # PowerShell on a cold CI runner — and when it is not, every test in
+  # that shell types into a session that is not listening yet and sees
+  # nothing, which reads as four unrelated failures with empty output
+  # rather than as "the shell had not started".
+  if (-not (Wait-Prompt)) {
+    Write-Host "  note: $shell showed no prompt within 40s" -ForegroundColor DarkYellow
+  }
   $null = Drain 800
   [pscustomobject]@{ Id = $sid; Client = $c }
 }
