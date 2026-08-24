@@ -3194,22 +3194,18 @@ function mkHotkeyPicker(): HTMLElement {
 /// come forward, not disappear, which is what catches people out with a
 /// naive show/hide.
 async function summonToggle() {
-  const win = getCurrentWindow();
+  // Decided in Rust, from GetForegroundWindow. Asking from here used
+  // isFocused(), which answers for the window while the keyboard focus
+  // sits in the WebView2 child — so a window plainly in front called
+  // itself unfocused, the first press "summoned" an already-summoned
+  // window, and only the second one hid it. Rust also owns the fade, so
+  // the hotkey now puts the window away the same way the close button
+  // does instead of blinking it out.
   try {
-    const [visible, focused, minimized] = await Promise.all([
-      win.isVisible(),
-      win.isFocused(),
-      win.isMinimized(),
-    ]);
-    if (visible && focused && !minimized) {
-      await win.hide();
-      return;
-    }
-    if (minimized) await win.unminimize();
-    await win.show();
-    await win.setFocus();
+    await invoke("summon_toggle");
   } catch {
     // Never leave the window stuck away because one call failed.
+    const win = getCurrentWindow();
     await win.show().catch(() => {});
     await win.setFocus().catch(() => {});
   }

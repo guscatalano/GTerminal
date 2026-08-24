@@ -354,14 +354,29 @@ fn fade(win: &tauri::WebviewWindow, appearing: bool) {
     }
 }
 
+/// Bumped every time the window is summoned. A fade-out that finds it
+/// changed knows someone asked for the window back mid-fade and leaves it
+/// alone — otherwise a quick press-press-press would hide a window that
+/// had just been summoned, a hundred milliseconds after it appeared.
+static SUMMON_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Fade out, then hide. Off the UI thread: sleeping on it would freeze
 /// the window for exactly the span the fade needs to be drawn in.
 fn leave(win: &tauri::WebviewWindow, app: &AppHandle) {
+    use std::sync::atomic::Ordering;
     let win = win.clone();
     let handle = app.clone();
+    let gen = SUMMON_GEN.load(Ordering::SeqCst);
     std::thread::spawn(move || {
         #[cfg(windows)]
         fade(&win, false);
+        if SUMMON_GEN.load(Ordering::SeqCst) != gen {
+            // Summoned while it was on its way out. Undo the fade rather
+            // than the summon.
+            #[cfg(windows)]
+            set_window_alpha(&win, 255);
+            return;
+        }
         let _ = win.hide();
         // Opaque again while hidden. Whatever shows it next — the tray,
         // a second instance, the hotkey with the animation since turned
@@ -384,6 +399,7 @@ fn animate() -> bool {
 /// merely buried. Focus, not visibility, is what decides: a window you
 /// can see but cannot type into still needs raising.
 fn summon(app: &AppHandle) {
+    SUMMON_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     if let Some(win) = app.get_webview_window("main") {
         if win.is_minimized().unwrap_or(false) {
             let _ = win.unminimize();
@@ -413,6 +429,49 @@ fn summon(app: &AppHandle) {
                 set_window_alpha(&w, 255);
             });
         }
+    }
+}
+
+/// Is this window the one the user is looking at?
+///
+/// Asked of the OS rather than of Tauri's `is_focused`, which answers for
+/// the *window* while the keyboard focus sits in the WebView2 child. A
+/// window plainly in front then reports itself unfocused, and the summon
+/// hotkey — which hides only when it is already in front — did nothing on
+/// the first press and worked on the second.
+#[cfg(windows)]
+fn is_foreground(win: &tauri::WebviewWindow) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    let Ok(hwnd) = win.hwnd() else { return false };
+    let fg = unsafe { GetForegroundWindow() };
+    !fg.is_null() && fg == hwnd.0 as *mut core::ffi::c_void
+}
+
+/// One key, both directions: in front, put it away; anywhere else, bring
+/// it here. Deliberately keyed on being in front rather than on being
+/// visible — a window you can see but is buried behind three others
+/// should come forward, not disappear, which is what a naive show/hide
+/// gets wrong.
+#[tauri::command]
+fn summon_toggle(app: AppHandle) {
+    let Some(win) = app.get_webview_window("main") else {
+        return;
+    };
+    let visible = win.is_visible().unwrap_or(false);
+    let minimized = win.is_minimized().unwrap_or(false);
+    #[cfg(windows)]
+    let in_front = is_foreground(&win);
+    #[cfg(not(windows))]
+    let in_front = win.is_focused().unwrap_or(false);
+    if visible && !minimized && in_front {
+        if animate() {
+            leave(&win, &app);
+        } else {
+            let _ = win.hide();
+            let _ = apply_tray_text(&app);
+        }
+    } else {
+        summon(&app);
     }
 }
 
@@ -611,6 +670,7 @@ pub fn run() {
             create_session,
             attach_session,
             peek_session,
+            summon_toggle,
             write_session,
             resize_session,
             detach_session,

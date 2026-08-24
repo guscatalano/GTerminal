@@ -780,11 +780,36 @@ if (-not $Only -or $Only -eq "tray") {
       }
     }
     Start-Sleep -Seconds 2
+    # And away again on *one* press, with the window in front. This used
+    # to take two: the toggle asked Tauri whether the window was focused,
+    # which answers for the window while the keyboard focus is in the
+    # WebView2 child, so a window plainly in front called itself unfocused
+    # and the first press re-summoned it instead of hiding it.
+    $script:onePress = $false
+    if ($script:backOk) {
+      [void]$U::SetForegroundWindow($h)
+      Start-Sleep -Milliseconds 600
+      Release-Modifiers
+      $U::keybd_event(0x11,0,0,[UIntPtr]::Zero)
+      $U::keybd_event(0x12,0,0,[UIntPtr]::Zero)
+      $U::keybd_event(0x77,0,0,[UIntPtr]::Zero)
+      Start-Sleep -Milliseconds 80
+      $U::keybd_event(0x77,0,2,[UIntPtr]::Zero)
+      $U::keybd_event(0x12,0,2,[UIntPtr]::Zero)
+      $U::keybd_event(0x11,0,2,[UIntPtr]::Zero)
+      foreach ($i in 1..20) {
+        Start-Sleep -Milliseconds 250
+        if (-not $U::IsWindowVisible($h)) { $script:onePress = $true; break }
+      }
+    }
+    Start-Sleep -Seconds 1
   }
   if ($hidOk) { Pass "close hides the window and leaves the app running" }
   else { Fail "tray" "close did not hide the window" }
   if ($backOk) { Pass "the summon hotkey brings the window back" }
   else { Fail "tray" "the window did not come back from the tray" }
+  if ($onePress) { Pass "and puts it away again on one press, not two" }
+  else { Fail "tray" "the hotkey did not hide the window it had just summoned" }
   # Three or more distinct levels on the way down is a fade; one or two is
   # the window blinking out, which is what this replaced.
   $levels = @($fadeSteps | Select-Object -Unique)
