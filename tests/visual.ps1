@@ -143,6 +143,7 @@ $sig = @'
 [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
 [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, UIntPtr e);
 [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+[DllImport("user32.dll")] public static extern bool GetLayeredWindowAttributes(IntPtr h, out uint key, out byte alpha, out uint flags);
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
 public struct RECT { public int L,T,R,B; }
 '@
@@ -669,8 +670,21 @@ if (-not $Only -or $Only -eq "tray") {
     Start-Sleep -Seconds 2
     [void]$U::SetWindowPos($h, [IntPtr]::Zero, 100, 60, $RECW, $RECH, 0x0004)
     Start-Sleep -Seconds 2
-    # Close slides it out to the tray; the hotkey brings it back.
+    # Close fades it out to the tray; the hotkey brings it back. The fade
+    # is layered-window alpha, so it can be measured rather than watched:
+    # sample while it goes. A window that jumps straight from opaque to
+    # gone is the jank this replaced — one sample at 255 and the next at
+    # nothing, with no ramp in between.
+    $script:fadeSteps = @()
     [void]$U::PostMessage($h, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
+    foreach ($i in 1..60) {
+      $k = 0; $a = [byte]0; $f = 0
+      if ($U::GetLayeredWindowAttributes($h, [ref]$k, [ref]$a, [ref]$f)) {
+        $script:fadeSteps += [int]$a
+      }
+      if (-not $U::IsWindowVisible($h)) { break }
+      Start-Sleep -Milliseconds 8
+    }
     Start-Sleep -Seconds 3
     $script:hidOk = -not $U::IsWindowVisible($h)
     Release-Modifiers
@@ -705,6 +719,24 @@ if (-not $Only -or $Only -eq "tray") {
   else { Fail "tray" "close did not hide the window" }
   if ($backOk) { Pass "the summon hotkey brings the window back" }
   else { Fail "tray" "the window did not come back from the tray" }
+  # Three or more distinct levels on the way down is a fade; one or two is
+  # the window blinking out, which is what this replaced.
+  $levels = @($fadeSteps | Select-Object -Unique)
+  Write-Host "  alpha while hiding: $($fadeSteps -join ' ')" -ForegroundColor DarkGray
+  if ($levels.Count -ge 3) { Pass "the window fades out rather than blinking away" }
+  else { Fail "fade" "only $($levels.Count) alpha level(s) seen on the way out: $($fadeSteps -join ',')" }
+  $backwards = $false
+  for ($i = 1; $i -lt $fadeSteps.Count; $i++) {
+    if ($fadeSteps[$i] -gt $fadeSteps[$i - 1]) { $backwards = $true }
+  }
+  if (-not $backwards) { Pass "and only ever gets fainter" }
+  else { Fail "fade" "the fade brightened part way through: $($fadeSteps -join ',')" }
+  # Left transparent, the window would come back invisible — worse than
+  # having no animation at all, and only visible on the *next* summon.
+  $k = 0; $a = [byte]0; $f = 0
+  $known = $U::GetLayeredWindowAttributes($h, [ref]$k, [ref]$a, [ref]$f)
+  if (-not $known -or $a -eq 255) { Pass "and is fully opaque again once it is back" }
+  else { Fail "fade" "the window came back at alpha $a" }
   Stop-App $ctx
 }
 

@@ -6295,10 +6295,10 @@ function buildSettingsPage() {
   );
   settingRow(
     "Summon animation",
-    "Slide the window in from the top edge when it is summoned, and back out when it hides — the way a quake console does. Appearing and vanishing instantly reads as a glitch; a short slide says the window came from somewhere. Off makes it instant.",
+    "Fade the window in when it is summoned, and out when it hides. Appearing and vanishing instantly reads as a glitch; a short fade says the window went somewhere. Off makes it instant.",
     mkSelect(
-      [["slide", "Slide"], ["none", "Instant"]],
-      config.summon_animation ?? "slide",
+      [["fade", "Fade"], ["none", "Instant"]],
+      config.summon_animation === "none" ? "none" : "fade",
       (v) => {
         config.summon_animation = v;
         changed();
@@ -7887,16 +7887,10 @@ async function main() {
   document.getElementById("settings-close")!.addEventListener("click", closeSettings);
   initFind();
   void applySummonHotkey();
-  // The window arriving is animated here rather than by moving the
-  // window: moving it during a show races the show itself and the window
-  // can fail to appear at all. Content that drops into place reads the
-  // same and cannot strand anyone's window off screen.
-  void listen("summoned", () => {
-    app.classList.remove("summoning");
-    void app.offsetWidth; // restart the animation on a repeat summon
-    app.classList.add("summoning");
-    window.setTimeout(() => app.classList.remove("summoning"), 260);
-  });
+  // Arriving and leaving are both a fade of the window itself now, done
+  // with layered-window alpha in lib.rs. Animating the page instead left
+  // the window sitting there as a dark rectangle after its contents had
+  // gone, which is not what "it fades away" looks like.
   window.addEventListener("keydown", (e) => {
     // Keystrokes inside a terminal are handled by that terminal's own
     // shortcut handler; letting them also reach this global handler

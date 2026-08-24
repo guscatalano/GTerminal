@@ -2207,22 +2207,8 @@ input.set-control {
   color: var(--accent) !important;
 }
 
-/* The window arriving from the tray. Content drops into place rather
-   than the window itself moving — see summon() in lib.rs for why. */
-#app.summoning {
-  animation: summon-drop 150ms cubic-bezier(0.2, 0.7, 0.3, 1);
-}
-
-@keyframes summon-drop {
-  from {
-    transform: translateY(-14px);
-    opacity: 0.35;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
+/* Summoning and hiding are a fade of the whole window, done with
+   layered-window alpha in lib.rs — nothing for the page to animate. */
 
 /* ── summon hotkey picker ────────────────────────────────────────────── */
 

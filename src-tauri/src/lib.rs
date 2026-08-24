@@ -286,36 +286,74 @@ fn create_shortcut(path: String, workspace: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Slide the window out through the top edge on its way to the tray, the
-/// way a quake console does. Vanishing instantly makes it feel like a
-/// glitch; a short slide says the window went somewhere.
+/// The window fades, rather than moving or being animated in the page.
 ///
-/// Only ever used for leaving. Coming back is animated in the frontend —
-/// see summon() for why.
+/// It used to slide: ten `set_position` calls with the UI thread asleep
+/// between them, each forcing WebView2 to re-composite the whole window.
+/// You saw ten discrete positions rather than motion — the jankiest thing
+/// in the app. Animating the *content* instead is smooth but wrong: the
+/// window stays put and opaque, so the terminal dissolves and leaves a
+/// dark rectangle sitting there until the window finally goes.
 ///
-/// Movement rather than a fade: fading needs WS_EX_LAYERED, and layering
-/// a WebView2 window costs a composition path and can tear.
+/// Layered-window alpha fades the window itself, chrome and all, and DWM
+/// does the compositing — no repaint per step, and nothing for the page
+/// to be involved in. The layered style is set once on first use and left
+/// alone; alpha 255 is indistinguishable from a plain window.
+const FADE_MS: u64 = 140;
+const FADE_STEPS: u32 = 16;
+
+/// Alpha at step `i`, eased so most of the change happens early — quick
+/// rather than slow, at the same duration.
+fn fade_alpha(i: u32, steps: u32, appearing: bool) -> u8 {
+    let t = (i as f64 / steps as f64).clamp(0.0, 1.0);
+    let eased = 1.0 - (1.0 - t) * (1.0 - t);
+    let level = if appearing { eased } else { 1.0 - eased };
+    (level * 255.0).round() as u8
+}
+
 #[cfg(windows)]
-fn slide(win: &tauri::WebviewWindow, appearing: bool) {
-    use std::time::Duration;
-    let Ok(pos) = win.outer_position() else { return };
-    let Ok(size) = win.outer_size() else { return };
-    let h = size.height as i32;
-    let steps = 10;
-    let total = Duration::from_millis(110);
-    for i in 0..=steps {
-        // Ease out: most of the distance early, so it reads as quick
-        // rather than slow, at the same overall duration.
-        let t = i as f64 / steps as f64;
-        let eased = 1.0 - (1.0 - t) * (1.0 - t);
-        let frac = if appearing { 1.0 - eased } else { eased };
-        let y = pos.y - (frac * h as f64) as i32;
-        let _ = win.set_position(tauri::PhysicalPosition::new(pos.x, y));
-        std::thread::sleep(total / (steps as u32 + 1));
+fn set_window_alpha(win: &tauri::WebviewWindow, alpha: u8) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetLayeredWindowAttributes, SetWindowLongPtrW, GWL_EXSTYLE, LWA_ALPHA,
+        WS_EX_LAYERED,
+    };
+    let Ok(hwnd) = win.hwnd() else { return };
+    let h = hwnd.0 as *mut core::ffi::c_void;
+    unsafe {
+        let ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
+        if ex & (WS_EX_LAYERED as isize) == 0 {
+            SetWindowLongPtrW(h, GWL_EXSTYLE, ex | WS_EX_LAYERED as isize);
+        }
+        SetLayeredWindowAttributes(h, 0, alpha, LWA_ALPHA);
     }
-    // Always finish exactly where it started, so repeated summons cannot
-    // walk the window up the screen a few pixels at a time.
-    let _ = win.set_position(pos);
+}
+
+#[cfg(windows)]
+fn fade(win: &tauri::WebviewWindow, appearing: bool) {
+    for i in 0..=FADE_STEPS {
+        set_window_alpha(win, fade_alpha(i, FADE_STEPS, appearing));
+        std::thread::sleep(std::time::Duration::from_millis(
+            FADE_MS / (FADE_STEPS as u64 + 1),
+        ));
+    }
+}
+
+/// Fade out, then hide. Off the UI thread: sleeping on it would freeze
+/// the window for exactly the span the fade needs to be drawn in.
+fn leave(win: &tauri::WebviewWindow, app: &AppHandle) {
+    let win = win.clone();
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        #[cfg(windows)]
+        fade(&win, false);
+        let _ = win.hide();
+        // Opaque again while hidden. Whatever shows it next — the tray,
+        // a second instance, the hotkey with the animation since turned
+        // off — must never get a window that is still transparent.
+        #[cfg(windows)]
+        set_window_alpha(&win, 255);
+        let _ = apply_tray_text(&handle);
+    });
 }
 
 fn animate() -> bool {
@@ -335,18 +373,29 @@ fn summon(app: &AppHandle) {
             let _ = win.unminimize();
         }
         let hidden = !win.is_visible().unwrap_or(true);
+        let fading = hidden && animate();
+        // Transparent *before* the show, so the window never appears at
+        // full strength for a frame and then restarts the fade — which is
+        // what made the old arrival read as a jerk rather than a fade.
+        //
+        // The window is still never moved: sliding it on the way in races
+        // the show that was just requested and it can fail to appear at
+        // all, measured at zero successes in six attempts. Alpha does not
+        // touch position or size, so it has nothing to race.
+        #[cfg(windows)]
+        if fading {
+            set_window_alpha(&win, 0);
+        }
         let _ = win.show();
         let _ = win.set_focus();
-        // The window is never moved on the way *in*. Sliding it here —
-        // whether on this thread or a spawned one — races the show that
-        // was just requested, and the window fails to appear at all:
-        // measured at zero successes in six attempts. The arrival is
-        // animated in the frontend instead, where the window manager is
-        // not involved. Going out is a different matter: the window is
-        // already up and settled, so moving it is safe, and that half
-        // stayed in Rust.
-        if hidden && animate() {
-            let _ = win.emit("summoned", ());
+        #[cfg(windows)]
+        if fading {
+            let w = win.clone();
+            std::thread::spawn(move || {
+                fade(&w, true);
+                // Land exactly on opaque, whatever the arithmetic did.
+                set_window_alpha(&w, 255);
+            });
         }
     }
 }
@@ -502,12 +551,12 @@ pub fn run() {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         if close_hides() {
                             api.prevent_close();
-                            #[cfg(windows)]
                             if animate() {
-                                slide(&closing, false);
+                                leave(&closing, &handle);
+                            } else {
+                                let _ = closing.hide();
+                                let _ = apply_tray_text(&handle);
                             }
-                            let _ = closing.hide();
-                            let _ = apply_tray_text(&handle);
                         }
                     }
                 });
@@ -568,7 +617,33 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{pretty_hotkey, tray_strings};
+    use super::{fade_alpha, pretty_hotkey, tray_strings, FADE_STEPS};
+
+    /// A fade that does not reach both ends is worse than none: stopping
+    /// short of 0 leaves a ghost of the window on screen after it should
+    /// be gone, and stopping short of 255 leaves the one you summoned
+    /// permanently see-through.
+    #[test]
+    fn a_fade_starts_and_ends_where_it_should() {
+        assert_eq!(fade_alpha(0, FADE_STEPS, false), 255, "leaving starts opaque");
+        assert_eq!(fade_alpha(FADE_STEPS, FADE_STEPS, false), 0, "and ends invisible");
+        assert_eq!(fade_alpha(0, FADE_STEPS, true), 0, "arriving starts invisible");
+        assert_eq!(fade_alpha(FADE_STEPS, FADE_STEPS, true), 255, "and ends opaque");
+    }
+
+    /// Monotonic, or the window flickers back the way it came.
+    #[test]
+    fn a_fade_only_moves_one_way() {
+        let mut last = 256i32;
+        for i in 0..=FADE_STEPS {
+            let a = fade_alpha(i, FADE_STEPS, false) as i32;
+            assert!(a <= last, "alpha went back up at step {i}: {a} after {last}");
+            last = a;
+        }
+        // Eased: past halfway, most of the fade is already done.
+        let half = fade_alpha(FADE_STEPS / 2, FADE_STEPS, false);
+        assert!(half < 128, "the fade should be more than half gone by halfway: {half}");
+    }
 
     /// Once the window is hidden the tray is the only place left to ask
     /// how to get it back, so it has to answer — and say so plainly when
