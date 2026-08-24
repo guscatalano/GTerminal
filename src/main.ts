@@ -4338,7 +4338,16 @@ async function createTab(
   pane.addEventListener(
     "mousedown",
     (e) => {
-      if (e.button === 2) selAtRightClick = term.getSelection();
+      if (e.button !== 2) return;
+      selAtRightClick = term.getSelection();
+      // Keep the highlight as well as the text. xterm clears the
+      // selection on any mousedown outside it, so without this the thing
+      // you are about to copy stops looking selected the instant you ask
+      // for the menu — and after copying you have no idea what you got.
+      // Stopping propagation in the capture phase means xterm's selection
+      // service never sees the press; the default is left alone, so focus
+      // still behaves normally.
+      if (selAtRightClick) e.stopPropagation();
     },
     true
   );
@@ -4366,7 +4375,9 @@ async function createTab(
           action: () => {
             pushClip(sel);
             navigator.clipboard.writeText(sel).catch(() => {});
-            term.clearSelection();
+            // The selection stays. Copying is not a reason to lose sight
+            // of what you copied, and it leaves the second copy — or a
+            // wider drag from the same anchor — one gesture away.
             term.focus();
           },
         });

@@ -751,11 +751,24 @@ if (-not $Only -or $Only -eq "copy") {
     # First item in the menu, which is Copy whenever there is a selection.
     Click ($h6) 640 312
     Start-Sleep -Seconds 2
+    $script:copied1 = try { Get-Clipboard -Raw } catch { "" }
+    # Copying must not clear the selection, so the same gesture again -
+    # with nothing re-selected - has to copy the same text. That is the
+    # only way to ask "is it still selected?" from out here.
+    Set-Clipboard -Value "sentinel-between-copies"
+    Start-Sleep -Milliseconds 400
+    Right-Click ($h6) 600 300
+    Start-Sleep -Seconds 1
+    Click ($h6) 640 312
+    Start-Sleep -Seconds 2
+    $script:copied2 = try { Get-Clipboard -Raw } catch { "" }
   }
-  $got = try { Get-Clipboard -Raw } catch { "" }
-  if ($got -match "COPYME-1234567890") { Pass "right-clicking away from a selection still offers Copy" }
-  elseif ($got -match "clipboard-before-the-test") { Fail "copy" "the menu had no Copy to click - the clipboard never changed" }
-  else { Fail "copy" "something else was copied: $($got -replace '\s+', ' ')" }
+  if ($copied1 -match "COPYME-1234567890") { Pass "right-clicking away from a selection still offers Copy" }
+  elseif ($copied1 -match "clipboard-before-the-test") { Fail "copy" "the menu had no Copy to click - the clipboard never changed" }
+  else { Fail "copy" "something else was copied: $($copied1 -replace '\s+', ' ')" }
+  if ($copied2 -match "COPYME-1234567890") { Pass "and the selection survives copying, so it can be copied again" }
+  elseif ($copied2 -match "sentinel-between-copies") { Fail "copy" "the selection was gone after copying - no Copy on the second menu" }
+  else { Fail "copy" "the second copy took something else: $($copied2 -replace '\s+', ' ')" }
   Stop-App $ctx6
 }
 
