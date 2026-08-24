@@ -88,6 +88,14 @@ use day to day, and the one the visual tests need (`-Exe`).
 
 Every new feature should land with coverage in one of these suites.
 
+## How it works
+
+[docs/architecture.md](docs/architecture.md) — the two processes, the wire
+between them, where session state lives, and what the test suites drive.
+Deeper dives: [tiling panes](docs/tiling-panes.md),
+[command blocks](docs/command-blocks.md), and
+[the daemon outliving the app](docs/daemon-protocol.md).
+
 ## Known limitations
 
 - The daemon socket is unauthenticated localhost TCP; switching to a user-ACL'd named pipe is the planned hardening step.

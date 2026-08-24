@@ -30,6 +30,8 @@ import {
   sessionState,
 } from "./restore";
 import type { SessionState } from "./restore";
+import { staleDaemon, shellsAtRisk, daemonNotice } from "./daemon";
+import type { DaemonInfo } from "./daemon";
 import { BlockTracker } from "./blocks";
 import type { Block } from "./blocks";
 import {
@@ -4577,6 +4579,41 @@ function removeTab(id: number, closeWindowIfLast = true) {
 // Closing a tab starts its grace window: the session lands in "Closing
 // soon" with a countdown, restorable (from the sidebar, ⟳ menu, or
 // Ctrl+Shift+Z) until the timer runs out — then it actually dies.
+/// The daemon outlives the app that started it, so an update can leave a
+/// window talking to the previous release's daemon — which refuses the
+/// requests added since. Said plainly, once, with the remedy and its
+/// price attached. See docs/daemon-protocol.md.
+async function checkDaemonVersion(sessions: SessionInfo[]) {
+  const info = await invoke<DaemonInfo & { required?: number }>("daemon_info").catch(() => null);
+  if (!info || !staleDaemon(info, info.required ?? 0)) return;
+  const bar = document.createElement("div");
+  bar.className = "daemon-notice";
+  const note = document.createElement("span");
+  note.className = "daemon-note";
+  note.textContent = daemonNotice(info, shellsAtRisk(sessions));
+  const go = document.createElement("button");
+  go.className = "set-control";
+  go.textContent = "Restart it";
+  const later = document.createElement("button");
+  later.className = "set-control";
+  later.textContent = "Not now";
+  bar.append(note, go, later);
+  later.addEventListener("click", () => bar.remove());
+  go.addEventListener("click", () => {
+    go.disabled = true;
+    later.disabled = true;
+    note.textContent = "Restarting the background service…";
+    void (async () => {
+      await invoke("restart_daemon").catch(() => {});
+      // Every tab is attached to a daemon that no longer exists, so the
+      // window is rebuilt against the new one rather than left holding
+      // streams that will never speak again.
+      location.reload();
+    })();
+  });
+  document.getElementById("main")?.prepend(bar);
+}
+
 /// Tabs showing an ended session's output with no shell behind them.
 const previewing = new Set<number>();
 
@@ -8250,6 +8287,8 @@ async function main() {
   }
   if (tabCount() === 0) await createTab();
   refreshChrome();
+  // Last, and never blocking: the window works, one thing in it may not.
+  void checkDaemonVersion(sessions);
 }
 
 main();

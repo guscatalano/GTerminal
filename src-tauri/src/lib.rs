@@ -132,6 +132,65 @@ fn attach_session(
     send_to(&state, id, Request::Resize { cols, rows })
 }
 
+/// Who the daemon is: protocol, version, pid. Empty fields mean a daemon
+/// old enough not to report them, which is itself the answer.
+#[tauri::command]
+fn daemon_info() -> Result<Value, String> {
+    let stream = match mux::client::connect() {
+        Ok(s) => s,
+        Err(_) => return Ok(serde_json::json!({})),
+    };
+    let v = mux::client::request(stream, &Request::List)?;
+    Ok(serde_json::json!({
+        "protocol": v.get("protocol"),
+        "version": v.get("version"),
+        "pid": v.get("pid"),
+        // What the *window* needs, so the comparison is not duplicated in
+        // two languages that can drift apart.
+        "required": mux::PROTOCOL,
+    }))
+}
+
+/// Stop the running daemon so the next request starts a fresh one.
+///
+/// Killing rather than asking: the daemon this exists for is by
+/// definition too old to know a shutdown request. Its sessions are
+/// checkpointed as it goes — they come back as ended sessions with their
+/// scrollback — but the shells themselves end, which is why this is only
+/// ever reached by someone pressing a button that says so.
+#[tauri::command]
+fn restart_daemon() -> Result<(), String> {
+    let pid = match mux::client::connect() {
+        Ok(stream) => mux::client::request(stream, &Request::List)
+            .ok()
+            .and_then(|v| v.get("pid").and_then(Value::as_u64)),
+        Err(_) => None,
+    };
+    let Some(pid) = pid else {
+        // Nothing running, or too old to say which process it is. Either
+        // way the next request will start one.
+        mux::client::ensure()?;
+        return Ok(());
+    };
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .output();
+    }
+    // Wait for it to actually go before starting another, or the new one
+    // finds the port still held and gives up.
+    for _ in 0..40 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if mux::client::connect().is_err() {
+            break;
+        }
+    }
+    mux::client::ensure()?;
+    Ok(())
+}
+
 /// A session's saved output, without starting anything.
 ///
 /// Deliberately not an attach: attaching to a session whose shell has
@@ -670,6 +729,8 @@ pub fn run() {
             create_session,
             attach_session,
             peek_session,
+            daemon_info,
+            restart_daemon,
             summon_toggle,
             write_session,
             resize_session,

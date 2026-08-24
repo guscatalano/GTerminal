@@ -127,6 +127,20 @@ class GTermPredictor : System.Management.Automation.Subsystem.Prediction.IComman
   [System.Management.Automation.Subsystem.SubsystemKind]::CommandPredictor, [GTermPredictor]::new())
 "#;
 
+/// Bumped whenever a request is added, so a window can tell whether the
+/// daemon it found is old enough to lack something it needs.
+///
+/// The daemon deliberately outlives the app that started it — sessions
+/// live in it, and closing every window leaves it running — so an update
+/// replaces the binary while the old daemon keeps serving. A window then
+/// talks to a daemon from the previous release. See
+/// docs/daemon-protocol.md.
+///
+/// 1: `peek` (read a session's scrollback without resurrecting it), and
+///    the first version to report this number at all. A daemon that
+///    reports nothing is older than this.
+pub const PROTOCOL: u32 = 1;
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Request {
@@ -977,7 +991,16 @@ fn conn_loop(
                 }
                 let mut list: Vec<SessionInfo> = list.into_iter().map(|(i, _)| i).collect();
                 list.sort_by_key(|s| s.created_ms);
-                write_line(&mut out, &json!({"ok": true, "sessions": list}))?;
+                write_line(
+                    &mut out,
+                    &json!({
+                        "ok": true,
+                        "sessions": list,
+                        "protocol": PROTOCOL,
+                        "version": env!("CARGO_PKG_VERSION"),
+                        "pid": std::process::id(),
+                    }),
+                )?;
             }
             Request::Create { cols, rows, shell, cwd } => {
                 let id = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);

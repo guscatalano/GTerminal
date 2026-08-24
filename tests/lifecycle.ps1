@@ -683,6 +683,38 @@ foreach ($k in @($keep, $rz)) {
 }
 
 
+# ── the daemon says who it is ──
+# The daemon outlives the app that started it, so an update leaves a new
+# window talking to the previous release's daemon. Without these fields
+# the window cannot tell "this session is empty" from "this daemon is too
+# old to answer" — see docs/daemon-protocol.md.
+$hello = Request2 $port '{"cmd":"list"}'
+$proto = 0
+if ($null -ne $hello.protocol -and [int]::TryParse([string]$hello.protocol, [ref]$proto) -and $proto -ge 1) {
+  Pass "list reports a protocol number"
+} else { Fail "protocol" "no protocol in the list reply: $($hello.protocol)" }
+if ($hello.version -match '^\d+\.\d+\.\d+$') { Pass "and the version it is running" }
+else { Fail "protocol" "no version in the list reply: $($hello.version)" }
+# The pid is what the window uses to stop this exact process, so a wrong
+# one would have it kill something else entirely.
+if ($hello.pid -eq $script:daemons[-1]) { Pass "and its own pid, which is the one running" }
+else { Fail "protocol" "reported pid $($hello.pid), daemon is $($script:daemons[-1])" }
+
+# ── an unknown request is refused, not fatal ──
+# This is what a *newer* window's request looks like to an older daemon:
+# it must be answered and the connection left usable, or the window loses
+# the session it was attached to as well as the feature.
+$un = New-Conn $port
+$un.Writer.WriteLine('{"cmd":"peek_the_future","id":1}')
+$refusal = Read-Line2 $un 3000
+if ($refusal -and ($refusal | ConvertFrom-Json).ok -eq $false) { Pass "an unknown request is refused" }
+else { Fail "unknown-request" "no refusal came back: $refusal" }
+$un.Writer.WriteLine('{"cmd":"list"}')
+$still = Read-Line2 $un 3000
+if ($still -and ($still | ConvertFrom-Json).ok -eq $true) { Pass "and the connection still works afterwards" }
+else { Fail "unknown-request" "the connection died on an unknown request" }
+$un.Client.Close()
+
 # ── closing several sessions in a row ──
 # Reported from real use: closing a handful of tabs left only *one* of them
 # under "Closing soon" and the rest unaccounted for. Each close is its own
