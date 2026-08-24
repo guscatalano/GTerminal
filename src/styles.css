@@ -160,8 +160,15 @@ body,
   color: var(--dim);
 }
 
-.side-dot.cold {
+.side-dot.detached {
   color: var(--muted2);
+}
+
+/* Ended: dimmer than detached, because the shell is gone — but not the
+   danger colour, because nothing is lost by leaving it there. */
+.side-dot.ended {
+  color: var(--dim);
+  opacity: 0.85;
 }
 
 .side-dot.doomed {

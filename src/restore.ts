@@ -12,6 +12,37 @@ export interface RestorableSession {
   expires_ms?: number | null;
 }
 
+/// Which list a session belongs in.
+///
+/// - `open`     — it has a tab on screen
+/// - `closing`  — killed, still inside its grace window, restorable
+/// - `hidden`   — parked deliberately
+/// - `ended`    — its shell is gone (reboot, or the daemon stopped), but
+///                its folder and scrollback were kept. Reopening starts a
+///                *new* shell with the old output replayed above it.
+/// - `detached` — still running, just not on screen. Reopening hands back
+///                the very shell you left.
+///
+/// The last two look identical in a list and are not the same thing at
+/// all, which is the whole reason this exists: one click gives you your
+/// shell back, the other gives you a fresh one that merely looks like it.
+///
+/// Order matters. A killed session counts as closing even if it was also
+/// hidden — the countdown is the more urgent fact, and the one with a
+/// deadline attached.
+export type SessionState = "open" | "closing" | "hidden" | "ended" | "detached";
+
+export function sessionState(
+  s: { expires_ms?: number | null; alive?: boolean },
+  hasTab: boolean,
+  isHidden: boolean
+): SessionState {
+  if (hasTab) return "open";
+  if (s.expires_ms) return "closing";
+  if (isHidden) return "hidden";
+  return s.alive === false ? "ended" : "detached";
+}
+
 /// Sessions worth reopening as tabs.
 ///
 /// Two exclusions, and both matter. A session in its grace window was

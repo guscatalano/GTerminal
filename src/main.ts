@@ -22,7 +22,14 @@ import {
 import type { PasteLimits } from "./keys";
 import { autoTitle, SHELLS, BORING_TITLE } from "./titles";
 import { fmtBytes, fmtRate, fmtDuration, pct, fmtSize, clipPreview } from "./format";
-import { adoptable as adoptableOf, inSavedOrder, shouldAsk, tabForNumber } from "./restore";
+import {
+  adoptable as adoptableOf,
+  inSavedOrder,
+  shouldAsk,
+  tabForNumber,
+  sessionState,
+} from "./restore";
+import type { SessionState } from "./restore";
 import { BlockTracker } from "./blocks";
 import type { Block } from "./blocks";
 import {
@@ -287,8 +294,11 @@ function remainingLabel(expiresMs: number): string {
   const s = total % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
 }
+/// "cold" is the daemon's word for a session whose shell is gone but
+/// whose scrollback and folder were kept. It means nothing to anyone who
+/// has not read mux.rs, so nowhere the user can see says it.
 function expirySuffix(s: SessionInfo): string {
-  return s.expires_ms ? ` · closes in ${minutesLeft(s.expires_ms)}m` : s.alive ? "" : " (cold)";
+  return s.expires_ms ? ` · closes in ${minutesLeft(s.expires_ms)}m` : s.alive ? "" : " · ended";
 }
 
 const tabs = new Map<number, Tab>();
@@ -3351,7 +3361,11 @@ function chooseRestore(list: SessionInfo[]): Promise<Set<number>> {
       const sub = document.createElement("div");
       sub.className = "restore-sub";
       const running = s.running?.length ? ` — ${s.running.join(", ")}` : "";
-      sub.textContent = `${ages.get(s.id)} · ${s.shell || "shell"} · ${s.cwd ?? ""}${running}`;
+      // Ticking one of these is a different bargain from ticking a live
+      // one: you get the folder and the output back, in a shell that has
+      // never run anything. Say so here, where the choice is made.
+      const gone = s.alive ? "" : " · ended, reopens as a new shell";
+      sub.textContent = `${ages.get(s.id)} · ${s.shell || "shell"} · ${s.cwd ?? ""}${running}${gone}`;
       sub.title = s.cwd ?? "";
       main.append(name, sub);
       row.append(cb, main);
@@ -5547,7 +5561,8 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
     d.title = {
       open: "Open in a tab",
       hidden: "Hidden (parked) — click to restore",
-      cold: "Detached, still running or restorable — click to restore",
+      detached: "Detached and still running — click to open it in a tab",
+      ended: "Its shell is gone (reboot, or the daemon stopped). Click to reopen it in its old folder with its output replayed — as a new shell.",
       doomed: "Closing soon — click to restore before the timer runs out",
     }[dotClass] ?? "";
     const l = document.createElement("span");
@@ -5645,10 +5660,10 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
     addRow("◌", "hidden", id, titleOf(id), false, () => restoreHidden(id), [
       ["×", "Kill session — click twice", () => killSession(id), true],
     ]);
-  const coldRow = (s: SessionInfo) =>
+  const detachedRow = (s: SessionInfo) =>
     addRow(
       s.expires_ms ? "⌛" : "○",
-      s.expires_ms ? "doomed" : "cold",
+      s.expires_ms ? "doomed" : "detached",
       s.id,
       `${titleOf(s.id)}${expirySuffix(s)}`,
       false,
@@ -5658,24 +5673,55 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
 
   // Sessions in their grace window get their own section with a live
   // countdown; everything else renders under its group as usual.
-  const closing = sessions.filter((s) => s.expires_ms && !tabs.has(s.id));
-  const isClosing = (id: number) => closing.some((s) => s.id === id);
+  // So do sessions whose shell is gone. Listing them among the detached
+  // ones says they are equivalent, and they are not: opening a detached
+  // session hands back the shell you left, with its environment and
+  // whatever it was running. Opening one of these starts a *new* shell —
+  // same folder, old output replayed above it, nothing else carried over.
+  // Same click, different outcome, so they are not the same list.
+  //
+  // Which list each one lands in is decided in restore.ts and tested
+  // there, so the sections cannot drift from the rule they claim to
+  // follow. A hidden id the daemon no longer knows about keeps its pill
+  // rather than vanishing silently.
+  const stateOf = new Map(
+    sessions.map((s) => [s.id, sessionState(s, tabs.has(s.id), hidden.has(s.id))] as const)
+  );
+  const isState = (id: number, want: SessionState, fallback?: SessionState) =>
+    (stateOf.get(id) ?? fallback) === want;
+  const closing = sessions.filter((s) => isState(s.id, "closing"));
+  const ended = sessions.filter((s) => isState(s.id, "ended"));
 
   const inGroup = (id: number, gid: string) => groupState.assign[id] === gid;
   for (const g of groupState.groups) {
     addHeader(g.name, g.color, g);
     for (const id of orderedIds()) if (inGroup(id, g.id)) openRow(id);
-    for (const id of hidden) if (inGroup(id, g.id) && !isClosing(id)) hiddenRow(id);
+    for (const id of hidden) if (inGroup(id, g.id) && isState(id, "hidden", "hidden")) hiddenRow(id);
     for (const s of sessions) {
-      if (!tabs.has(s.id) && !hidden.has(s.id) && !isClosing(s.id) && inGroup(s.id, g.id)) coldRow(s);
+      if (isState(s.id, "detached") && inGroup(s.id, g.id)) detachedRow(s);
     }
   }
   const ungrouped = (id: number) => !groupById(groupState.assign[id]);
   if (groupState.groups.length) addHeader("Ungrouped");
   for (const id of orderedIds()) if (ungrouped(id)) openRow(id);
-  for (const id of hidden) if (ungrouped(id) && !isClosing(id)) hiddenRow(id);
+  for (const id of hidden) if (ungrouped(id) && isState(id, "hidden", "hidden")) hiddenRow(id);
   for (const s of sessions) {
-    if (!tabs.has(s.id) && !hidden.has(s.id) && !isClosing(s.id) && ungrouped(s.id)) coldRow(s);
+    if (isState(s.id, "detached") && ungrouped(s.id)) detachedRow(s);
+  }
+
+  if (ended.length) {
+    addHeader("Ended — reopen to keep the output");
+    for (const s of ended) {
+      addRow(
+        "◍",
+        "ended",
+        s.id,
+        titleOf(s.id),
+        false,
+        () => createTab(s.id),
+        [["×", "Forget this session and its output — click twice", () => killSession(s.id), true]]
+      );
+    }
   }
 
   if (closing.length) {
@@ -7309,13 +7355,16 @@ const STATUS_BUILTINS: Record<string, StatusItemDef> = {
     label: "Sessions",
     render: () => `S ${tabCount()}${tabs.size > tabCount() ? `/${tabs.size}` : ""}`,
     detail: () => {
-      const cold = [...lastInfo.values()].filter((s) => !s.attached && !s.expires_ms);
+      const loose = [...lastInfo.values()].filter((s) => !s.attached && !s.expires_ms);
+      const detached = loose.filter((s) => s.alive);
+      const ended = loose.filter((s) => !s.alive);
       const doomed = [...lastInfo.values()].filter((s) => s.expires_ms);
       return {
         rows: [
           ["Open tabs", String(tabCount())], ["Panes", String(tabs.size)],
           ["Hidden", String(hidden.size)],
-          ["Detached", String(cold.length)],
+          ["Detached", String(detached.length)],
+          ["Ended", String(ended.length)],
           ["Closing soon", String(doomed.length)],
           ["Known to daemon", String(lastInfo.size)],
         ],
