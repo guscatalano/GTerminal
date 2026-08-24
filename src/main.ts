@@ -32,6 +32,7 @@ import {
 import type { SessionState } from "./restore";
 import { staleDaemon, shellsAtRisk, daemonNotice } from "./daemon";
 import type { DaemonInfo } from "./daemon";
+import { activates } from "./menus";
 import { BlockTracker } from "./blocks";
 import type { Block } from "./blocks";
 import {
@@ -5041,7 +5042,14 @@ function showContextMenu(x: number, y: number, items: CtxItem[]) {
       span.className = "menu-label";
       span.textContent = it.label;
       row.appendChild(span);
+      let pressedConfirm = false;
+      row.addEventListener("mousedown", (e) => {
+        if (e.button === 0) pressedConfirm = true;
+      });
       row.addEventListener("click", () => {
+        const ok = menuClickCounts(row, pressedConfirm);
+        pressedConfirm = false;
+        if (!ok) return;
         if (row.classList.contains("armed")) {
           closeMenus();
           it.action();
@@ -5067,6 +5075,7 @@ function showContextMenu(x: number, y: number, items: CtxItem[]) {
   }
   closeMenus(ctxMenu);
   ctxMenu.classList.add("open");
+  armMenu(ctxMenu);
   placeFloating(ctxMenu, x, y);
 }
 
@@ -5299,6 +5308,30 @@ function groupMenuItems(g: TabGroup, nameEl: HTMLElement): CtxItem[] {
   ];
 }
 
+/// A menu placed at the pointer must not act on the release of the very
+/// gesture that opened it, nor on a press that began somewhere else.
+///
+/// The menu's first row lands directly under the cursor, so a mouseup
+/// arriving from the click that opened it — or a press started on the
+/// terminal and released over the menu — activates whatever is there.
+/// From the outside that reads as "it pasted as soon as I hovered over
+/// Paste", because no deliberate click on the row ever happened.
+///
+/// Two conditions, both required: the row must have received its own
+/// press, and the menu must have been up long enough that the click
+/// cannot belong to the gesture that opened it.
+const MENU_ARM_MS = 250;
+
+function armMenu(el: HTMLElement) {
+  el.dataset.armedAt = String(performance.now());
+}
+
+function menuClickCounts(row: HTMLElement, pressed: boolean): boolean {
+  const menu = row.closest<HTMLElement>(".menu");
+  const at = Number(menu?.dataset.armedAt ?? "0");
+  return activates(pressed, performance.now() - at, MENU_ARM_MS);
+}
+
 function menuRow(
   label: string,
   onClick: () => void,
@@ -5319,8 +5352,17 @@ function menuRow(
     requireConfirm(killBtn, onKill);
     row.appendChild(killBtn);
   }
+  // Only a press that began on this row can activate it — see
+  // menuClickCounts.
+  let pressed = false;
+  row.addEventListener("mousedown", (e) => {
+    if (e.button === 0) pressed = true;
+  });
   row.addEventListener("click", (e) => {
     if (killBtn && e.target === killBtn) return;
+    const ok = menuClickCounts(row, pressed);
+    pressed = false;
+    if (!ok) return;
     closeMenus();
     onClick();
   });
@@ -5394,6 +5436,7 @@ function renderHiddenPills() {
       }
       closeMenus(hiddenMenu);
       hiddenMenu.classList.toggle("open");
+    if (hiddenMenu.classList.contains("open")) armMenu(hiddenMenu);
     });
     hiddenbar.appendChild(chip);
     return;
@@ -8030,6 +8073,7 @@ async function main() {
     e.stopPropagation();
     closeMenus(overflowMenu);
     overflowMenu.classList.toggle("open");
+    if (overflowMenu.classList.contains("open")) armMenu(overflowMenu);
   });
   const restoreBtn = document.getElementById("restore")!;
   restoreBtn.addEventListener("click", async (e) => {
@@ -8037,6 +8081,7 @@ async function main() {
     if (!restoreMenu.classList.contains("open")) await renderRestoreMenu();
     closeMenus(restoreMenu);
     restoreMenu.classList.toggle("open");
+    if (restoreMenu.classList.contains("open")) armMenu(restoreMenu);
   });
   const settingsBtn = document.getElementById("settingsbtn")!;
   settingsBtn.addEventListener("click", (e) => {

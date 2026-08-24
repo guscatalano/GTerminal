@@ -94,7 +94,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -191,6 +191,13 @@ function Drag {
   }
   $U::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
   Start-Sleep -Milliseconds 300
+}
+
+function Move-Pointer {
+  param($hwnd, $x, $y)
+  $r = New-Object 'GTerm.Vis+RECT'
+  [void]$U::GetWindowRect($hwnd, [ref]$r)
+  [void]$U::SetCursorPos(($r.L + $x), ($r.T + $y))
 }
 
 function Right-Click {
@@ -770,6 +777,40 @@ if (-not $Only -or $Only -eq "copy") {
   elseif ($copied2 -match "sentinel-between-copies") { Fail "copy" "the selection was gone after copying - no Copy on the second menu" }
   else { Fail "copy" "the second copy took something else: $($copied2 -replace '\s+', ' ')" }
   Stop-App $ctx6
+}
+
+# ══ scene: hovering a menu item does not choose it ═════════════════════
+# Reported: "if you hover over Paste it pastes, you need to actually click
+# on it". Nothing fires on hover — but the menu is placed at the pointer,
+# so its first row appears under the cursor and a stray release lands on
+# it. Asserted against the transcript: what reached the shell, which is
+# the only thing that matters here.
+if (-not $Only -or $Only -eq "hover") {
+  $ctx7 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7}"
+  $h7 = $ctx7.Hwnd
+  Set-Clipboard -Value "PASTED-BY-ACCIDENT"
+  Record-Scene "hover" 24 $ctx7 {
+    Run-Cmd 'echo hover-scene-ready' 2
+    Right-Click ($h7) 500 260
+    Start-Sleep -Seconds 1
+    # Move across the rows, pausing on each — a menu that acts on hover
+    # pastes here, and one that acts on a stray release does too.
+    foreach ($dy in 12, 26, 40, 54) {
+      Move-Pointer ($h7) 560 (260 + $dy)
+      Start-Sleep -Milliseconds 500
+    }
+    Start-Sleep -Seconds 2
+    # Escape puts the menu away without choosing anything.
+    Key $VK_ESC
+    Start-Sleep -Seconds 2
+  }
+  $logs = @(Get-ChildItem "$scratch\GTerminal\history" -Filter *.log -ErrorAction SilentlyContinue)
+  $all = ($logs | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
+  if ($all -notmatch "PASTED-BY-ACCIDENT") { Pass "hovering the menu pastes nothing" }
+  else { Fail "hover" "the clipboard reached the shell without anyone clicking Paste" }
+  if ($all -match "hover-scene-ready") { Pass "and the session was live throughout" }
+  else { Fail "hover" "the scene never got a working shell, so it proves nothing" }
+  Stop-App $ctx7
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════
