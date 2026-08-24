@@ -34,6 +34,7 @@ import { staleDaemon, shellsAtRisk, daemonNotice } from "./daemon";
 import type { DaemonInfo } from "./daemon";
 import { activates } from "./menus";
 import { visibilityReport } from "./controls";
+import { shouldSuggestThemes } from "./firstrun";
 import type { ControlRect } from "./controls";
 import { formatEvent, describeText } from "./uilog";
 import type { UiEvent } from "./uilog";
@@ -174,6 +175,9 @@ interface AppConfig {
   /// default: a diagnostic you have to switch on before reproducing is
   /// one you never have when the bug first appears.
   ui_log?: boolean;
+  /// Set once the first-run theme hint has been shown — or once an
+  /// existing install has been marked as not needing it. Never unset.
+  themes_hint_shown?: boolean;
   /// Draw the – (hide) button on tabs.
   tab_hide_button?: boolean;
   restore_prompt_at?: number;
@@ -987,6 +991,17 @@ function mkTheme(
 }
 
 const THEMES: Record<string, ThemeDef> = {
+  // The one a new install gets: a flat background, one typeface, and the
+  // sixteen colours a terminal is supposed to have. Every other theme
+  // here paints art behind the text, which is a lovely thing to *choose*
+  // and a strange thing to be handed before you have run a command.
+  //
+  // Deliberately dull, and deliberately first in the picker: it is the
+  // one to come back to when a theme turns out to be too much.
+  plain: mkTheme("Plain", "white", ['"Cascadia Mono", Consolas, monospace', 1.15, "bar"], "linear-gradient(180deg, rgb(24,25,28), rgb(24,25,28))", "#18191c", "#dcdde0", [
+    "#2a2c31", "#e07b7b", "#8fbf8f", "#d6bd7a", "#7aa6d6", "#b48ec9", "#78b8bd", "#c8cacf",
+    "#5a5d66", "#eb9494", "#a8d2a8", "#e4d199", "#9bc0e6", "#c9aada", "#95cdd1", "#eceef2",
+  ]),
   "one-dark": mkTheme("One Dark", "white", ['"Cascadia Mono", Consolas, monospace', 1.1, "bar"], 'linear-gradient(rgba(15,17,21,0.52), rgba(15,17,21,0.66)), url("/backgrounds/onedark.png") center / cover no-repeat, linear-gradient(180deg, rgb(15,17,21), rgb(15,17,21))', "#0f1115", "#d7dae0", [
     "#1c1f26", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd", "#56b6c2", "#d7dae0",
     "#5c6370", "#ef7d85", "#a9d387", "#f0cd8a", "#74bdf7", "#d48ce8", "#67c5d0", "#f0f2f6",
@@ -4653,6 +4668,74 @@ async function checkDaemonVersion(sessions: SessionInfo[]) {
   document.getElementById("main")?.prepend(bar);
 }
 
+/// Point out the themes, once, on a genuinely new install.
+///
+/// A window that opens plain and stays plain is a window nobody knows is
+/// themeable. Shown once and marked as shown either way — an existing
+/// install is marked without ever seeing it, so this cannot surface
+/// later when someone happens to clear a setting.
+function suggestThemesOnce(freshInstall: boolean) {
+  const show = shouldSuggestThemes({ shown: config.themes_hint_shown, fresh: freshInstall });
+  if (config.themes_hint_shown !== true) {
+    config.themes_hint_shown = true;
+    saveConfig();
+  }
+  if (!show) return;
+  logUi("firstrun.themes");
+
+  const ov = document.createElement("div");
+  ov.className = "overlay";
+  const panel = document.createElement("div");
+  panel.className = "restore-panel firstrun-panel";
+  const title = document.createElement("div");
+  title.className = "restore-title";
+  title.textContent = "This one is deliberately plain";
+  const note = document.createElement("div");
+  note.className = "restore-note";
+  note.textContent =
+    "GTerminal starts with a flat background and nothing in the way. There are eighty other themes in settings if you want one — several of them paint the window behind your text. You will not be asked again.";
+  const actions = document.createElement("div");
+  actions.className = "restore-actions";
+  const later = document.createElement("button");
+  later.className = "set-control";
+  later.textContent = "Not now";
+  const go = document.createElement("button");
+  go.className = "set-control restore-go";
+  go.textContent = "Show me the themes";
+  actions.append(later, go);
+  const close = () => {
+    ov.remove();
+    window.removeEventListener("keydown", onKey, true);
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape" || e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+    }
+  };
+  later.addEventListener("click", close);
+  go.addEventListener("click", () => {
+    close();
+    openSettings();
+    // Straight to the picker: "it is in settings somewhere" is how a
+    // suggestion becomes a chore.
+    window.setTimeout(() => {
+      // The theme select carries data-role="theme"; scrolled to and
+      // focused, so the arrow keys preview themes straight away — which
+      // is the fastest way to see what the offer actually is.
+      const sel = document.querySelector<HTMLSelectElement>('[data-role="theme"]');
+      sel?.scrollIntoView({ block: "center" });
+      sel?.focus();
+    }, 80);
+  });
+  window.addEventListener("keydown", onKey, true);
+  panel.append(title, note, actions);
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+  go.focus();
+}
+
 /// Tabs showing an ended session's output with no shell behind them.
 const previewing = new Set<number>();
 
@@ -6150,6 +6233,7 @@ async function renderRestoreMenu() {
 // Theme picker categories: keys not listed here (and custom themes)
 // land in their own groups, so nothing can silently vanish.
 const THEME_GROUPS: Array<[string, string[]]> = [
+  ["Start here", ["plain"]],
   ["Classics", ["one-dark", "dracula", "nord", "gruvbox", "tokyo-night", "catppuccin", "solarized-dark", "solarized-light", "monokai", "everforest", "zenburn"]],
   ["Dev & tooling", ["coral", "monochrome", "git", "circuit", "containers", "helm", "mainframe", "punchcard", "panic", "whiteboard", "eink", "duck"]],
   ["Retro hardware", ["amber-crt", "gameboy", "c64"]],
@@ -8109,8 +8193,11 @@ function applyStatusBar() {
 
 async function main() {
   config = await invoke<AppConfig>("get_config").catch(() => ({}));
+  // Read before anything can save: a fresh install has no config at all,
+  // and every later write would make it look established.
+  const freshInstall = Object.keys(config).length === 0;
   registerCustomThemes();
-  applyTheme(config.theme ?? localStorage.getItem("gterm-theme") ?? "one-dark");
+  applyTheme(config.theme ?? localStorage.getItem("gterm-theme") ?? "plain");
   applyBackground();
   // The window starts hidden (tauri.conf visible:false) so users never
   // see the webview's white pre-paint flash; show once themed.
@@ -8491,6 +8578,7 @@ async function main() {
   refreshChrome();
   // Last, and never blocking: the window works, one thing in it may not.
   void checkDaemonVersion(sessions);
+  suggestThemesOnce(freshInstall);
 }
 
 main();
