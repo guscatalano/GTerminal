@@ -95,7 +95,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -127,6 +127,9 @@ $sig = @'
 [DllImport("user32.dll")] public static extern bool GetLayeredWindowAttributes(IntPtr h, out uint key, out byte alpha, out uint flags);
 [DllImport("user32.dll", EntryPoint="GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
 [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
+[DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr l);
+[DllImport("user32.dll")] public static extern int GetWindowThreadProcessId(IntPtr h, out int procId);
+public delegate bool EnumWindowsProc(IntPtr h, IntPtr l);
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
 public struct RECT { public int L,T,R,B; }
 '@
@@ -203,6 +206,29 @@ function Drag {
 # fail to put it on screen — which is what "stuck on old output" was —
 # and no byte-level test can see that. PrintWindow renders the window's
 # own content, so this works without the window being in front.
+# Every window a process has on screen. Process.MainWindowHandle only
+# ever names one, which is no use to a test about there being two.
+function App-Windows {
+  param([int]$procId)
+  $found = New-Object System.Collections.ArrayList
+  $cb = [GTerm.Vis+EnumWindowsProc]{
+    param($h, $l)
+    if ($U::IsWindowVisible($h)) {
+      $owner = 0
+      [void]$U::GetWindowThreadProcessId($h, [ref]$owner)
+      if ($owner -eq $procId) {
+        $r = New-Object 'GTerm.Vis+RECT'
+        [void]$U::GetWindowRect($h, [ref]$r)
+        # Tooltips and other incidental windows are tiny; a terminal is not.
+        if (($r.R - $r.L) -gt 300) { [void]$found.Add($h) }
+      }
+    }
+    return $true
+  }
+  [void]$U::EnumWindows($cb, [IntPtr]::Zero)
+  , @($found)
+}
+
 function Capture-Window {
   param($hwnd)
   $r = New-Object 'GTerm.Vis+RECT'
@@ -1058,6 +1084,58 @@ if (-not $Only -or $Only -eq "cliphist") {
   $viewer.Dispose()
   Write-Host "  viewer saved to $dump" -ForegroundColor DarkGray
   Stop-App $ctx10
+}
+
+# ══ scene: a second window ═════════════════════════════════════════════
+# The failure this is about is the one that made single-instance
+# necessary: two windows sharing one localStorage, both writing the same
+# tab order and pane layouts, last save winning. Opening a second window
+# must leave the first one's tabs exactly where they were - including
+# after the second window closes, which is when the old arrangement did
+# its damage.
+#
+# Sessions are the other half. The daemon allows one attacher and honours
+# the newest, so a second window that restored everything would take the
+# first window's terminals. It must not.
+if (-not $Only -or $Only -eq "multiwindow") {
+  $ctx11 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7}"
+  $h11 = $ctx11.Hwnd
+  Record-Scene "multiwindow" 40 $ctx11 {
+    Run-Cmd 'echo WINDOW-ONE-4242' 3
+    Key 0x4E @([byte]$VK_CTRL, [byte]$VK_SHIFT)     # Ctrl+Shift+N
+    Start-Sleep -Seconds 8
+    $script:wins = App-Windows $ctx11.App.Id
+    # The new window has focus; type into it.
+    Run-Cmd 'echo WINDOW-TWO-8686' 3
+    $script:bothOpen = Transcripts
+    $script:sessionsWhileTwo = Daemon-Sessions
+    # Close the second window. The first must be untouched by it.
+    $second = @($wins | Where-Object { $_ -ne $h11 })
+    if ($second.Count) { [void]$U::PostMessage($second[0], 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) }
+    Start-Sleep -Seconds 5
+    $script:afterClose = App-Windows $ctx11.App.Id
+    # And the first window still works: its tab is still its tab.
+    [void]$U::SetForegroundWindow($h11)
+    Start-Sleep -Milliseconds 800
+    Focus-Pane $h11
+    Run-Cmd 'echo FIRST-STILL-WORKS' 3
+    $script:finalOut = Transcripts
+  }
+  if ($wins.Count -ge 2) { Pass "Ctrl+Shift+N opens a second window" }
+  else { Fail "multiwindow" "only $($wins.Count) window(s) after Ctrl+Shift+N" }
+  # Two windows, two sessions - not one session shown twice, which is what
+  # would happen if the second window adopted what the first already had.
+  $attached = @($sessionsWhileTwo | Where-Object { $_.attached })
+  if ($attached.Count -ge 2) { Pass "and it runs a session of its own" }
+  else { Fail "multiwindow" "$($attached.Count) attached session(s) with two windows open" }
+  if (($bothOpen -match "WINDOW-ONE-4242") -and ($bothOpen -match "WINDOW-TWO-8686")) {
+    Pass "and both windows reach a shell"
+  } else { Fail "multiwindow" "one of the two windows never ran anything" }
+  if ($afterClose.Count -eq 1) { Pass "closing the second leaves one window" }
+  else { Fail "multiwindow" "$($afterClose.Count) window(s) after closing the second" }
+  if ($finalOut -match "FIRST-STILL-WORKS") { Pass "and the first window still has its terminal" }
+  else { Fail "multiwindow" "the first window stopped working once the second had been and gone" }
+  Stop-App $ctx11
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════
