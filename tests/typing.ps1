@@ -313,19 +313,32 @@ $ESC = [string][char]27
 # has to reach the child process, stop it, and leave the shell usable.
 #
 # KNOWN: this fails on at least one developer machine and passes on every
-# CI runner. What was established there, so the next person does not
-# start from nothing:
+# CI runner. What is established, so the next person does not start from
+# nothing - and correcting an earlier note here that said a native
+# program is interrupted, which a direct probe showed it is not:
 #
-#   - a native program (ping) *is* interrupted, so the keystroke reaches
-#     the console;
-#   - Start-Sleep is not, and behaves the same under pwsh 7.6.5 and
-#     Windows PowerShell 5.1 - so it is not a shell version;
-#   - nothing in this project's write path treats 0x03 specially: it is
-#     written to the pty like any other byte, and has been for months.
+#   - nothing is interrupted: ping keeps replying straight through it,
+#     and Start-Sleep runs its full thirty seconds;
+#   - the byte is not lost, it is queued. A command typed after the
+#     interrupt runs the moment the sleep ends, which means 0x03 reached
+#     the input buffer and was read as ordinary input rather than raised
+#     as a signal;
+#   - the console input mode is not the cause, which was the standing
+#     suspicion. Measured from inside the session, at the prompt and
+#     again while a command runs, it is 0x01f7: PROCESSED_INPUT on,
+#     VIRTUAL_TERMINAL_INPUT off. That is the mode in which ConPTY is
+#     supposed to turn 0x03 into a Ctrl+C event;
+#   - .NET agrees: TreatControlCAsInput reads False in both states;
+#   - the child is not in its own process group, which would make it
+#     ignore Ctrl+C by default: portable-pty 0.9 spawns with
+#     EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT and
+#     nothing else;
+#   - there is no PowerShell profile on that machine to change any of it.
 #
-# The remaining suspect is the console input mode the shell leaves set
-# while a command runs - with processed input off, 0x03 arrives as a byte
-# rather than as an interrupt. Unproven.
+# So the remaining difference is the pty layer itself on that Windows
+# build (10.0.26200, pwsh 7.6.5) rather than anything this project does
+# with the byte. Unproven, and the next step would be driving portable-pty
+# directly, outside this daemon, to see whether it fails there too.
 Type-Text "Start-Sleep -Seconds 30"
 Start-Sleep -Seconds 1
 $null = Drain 400
@@ -337,7 +350,20 @@ Start-Sleep -Seconds 2
 $null = Drain 600
 $back = Run-Line "echo (555+1)"
 if ($back -like "*556*") { "PASS Ctrl+C interrupts a running command and returns the prompt" }
-else { $failures += "ctrl-c-running: shell did not come back. Got: $back" }
+else {
+  $failures += "ctrl-c-running: shell did not come back. Got: $back"
+  # Start over in a fresh shell rather than carrying this one forward.
+  #
+  # Every test below shares this session, and a shell that ignored the
+  # interrupt is still running a thirty-second sleep. What they typed
+  # queues behind it and runs long after they have read an empty result,
+  # so one broken thing reported itself three times - as a Ctrl+C failure,
+  # a history failure and a throughput failure, each with empty output and
+  # no hint that the second two were consequences. Their own behaviour was
+  # never tested at all on a machine where this fails.
+  Close-Shell $exp
+  $exp = Open-Shell "pwsh"
+}
 
 # Up-arrow history recall. Experts navigate history far more than they
 # retype, and it is a different input path — an escape sequence, not a
