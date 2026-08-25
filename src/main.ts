@@ -177,9 +177,10 @@ interface AppConfig {
   close_action?: string;
   summon_animation?: string;
   restore_prompt?: boolean;
-  /// Record what the window does (menus, pastes) to ui.log. On by
-  /// default: a diagnostic you have to switch on before reproducing is
-  /// one you never have when the bug first appears.
+  /// Record what the window does (menus, pastes, uncaught errors) to
+  /// ui.log. Off unless asked for: a terminal writing down what you did
+  /// with it, by default, is not a trade anyone agreed to — even when
+  /// the file never leaves the machine and holds no clipboard contents.
   ui_log?: boolean;
   /// Set once the first-run theme hint has been shown — or once an
   /// existing install has been marked as not needing it. Never unset.
@@ -5462,7 +5463,7 @@ function groupMenuItems(g: TabGroup, nameEl: HTMLElement): CtxItem[] {
 /// throw: a log that can break the thing it is logging is worse than no
 /// log. See src/uilog.ts for what may and may not be written.
 function logUi(ev: string, fields: Record<string, unknown> = {}) {
-  if (config.ui_log === false) return;
+  if (config.ui_log !== true) return;
   try {
     const line = formatEvent({ ev, ...fields } as UiEvent, new Date().toISOString());
     void invoke("log_ui", { line }).catch(() => {});
@@ -7394,10 +7395,10 @@ function buildSettingsPage() {
   settingsSection("Diagnostics");
   settingRow(
     "Log what this window does",
-    "Menus opening, what was chosen — or refused — and where each paste came from, in ui.log next to the transcripts. Sizes only: what you copied is never written down. Diagnostics you have to switch on before reproducing are the ones nobody has when a bug first appears.",
+    "Off by default. Turn it on while chasing a bug and ui.log records menus opening, what was chosen — or refused — where each paste came from, and any error the window threw. Sizes only: what you copied is never written down.",
     mkSelect(
       [["on", "On"], ["off", "Off"]],
-      config.ui_log === false ? "off" : "on",
+      config.ui_log === true ? "on" : "off",
       (v) => {
         config.ui_log = v === "on";
         saveConfig();

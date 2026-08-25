@@ -9,6 +9,13 @@
 // What it must never contain is the clipboard. A log people are asked to
 // send should not carry what they copied, so text is reduced to a size
 // and a line count before it goes anywhere near the file.
+//
+// And it is off unless switched on. A terminal that records what you did
+// with it, by default, is not a trade anyone agreed to - the file staying
+// on the machine does not make it one. The cost is real and worth stating:
+// when something breaks unexpectedly there is nothing to look at, and the
+// first thing anyone can do is turn this on and try to make it happen
+// again.
 
 export interface UiEvent {
   ev: string;
