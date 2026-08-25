@@ -714,6 +714,20 @@ pub fn run() {
         return;
     }
     tauri::Builder::default()
+        // First, per the plugin's own requirement. Launching the app again
+        // - from the Store tile, a shortcut, a workspace link - used to
+        // start a second copy: two windows, two tray icons, and two
+        // claimants for one summon hotkey. The sessions were never at
+        // stake (they live in the daemon), but the tray was, and a tray
+        // icon that does not answer is worse than no tray icon.
+        //
+        // The second launch hands its arguments over and exits, so a
+        // workspace shortcut still opens its workspace - in the window
+        // that is already there.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            summon(app);
+            let _ = app.emit("second-instance", argv);
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())

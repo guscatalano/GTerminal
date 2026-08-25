@@ -1,0 +1,9 @@
+# Builds run on the machine someone is using. Rust will happily take
+# every core, and the terminal is the app that suffers most for it: a
+# keystroke here crosses the webview, the app process, a socket, the
+# daemon and a pty before its echo comes back, and every one of those
+# hops is a chance to be descheduled when nothing is idle.
+#
+# Half the cores compiles a little slower and leaves the machine usable.
+[build]
+jobs = 8

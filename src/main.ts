@@ -186,6 +186,10 @@ interface AppConfig {
   themes_hint_shown?: boolean;
   /// Draw the – (hide) button on tabs.
   tab_hide_button?: boolean;
+  /// Draw the decoration gutter down the right edge (failed commands,
+  /// find matches). Off is for when a full-screen program stops
+  /// redrawing — see docs/architecture.md.
+  overview_ruler?: boolean;
   restore_prompt_at?: number;
   paste_warn?: boolean;
   paste_warn_lines?: number;
@@ -4133,7 +4137,12 @@ async function createTab(
     // Without a width the overview ruler is not rendered at all, and every
     // decoration that targets it — failed commands, find matches — is
     // registered into nothing and silently invisible.
-    overviewRuler: { width: 14 },
+    //
+    // It is also the one change to how the terminal draws between the
+    // last version a full-screen program worked in and the first it did
+    // not, so it can be turned off: it is a gutter of marks, and a
+    // terminal that repaints is worth more.
+    ...(config.overview_ruler === false ? {} : { overviewRuler: { width: 14 } }),
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
@@ -4740,6 +4749,29 @@ function suggestThemesOnce(freshInstall: boolean) {
   ov.appendChild(panel);
   document.body.appendChild(ov);
   go.focus();
+}
+
+/// Open whatever `--workspace <name>` asks for.
+///
+/// Used at start-up and again when a second launch hands its arguments
+/// over instead of starting another copy of the app — clicking a
+/// workspace shortcut while the app is already running should open that
+/// workspace, not a second window with a second tray icon.
+async function openWorkspaceFromArgs(args: string[]) {
+  const at = args.indexOf("--workspace");
+  const name = at >= 0 ? args[at + 1]?.trim() : undefined;
+  if (!name) return;
+  const ws = (config.workspaces ?? []).find(
+    (w) => w.name.trim().toLowerCase() === name.toLowerCase()
+  );
+  if (!ws) return;
+  logUi("workspace.open", { name, templates: ws.templates.length });
+  for (const tplName of ws.templates) {
+    const t = (config.templates ?? []).find(
+      (x) => x.name.trim().toLowerCase() === tplName.trim().toLowerCase()
+    );
+    if (t) await createTab(undefined, t.shell, t.cwd, t.title);
+  }
 }
 
 /// Tabs showing an ended session's output with no shell behind them.
@@ -7355,6 +7387,18 @@ function buildSettingsPage() {
       }
     )
   );
+  settingRow(
+    "Decoration gutter",
+    "The narrow strip down the right edge marking failed commands and find matches. Turn it off if a full-screen program (Claude Code, Agency, vim) stops redrawing — it is the extra layer the terminal has to draw. Takes effect for tabs opened afterwards.",
+    mkSelect(
+      [["on", "Show"], ["off", "Hide"]],
+      config.overview_ruler === false ? "off" : "on",
+      (v) => {
+        config.overview_ruler = v === "on";
+        saveConfig();
+      }
+    )
+  );
   settingsRow_TabHide();
   settingsSection("About");
   const about = document.createElement("div");
@@ -8350,6 +8394,27 @@ async function main() {
   window.addEventListener("contextmenu", (e) => e.preventDefault());
   document.getElementById("settings-close")!.addEventListener("click", closeSettings);
   initFind();
+  // An exception thrown while rendering leaves the screen exactly as it
+  // was - which is indistinguishable, from the outside, from a terminal
+  // that decided not to redraw. Nothing recorded those, so a report of
+  // "it gets stuck on old output" had nowhere to be checked against.
+  window.addEventListener("error", (e) => {
+    logUi("error", {
+      message: String(e.message ?? ""),
+      at: `${e.filename ?? "?"}:${e.lineno ?? 0}`,
+      stack: String((e.error as Error | undefined)?.stack ?? "").slice(0, 400),
+    });
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    logUi("error.promise", {
+      reason: String((e.reason as Error | undefined)?.message ?? e.reason ?? "").slice(0, 200),
+      stack: String((e.reason as Error | undefined)?.stack ?? "").slice(0, 400),
+    });
+  });
+  // A second launch hands its arguments here and exits.
+  void listen<string[]>("second-instance", (e) => {
+    void openWorkspaceFromArgs(e.payload ?? []);
+  });
   applyTabHideButton();
   void applySummonHotkey();
   // Arriving and leaving are both a fade of the window itself now, done
@@ -8566,20 +8631,7 @@ async function main() {
   saveLayouts();
   // `--workspace <name>` (e.g. from a shortcut) opens every template the
   // named workspace lists, on top of whatever sessions were adopted.
-  const wsArgs = launchInfo?.args ?? [];
-  const wsAt = wsArgs.indexOf("--workspace");
-  const wsName = wsAt >= 0 ? wsArgs[wsAt + 1]?.trim() : undefined;
-  if (wsName) {
-    const ws = (config.workspaces ?? []).find(
-      (w) => w.name.trim().toLowerCase() === wsName.toLowerCase()
-    );
-    for (const tplName of ws?.templates ?? []) {
-      const t = (config.templates ?? []).find(
-        (x) => x.name.trim().toLowerCase() === tplName.trim().toLowerCase()
-      );
-      if (t) await createTab(undefined, t.shell, t.cwd, t.title);
-    }
-  }
+  await openWorkspaceFromArgs(launchInfo?.args ?? []);
   if (tabCount() === 0) await createTab();
   refreshChrome();
   // Last, and never blocking: the window works, one thing in it may not.
