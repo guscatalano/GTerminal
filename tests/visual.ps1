@@ -241,6 +241,31 @@ function Wait-Drawn {
   $frame
 }
 
+function Wait-Settled {
+  # Waits until the window stops changing on its own, and hands back the
+  # frame it settled on.
+  #
+  # Drawing is not instant, and a program that has started painting is
+  # not finished painting. A control frame taken three seconds after the
+  # first pixel moved caught a cold-starting TUI mid-paint and measured
+  # 8.32% of the screen changing with nobody touching it - more than any
+  # keystroke moved - so every input comparison then failed against its
+  # own noise. Measure once it is quiet, or do not measure.
+  param($hwnd, [int]$timeoutSec = 45, [double]$quiet = 0.004, [int]$settleMs = 1500)
+  $sw = [System.Diagnostics.Stopwatch]::StartNew()
+  $prev = Capture-Window $hwnd
+  while ($sw.Elapsed.TotalSeconds -lt $timeoutSec) {
+    Start-Sleep -Milliseconds $settleMs
+    $now = Capture-Window $hwnd
+    $moved = Frame-Diff $prev $now -IgnoreBottom 40
+    $prev.Dispose()
+    $prev = $now
+    if ($moved -le $quiet) { break }
+  }
+  $script:LastSettleWait = [Math]::Round($sw.Elapsed.TotalSeconds, 1)
+  $prev
+}
+
 function App-Windows {
   param([int]$procId)
   $found = New-Object System.Collections.ArrayList
@@ -1502,9 +1527,14 @@ if (-not $Only -or $Only -eq "copilot") {
       Run-Cmd "& '$copilot'" 0
       $script:cpStarted = Wait-Drawn $h17 $cpShell 75
       $script:cpDrawWait = $script:LastDrawWait
-      # A control frame: the same wait with nothing sent. Whatever moves
-      # on its own moves here too, and input has to beat it.
-      Start-Sleep -Seconds 3
+      # Started drawing is not finished drawing. Everything below compares
+      # frames against each other, so it has to begin from a still screen.
+      $script:cpSettled = Wait-Settled $h17 45
+      $script:cpSettleWait = $script:LastSettleWait
+      # A control frame over the same span as the keystroke below gets,
+      # so the two are comparable. Whatever the screen does on its own it
+      # does here too, and input has to beat it.
+      Start-Sleep -Seconds 2
       $script:cpIdle = Capture-Window $h17
       # It opens on a folder-trust dialog, which takes arrows and Enter
       # and ignores letters, so drive it the way it asks to be driven.
@@ -1537,7 +1567,7 @@ if (-not $Only -or $Only -eq "copilot") {
     # belong here. The status bar is excluded from every comparison
     # because its clock and CPU readout move on their own.
     $floor = 0.001
-    $idle  = Frame-Diff $cpStarted $cpIdle -IgnoreBottom 40
+    $idle  = Frame-Diff $cpSettled $cpIdle -IgnoreBottom 40
     $c1 = Frame-Diff $cpShell $cpStarted
     # Signed out, copilot prints a line and exits rather than opening a
     # UI at all, so there is nothing here to test and a runner would fail
@@ -1603,18 +1633,18 @@ if (-not $Only -or $Only -eq "copilot") {
     $esu = ([regex]::Matches($t17, [regex]::Escape("$esc[?2026l"))).Count
     $alt = ([regex]::Matches($t17, [regex]::Escape("$esc[?1049h"))).Count
     Write-Host ("  sequences: {0} chars, sync-output open x{1} close x{2}, alt-screen enter x{3}" -f $t17.Length, $bsu, $esu, $alt) -ForegroundColor DarkGray
-    Write-Host ("  drew after {0}s" -f $cpDrawWait) -ForegroundColor DarkGray
+    Write-Host ("  drew after {0}s, settled after a further {1}s" -f $cpDrawWait, $cpSettleWait) -ForegroundColor DarkGray
     Write-Host ("  changed: start {0:p1}, idle {1:p2}, arrow {2:p2}, dialog {3:p2}, letters {4:p2}, exit {5:p1}" -f $c1, $idle, $c2, $c3, $c4, (Frame-Diff $cpTyped $cpGone -IgnoreBottom 40)) -ForegroundColor DarkGray
     if (-not $skipCopilot -and ($c1 -le 0.01 -or $c2 -le $idle -or ($signedIn -and $c3 -le $idle))) {
       $dump = Join-Path $outDir "copilot-frames"
       New-Item -ItemType Directory -Force $dump | Out-Null
       $i = 0
-      foreach ($f in $cpShell, $cpStarted, $cpIdle, $cpArrow, $cpOpen, $cpTyped, $cpGone) {
+      foreach ($f in $cpShell, $cpStarted, $cpSettled, $cpIdle, $cpArrow, $cpOpen, $cpTyped, $cpGone) {
         $f.Save((Join-Path $dump "$i.png"), [System.Drawing.Imaging.ImageFormat]::Png); $i++
       }
       Write-Host "  frames saved to $dump" -ForegroundColor DarkGray
     }
-    foreach ($b in $cpShell, $cpStarted, $cpIdle, $cpArrow, $cpOpen, $cpTyped, $cpGone) { $b.Dispose() }
+    foreach ($b in $cpShell, $cpStarted, $cpSettled, $cpIdle, $cpArrow, $cpOpen, $cpTyped, $cpGone) { $b.Dispose() }
     Stop-App $ctx17
   }
 }
@@ -1660,7 +1690,8 @@ if (-not $Only -or $Only -eq "copilot-mcp") {
       # first attempt at this scene measured a stretch of time in which
       # copilot was correctly waiting for a keypress, and read the
       # stillness as the bug. Answer it, then measure.
-      $script:mcTrust = Wait-Drawn $h18 $mcShell 75
+      $null = Wait-Drawn $h18 $mcShell 75
+      $script:mcTrust = Wait-Settled $h18 45
       Key $VK_RETURN                  # first option: this session only
       # Mid-setup: the server has not answered initialize yet.
       Start-Sleep -Seconds 3
