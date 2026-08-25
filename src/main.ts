@@ -3,6 +3,12 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl, openPath } from "@tauri-apps/plugin-opener";
+// The clipboard goes through the app, not the browser. navigator.clipboard
+// is a *web page's* clipboard API: WebView2 puts a permission dialog in
+// front of every read, and a read can hang outright while another process
+// holds the clipboard open. Neither is acceptable in a terminal, where
+// paste is a keystroke someone just pressed.
+import { readText as clipRead, writeText as clipWrite } from "@tauri-apps/plugin-clipboard-manager";
 import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Terminal } from "@xterm/xterm";
 import type { ITheme } from "@xterm/xterm";
@@ -3303,7 +3309,7 @@ function blockText(tab: Tab, b: Block, withCommand: boolean): string {
 function copyText(text: string) {
   if (!text) return;
   pushClip(text);
-  navigator.clipboard.writeText(text).catch(() => {});
+  clipWrite(text).catch(() => {});
 }
 
 // ── restoring sessions at startup ───────────────────────────────────────
@@ -3766,8 +3772,7 @@ function confirmPaste(id: number, text: string) {
 
 /// Paste the system clipboard into a session.
 function pasteClipboardInto(id: number, source = "keyboard") {
-  navigator.clipboard
-    .readText()
+  clipRead()
     .then((text) => pasteText(id, text, source))
     .catch(() => {});
 }
@@ -3837,7 +3842,7 @@ function makeShortcutHandler(getId: () => number) {
         const sel = tab?.term.getSelection();
         if (sel) {
           pushClip(sel);
-          navigator.clipboard.writeText(sel).catch(() => {});
+          clipWrite(sel).catch(() => {});
         }
         return false;
       }
@@ -4050,7 +4055,7 @@ function openClipViewer(id: number, term: Terminal) {
       }),
       mkBtn("Copy", () => {
         pushClip(text);
-        navigator.clipboard.writeText(text).catch(() => {});
+        clipWrite(text).catch(() => {});
       }),
       mkBtn("✕", () => {
         const i = clipHist.indexOf(text);
@@ -4385,13 +4390,14 @@ async function createTab(
     const y = e.clientY;
     void (async () => {
       const sel = term.getSelection() || selAtRightClick;
-      // Never let the clipboard hold the menu hostage. readText() can hang
-      // forever in WebView2 when another process has the clipboard locked —
-      // and everything below is what builds the menu, so a stalled promise
-      // means right-click silently does nothing. Race it; a missing paste
-      // preview is a far smaller loss than no menu.
+      // Never let the clipboard hold the menu hostage. A read can block
+      // while another process has the clipboard open — that is a Windows
+      // fact, not a WebView2 one, and it survived moving off the browser
+      // API — and everything below is what builds the menu, so a stalled
+      // promise means right-click silently does nothing. Race it; a
+      // missing paste preview is a far smaller loss than no menu.
       const current = await Promise.race([
-        navigator.clipboard.readText().catch(() => ""),
+        clipRead().catch(() => ""),
         new Promise<string>((r) => window.setTimeout(() => r(""), 150)),
       ]);
       if (current) pushClip(current);
@@ -4401,7 +4407,7 @@ async function createTab(
           label: "Copy",
           action: () => {
             pushClip(sel);
-            navigator.clipboard.writeText(sel).catch(() => {});
+            clipWrite(sel).catch(() => {});
             // The selection stays. Copying is not a reason to lose sight
             // of what you copied, and it leaves the second copy — or a
             // wider drag from the same anchor — one gesture away.
@@ -7176,7 +7182,7 @@ function buildSettingsPage() {
       copy.title = "Copies a command line for a shortcut that opens this workspace";
       copy.addEventListener("click", () => {
         const exe = launchInfo?.exe || "gterminal.exe";
-        void navigator.clipboard.writeText(`"${exe}" --workspace "${w.name}"`);
+        void clipWrite(`"${exe}" --workspace "${w.name}"`);
         copy.textContent = "Copied!";
         window.setTimeout(() => (copy.textContent = "Copy cmd"), 1200);
       });

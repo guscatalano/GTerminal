@@ -716,6 +716,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         // The summon hotkey is registered from the frontend, which owns the
         // config; this only installs the machinery.
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
