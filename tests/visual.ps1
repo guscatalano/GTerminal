@@ -124,6 +124,7 @@ $sig = @'
 [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, UIntPtr e);
 [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
 [DllImport("user32.dll")] public static extern bool GetLayeredWindowAttributes(IntPtr h, out uint key, out byte alpha, out uint flags);
+[DllImport("user32.dll", EntryPoint="GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
 public struct RECT { public int L,T,R,B; }
 '@
@@ -920,6 +921,15 @@ if (-not $Only -or $Only -eq "tray") {
   $known = $U::GetLayeredWindowAttributes($h, [ref]$k, [ref]$a, [ref]$f)
   if (-not $known -or $a -eq 255) { Pass "and is fully opaque again once it is back" }
   else { Fail "fade" "the window came back at alpha $a" }
+  # And not still layered. WS_EX_LAYERED is how the fade is drawn, but a
+  # layered WebView2 window is composited down a slower path — left set,
+  # it charges every later keystroke and every full-screen redraw for an
+  # animation that finished. Reported as typing lag, and as a full-screen
+  # program stuck on old output.
+  $WS_EX_LAYERED = [IntPtr]0x00080000
+  $ex = $U::GetWindowLongPtr($h, -20)   # GWL_EXSTYLE
+  if (([int64]$ex -band [int64]$WS_EX_LAYERED) -eq 0) { Pass "and is not left layered afterwards" }
+  else { Fail "fade" "the window is still WS_EX_LAYERED after the fade" }
   Stop-App $ctx
 }
 
