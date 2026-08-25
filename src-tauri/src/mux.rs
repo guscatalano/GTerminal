@@ -276,7 +276,7 @@ mod daemon_binary_tests {
         assert!(chosen.exists(), "the copy was never made: {chosen:?}");
         let name = chosen.file_name().unwrap().to_string_lossy().into_owned();
         assert!(
-            name.contains(env!("CARGO_PKG_VERSION")),
+            name.contains(env!("GTERMINAL_VERSION")),
             "named for its version, so an update does not reuse the old copy: {name}"
         );
         // Same bytes, or the daemon and the window disagree about the
@@ -1048,7 +1048,7 @@ fn conn_loop(
                         "ok": true,
                         "sessions": list,
                         "protocol": PROTOCOL,
-                        "version": env!("CARGO_PKG_VERSION"),
+                        "version": env!("GTERMINAL_VERSION"),
                         "pid": std::process::id(),
                     }),
                 )?;
@@ -1524,7 +1524,7 @@ pub mod client {
         if std::fs::create_dir_all(&dir).is_err() {
             return Ok(current);
         }
-        let want = dir.join(format!("gterminal-daemon-{}.exe", env!("CARGO_PKG_VERSION")));
+        let want = dir.join(format!("gterminal-daemon-{}.exe", env!("GTERMINAL_VERSION")));
         if !want.exists() {
             // A copy that fails - antivirus, a full disk - is not worth
             // failing to start over: the package binary still works, it

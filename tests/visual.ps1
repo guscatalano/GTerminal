@@ -208,6 +208,25 @@ function Drag {
 # own content, so this works without the window being in front.
 # Every window a process has on screen. Process.MainWindowHandle only
 # ever names one, which is no use to a test about there being two.
+function Wait-Drawn {
+  # Waits until the window stops looking like $baseline, and hands back
+  # the frame it stopped on. A fixed sleep was wrong in both directions:
+  # twelve seconds was plenty for a warm start here and not enough for a
+  # cold one on a runner, where a freshly installed CLI took longer and
+  # the scene recorded an empty screen as "it never drew".
+  param($hwnd, $baseline, [int]$timeoutSec = 75, [double]$floor = 0.01)
+  $sw = [System.Diagnostics.Stopwatch]::StartNew()
+  $frame = Capture-Window $hwnd
+  while ($sw.Elapsed.TotalSeconds -lt $timeoutSec) {
+    if ((Frame-Diff $baseline $frame) -gt $floor) { break }
+    Start-Sleep -Seconds 2
+    $frame.Dispose()
+    $frame = Capture-Window $hwnd
+  }
+  $script:LastDrawWait = [Math]::Round($sw.Elapsed.TotalSeconds, 1)
+  $frame
+}
+
 function App-Windows {
   param([int]$procId)
   $found = New-Object System.Collections.ArrayList
@@ -1467,8 +1486,8 @@ if (-not $Only -or $Only -eq "copilot") {
       Run-Cmd 'echo before-copilot' 2
       $script:cpShell = Capture-Window $h17
       Run-Cmd "& '$copilot'" 0
-      Start-Sleep -Seconds 12
-      $script:cpStarted = Capture-Window $h17
+      $script:cpStarted = Wait-Drawn $h17 $cpShell 75
+      $script:cpDrawWait = $script:LastDrawWait
       # A control frame: the same wait with nothing sent. Whatever moves
       # on its own moves here too, and input has to beat it.
       Start-Sleep -Seconds 3
@@ -1524,10 +1543,21 @@ if (-not $Only -or $Only -eq "copilot") {
     if ($skipCopilot) { }
     elseif ($c1 -gt 0.01) { Pass "copilot takes the screen" }
     else { Fail "copilot" ("the screen barely changed when it started ({0:p1}), though it did enter the alternate screen" -f $c1) }
+    # Either kind of input counts, and both are reported. Which one moves
+    # the screen depends on what is up: a dialog takes arrows and ignores
+    # letters, a prompt does the reverse, and which of the two you get
+    # depends on whether the machine is signed in. Asserting on the arrow
+    # alone failed a runner where copilot was drawing perfectly well and
+    # simply had a text field up rather than a menu. What this scene is
+    # about is whether input repaints the screen at all.
     $c2 = Frame-Diff $cpIdle $cpArrow -IgnoreBottom 40
+    $c4 = Frame-Diff $cpOpen $cpTyped -IgnoreBottom 40
+    $moved = [Math]::Max($c2, $c4)
     if ($skipCopilot) { }
-    elseif ($c2 -gt $floor -and $c2 -gt $idle) { Pass "and repaints when you drive it" }
-    else { Fail "copilot" ("an arrow key changed nothing on screen ({0:p2} against {1:p2} idle) - this is the reported symptom" -f $c2, $idle) }
+    elseif ($moved -gt $floor -and $moved -gt $idle) {
+      Pass ("and repaints when you drive it ({0})" -f $(if ($c2 -ge $c4) { "arrows" } else { "letters" }))
+    }
+    else { Fail "copilot" ("neither an arrow nor typing changed the screen (arrow {0:p2}, letters {1:p2}, idle {2:p2}) - this is the reported symptom" -f $c2, $c4, $idle) }
     # Letters reaching a composer prove the machine is signed in, which is
     # what makes the screen before it a folder-trust dialog and Enter an
     # answer to it. A signed-out runner gets a login screen instead, where
@@ -1535,8 +1565,7 @@ if (-not $Only -or $Only -eq "copilot") {
     # only on the machine where they mean what they say - and reported
     # either way, so a silent skip cannot pass for a pass.
     $c3 = Frame-Diff $cpArrow $cpOpen -IgnoreBottom 40
-    $c4 = Frame-Diff $cpOpen $cpTyped -IgnoreBottom 40
-    $signedIn = -not $skipCopilot -and $c4 -gt $floor -and $c4 -gt $idle
+    $signedIn = -not $skipCopilot -and $c4 -gt $floor -and $c4 -gt $idle -and $c2 -gt $idle
     if ($signedIn) {
       Pass "and letters land in its composer"
       if ($c3 -gt $floor -and $c3 -gt $idle) { Pass "and redraws the screen behind a dismissed dialog" }
@@ -1556,6 +1585,7 @@ if (-not $Only -or $Only -eq "copilot") {
     $esu = ([regex]::Matches($t17, [regex]::Escape("$esc[?2026l"))).Count
     $alt = ([regex]::Matches($t17, [regex]::Escape("$esc[?1049h"))).Count
     Write-Host ("  sequences: {0} chars, sync-output open x{1} close x{2}, alt-screen enter x{3}" -f $t17.Length, $bsu, $esu, $alt) -ForegroundColor DarkGray
+    Write-Host ("  drew after {0}s" -f $cpDrawWait) -ForegroundColor DarkGray
     Write-Host ("  changed: start {0:p1}, idle {1:p2}, arrow {2:p2}, dialog {3:p2}, letters {4:p2}, exit {5:p1}" -f $c1, $idle, $c2, $c3, $c4, (Frame-Diff $cpTyped $cpGone -IgnoreBottom 40)) -ForegroundColor DarkGray
     if (-not $skipCopilot -and ($c1 -le 0.01 -or $c2 -le $idle -or ($signedIn -and $c3 -le $idle))) {
       $dump = Join-Path $outDir "copilot-frames"
@@ -1612,8 +1642,7 @@ if (-not $Only -or $Only -eq "copilot-mcp") {
       # first attempt at this scene measured a stretch of time in which
       # copilot was correctly waiting for a keypress, and read the
       # stillness as the bug. Answer it, then measure.
-      Start-Sleep -Seconds 10
-      $script:mcTrust = Capture-Window $h18
+      $script:mcTrust = Wait-Drawn $h18 $mcShell 75
       Key $VK_RETURN                  # first option: this session only
       # Mid-setup: the server has not answered initialize yet.
       Start-Sleep -Seconds 3

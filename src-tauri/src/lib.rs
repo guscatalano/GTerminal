@@ -796,21 +796,26 @@ fn summon_label() -> Option<String> {
 /// is the only place left to ask "how do I get it back", so the answer
 /// lives there permanently rather than in a notice shown once, at the one
 /// moment nobody is looking at the tray.
-fn tray_strings(key: Option<&str>) -> (String, String) {
+fn tray_strings(key: Option<&str>, version: &str) -> (String, String) {
+    // The version belongs here because the tray is the one part of this
+    // app that is always on screen, and because "which version am I
+    // running" turned out to be worth answering at a glance: a machine
+    // can sit on an old build for days while a newer one exists, and
+    // every report made against it is then about code nobody is running.
     match key {
         Some(k) => (
-            format!("GTerminal — press {k} to show"),
+            format!("GTerminal {version} — press {k} to show"),
             format!("Show GTerminal\t{k}"),
         ),
         None => (
-            "GTerminal — no summon hotkey set".into(),
+            format!("GTerminal {version} — no summon hotkey set"),
             "Show GTerminal".into(),
         ),
     }
 }
 
 fn tray_text() -> (String, String) {
-    tray_strings(summon_label().as_deref())
+    tray_strings(summon_label().as_deref(), env!("GTERMINAL_VERSION"))
 }
 
 fn apply_tray_text(app: &AppHandle) -> Result<(), String> {
@@ -1053,8 +1058,9 @@ mod tests {
     /// there is no answer, rather than implying a key that does nothing.
     #[test]
     fn the_tray_says_how_to_get_the_window_back() {
-        let (tip, item) = tray_strings(Some("Alt+Space"));
+        let (tip, item) = tray_strings(Some("Alt+Space"), "9.9.9");
         assert!(tip.contains("Alt+Space"), "tooltip must name the key: {tip}");
+        assert!(tip.contains("9.9.9"), "tooltip must name the version: {tip}");
         assert!(item.contains("Alt+Space"), "menu item must name the key: {item}");
         assert!(item.starts_with("Show GTerminal"), "menu item is still an action: {item}");
         // A tab between label and key is what puts the key in the
@@ -1064,10 +1070,36 @@ mod tests {
 
     #[test]
     fn with_no_hotkey_it_says_so() {
-        let (tip, item) = tray_strings(None);
+        let (tip, item) = tray_strings(None, "9.9.9");
         assert!(tip.contains("no summon hotkey"), "{tip}");
+        // Still the version, even with no key to advertise: it is the
+        // reason to look at the tooltip at all.
+        assert!(tip.contains("9.9.9"), "tooltip must name the version: {tip}");
         assert_eq!(item, "Show GTerminal");
         assert!(!item.contains('\t'), "no key means no accelerator column: {item:?}");
+    }
+
+    /// The version the code reports has to be the version that ships.
+    /// These were two different numbers - Cargo.toml said 0.2.0 while
+    /// the app shipped as 0.12.0 - and nothing caught it because
+    /// nothing compared them. The daemon announced the wrong one over
+    /// the wire and named its own binary after it.
+    #[test]
+    fn the_reported_version_is_the_one_that_ships() {
+        let conf = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json"),
+        )
+        .expect("read tauri.conf.json");
+        let shipped = conf
+            .split(r#""version""#)
+            .nth(1)
+            .and_then(|rest| rest.split('"').nth(1))
+            .expect("a version in tauri.conf.json");
+        assert_eq!(
+            env!("GTERMINAL_VERSION"),
+            shipped,
+            "the version compiled in must be the version that ships"
+        );
     }
 
     /// Once the window is hidden the tray is the only place left to ask
