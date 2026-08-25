@@ -95,7 +95,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "tui", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "tui", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -239,6 +239,14 @@ function Frame-Diff {
     }
   }
   if ($total -eq 0) { 0.0 } else { [double]$diff / $total }
+}
+
+# What reached the shells, from the daemon's own transcripts. The only
+# honest answer to "did the paste arrive": the screen shows the same text
+# whether it was pasted, typed, or echoed by something else.
+function Transcripts {
+  $logs = @(Get-ChildItem "$scratch\GTerminal\history" -Filter *.log -ErrorAction SilentlyContinue)
+  ($logs | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
 }
 
 function Move-Pointer {
@@ -531,19 +539,37 @@ if (-not $Only -or $Only -eq "paste") {
   $ctx = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"paste_warn`":true,`"paste_warn_lines`":3}"
   $ph = $ctx.Hwnd
   Record-Scene "paste" 30 $ctx {
+    Run-Cmd 'echo paste-scene-ready' 2
     Set-Clip "echo `"first pasted line`"`necho `"second pasted line`"`necho `"third pasted line`"" $ph
     Key 0x56 @([byte]$VK_CTRL)      # Ctrl+V — the warning should appear
     Start-Sleep -Seconds 6          # dwell on the dialog: it is the point
+    # Nothing may have reached the shell yet. This is the whole point of
+    # the warning: three lines pasted into PSReadLine, which has no
+    # bracketed paste, would otherwise be three commands already run.
+    $script:beforeConfirm = Transcripts
     Key $VK_RETURN                  # confirm
-    Start-Sleep -Seconds 5
+    Start-Sleep -Seconds 6
+    $script:afterConfirm = Transcripts
     # And a small paste, which must go straight in with no dialog.
     Set-Clip 'echo "a short paste"' $ph
     Key 0x56 @([byte]$VK_CTRL)
     Start-Sleep -Seconds 2
     Key $VK_RETURN
-    Start-Sleep -Seconds 4
+    Start-Sleep -Seconds 5
+    $script:afterShort = Transcripts
   }
-  if ($U::IsWindowVisible($ctx.Hwnd)) { Pass "paste scene: the window came through it" }
+  if ($beforeConfirm -notmatch "first pasted line") { Pass "a multi-line paste waits for the warning" }
+  else { Fail "paste-warn" "the paste reached the shell before it was confirmed" }
+  if ($afterConfirm -match "first pasted line" -and
+      $afterConfirm -match "second pasted line" -and
+      $afterConfirm -match "third pasted line") {
+    Pass "and all three lines arrive once it is confirmed"
+  } else { Fail "paste-warn" "the confirmed paste did not arrive in full" }
+  # Ctrl+V itself: the clipboard is read by the app now rather than by the
+  # webview, and this is the path that exercises it.
+  if ($afterShort -match "a short paste") { Pass "a short paste goes straight in on Ctrl+V" }
+  else { Fail "paste-short" "the short paste never reached the shell" }
+  if ($U::IsWindowVisible($ctx.Hwnd)) { Pass "and the window came through it" }
   else { Fail "paste" "the window did not survive the scene" }
   Stop-App $ctx
 }
@@ -921,6 +947,43 @@ if (-not $Only -or $Only -eq "tui") {
   }
   foreach ($b in $shotShell, $shotA, $shotB, $shotC, $shotAfter) { $b.Dispose() }
   Stop-App $ctx8
+}
+
+# ══ scene: the clipboard, by keyboard ══════════════════════════════════
+# Copy and paste no longer go through navigator.clipboard - the app reads
+# and writes the clipboard itself - and nothing exercised that. The menu
+# paths have the copy scene; these are the keys, and they are the ones
+# people actually use.
+#
+# A round trip, both halves asserted against something outside the app:
+# the Windows clipboard for the copy, the session transcript for the
+# paste. Neither can be satisfied by the screen merely looking right.
+if (-not $Only -or $Only -eq "clipboard") {
+  $ctx9 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`"}"
+  $h9 = $ctx9.Hwnd
+  Set-Clipboard -Value "nothing-copied-yet"
+  Record-Scene "clipboard" 28 $ctx9 {
+    Run-Cmd 'echo COPYKEY-24680' 3
+    # Select the output line, then copy it with the keyboard.
+    Drag ($h9) 20 62 320 62
+    Start-Sleep -Milliseconds 600
+    Key 0x43 @([byte]$VK_CTRL, [byte]$VK_SHIFT)   # Ctrl+Shift+C
+    Start-Sleep -Seconds 2
+    $script:copiedByKey = try { Get-Clipboard -Raw } catch { "" }
+    # Now the other direction, with something the shell has never seen.
+    Set-Clip 'echo PASTEKEY-13579' $h9
+    Key 0x56 @([byte]$VK_CTRL, [byte]$VK_SHIFT)   # Ctrl+Shift+V
+    Start-Sleep -Seconds 2
+    Key $VK_RETURN
+    Start-Sleep -Seconds 4
+    $script:pastedByKey = Transcripts
+  }
+  if ($copiedByKey -match "COPYKEY-24680") { Pass "Ctrl+Shift+C puts the selection on the clipboard" }
+  elseif ($copiedByKey -match "nothing-copied-yet") { Fail "clip-copy" "the clipboard never changed - nothing was copied" }
+  else { Fail "clip-copy" "something else was copied: $($copiedByKey -replace '\s+', ' ')" }
+  if ($pastedByKey -match "PASTEKEY-13579") { Pass "and Ctrl+Shift+V pastes into the shell" }
+  else { Fail "clip-paste" "the pasted text never reached the shell" }
+  Stop-App $ctx9
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════
