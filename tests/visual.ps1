@@ -1135,6 +1135,20 @@ if (-not $Only -or $Only -eq "multiwindow") {
   else { Fail "multiwindow" "$($afterClose.Count) window(s) after closing the second" }
   if ($finalOut -match "FIRST-STILL-WORKS") { Pass "and the first window still has its terminal" }
   else { Fail "multiwindow" "the first window stopped working once the second had been and gone" }
+  # A second window that opens and then does nothing looks the same from
+  # out here as one that never loaded its page. Photograph every window
+  # the app has, so the difference is visible.
+  $dump = Join-Path $outDir "window-frames"
+  New-Item -ItemType Directory -Force $dump | Out-Null
+  $i = 0
+  foreach ($w in (App-Windows $ctx11.App.Id)) {
+    $shot = Capture-Window $w
+    $shot.Save((Join-Path $dump "window-$i.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+    $shot.Dispose()
+    Write-Host ("  window {0}: handle {1}" -f $i, $w) -ForegroundColor DarkGray
+    $i++
+  }
+  Write-Host "  windows saved to $dump" -ForegroundColor DarkGray
   Stop-App $ctx11
 }
 

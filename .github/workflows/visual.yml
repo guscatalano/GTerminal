@@ -74,4 +74,5 @@ jobs:
             docs/visual/*.gif
             docs/visual/tui-frames/*.png
             docs/visual/clip-frames/*.png
+            docs/visual/window-frames/*.png
           if-no-files-found: warn
