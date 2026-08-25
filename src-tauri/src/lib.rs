@@ -603,31 +603,10 @@ fn focused_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
         .or_else(|| app.webview_windows().into_values().next())
 }
 
-/// Open another window onto the same daemon.
-///
-/// Sessions are not duplicated: each window attaches to its own, and the
-/// daemon hands a session to whoever attached last. What a window owns is
-/// its layout - see docs/multi-window.md.
+/// The labels already in use, so the frontend can pick a free one.
 #[tauri::command]
-fn new_window(app: AppHandle) -> Result<String, String> {
-    // Labels must be unique and stable for the life of the window; the
-    // frontend keys its layout off this one.
-    let mut n = 2;
-    while app.get_webview_window(&format!("w{n}")).is_some() {
-        n += 1;
-    }
-    let label = format!("w{n}");
-    let url = tauri::WebviewUrl::App("index.html".into());
-    let win = tauri::WebviewWindowBuilder::new(&app, &label, url)
-        .title("GTerminal")
-        .inner_size(1100.0, 720.0)
-        .min_inner_size(400.0, 300.0)
-        .decorations(false)
-        .background_color(tauri::window::Color(13, 17, 23, 255))
-        .build()
-        .map_err(|e| e.to_string())?;
-    watch_window(&win, &app);
-    Ok(label)
+fn window_labels(app: AppHandle) -> Vec<String> {
+    app.webview_windows().keys().cloned().collect()
 }
 
 /// Wire a window up: remember it when focused, and decide what closing
@@ -791,7 +770,17 @@ pub fn run() {
         mux::run_daemon();
         return;
     }
-    tauri::Builder::default()
+    // Single-instance is machine-wide: the plugin keys its mutex on the
+    // app identifier, so *any* copy of GTerminal claims it - a Store
+    // install, a development build, and every app a test suite starts.
+    // One escape hatch, for the cases where more than one really is
+    // wanted: a test driving several, or a build being compared against
+    // an installed copy. Not a setting, because a user who launches the
+    // app twice wants the window they already have.
+    let allow_many = std::env::var("GTERMINAL_ALLOW_MULTI").is_ok();
+    let mut builder = tauri::Builder::default();
+    if !allow_many {
+        builder = builder
         // First, per the plugin's own requirement. Launching the app again
         // - from the Store tile, a shortcut, a workspace link - used to
         // start a second copy: two windows, two tray icons, and two
@@ -805,7 +794,9 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             summon(app);
             let _ = app.emit("second-instance", argv);
-        }))
+        }));
+    }
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -931,7 +922,7 @@ pub fn run() {
             logs_path,
             log_ui,
             summon_toggle,
-            new_window,
+            window_labels,
             write_session,
             resize_session,
             detach_session,

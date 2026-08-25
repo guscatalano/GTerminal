@@ -360,6 +360,10 @@ $env:LOCALAPPDATA = $scratch
 # itself and does move it. It also makes runs deterministic: scenes now
 # start from a known UI state instead of inheriting the last run's.
 $env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $scratch "webview2"
+# Every scene starts its own app, and one scene's leftover would make the
+# next scene's launch hand over and exit - the app would never appear,
+# for a reason that has nothing to do with what the scene is testing.
+$env:GTERMINAL_ALLOW_MULTI = "1"
 
 $savedClipboard = try { Get-Clipboard -Raw } catch { "" }
 $RECW = 1280; $RECH = 800

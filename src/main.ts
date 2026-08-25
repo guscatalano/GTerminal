@@ -1,6 +1,7 @@
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl, openPath } from "@tauri-apps/plugin-opener";
 // The clipboard goes through the app, not the browser. navigator.clipboard
@@ -3860,7 +3861,7 @@ function makeShortcutHandler(getId: () => number) {
         return false;
       }
       if (key === "N") {
-        void invoke("new_window").catch(() => {});
+        void openAnotherWindow();
         return false;
       }
       if (key === "C") {
@@ -4771,6 +4772,30 @@ function suggestThemesOnce(freshInstall: boolean) {
   ov.appendChild(panel);
   document.body.appendChild(ov);
   go.focus();
+}
+
+/// Another window onto the same daemon.
+///
+/// Created from here rather than from Rust: WebviewWindow is the API
+/// built for it, and it resolves the app's own URL the way the first
+/// window's does instead of one assembled by hand.
+async function openAnotherWindow() {
+  const taken = new Set((await invoke<string[]>("window_labels").catch(() => [])) ?? []);
+  let n = 2;
+  while (taken.has(`w${n}`)) n += 1;
+  const label = `w${n}`;
+  logUi("window.open", { label });
+  const win = new WebviewWindow(label, {
+    url: "index.html",
+    title: "GTerminal",
+    width: 1100,
+    height: 720,
+    minWidth: 400,
+    minHeight: 300,
+    decorations: false,
+    backgroundColor: "#0d1117",
+  });
+  win.once("tauri://error", (e) => logUi("error", { message: `new window: ${JSON.stringify(e.payload)}` }));
 }
 
 /// Open whatever `--workspace <name>` asks for.

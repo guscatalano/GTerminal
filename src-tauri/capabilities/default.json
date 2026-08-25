@@ -30,6 +30,9 @@
     "global-shortcut:allow-unregister-all",
     "global-shortcut:allow-is-registered",
     "clipboard-manager:allow-read-text",
-    "clipboard-manager:allow-write-text"
+    "clipboard-manager:allow-write-text",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-create",
+    "core:window:allow-destroy"
   ]
 }
