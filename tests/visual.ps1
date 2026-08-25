@@ -95,7 +95,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -1264,6 +1264,95 @@ if (-not $Only -or $Only -eq "preview") {
   if ($kept.Count -eq 2) { Pass "and both are still there to reopen" }
   else { Fail "preview" "only $($kept.Count) of 2 ended sessions survived being looked at" }
   Stop-App $ctx13
+}
+
+# ══ scene: moving a tab to another window ═════════════════════════════
+# A drag would be the obvious gesture and is not available: two webviews
+# share no drag context, so it is a menu command. Underneath, the daemon
+# does the work - the target window attaches, the newest attach wins, and
+# the window that had it is told and drops the tab.
+#
+# The assertion is that the session survives the journey and is still
+# usable at the other end, which is the only part that matters.
+if (-not $Only -or $Only -eq "movetab") {
+  $ctx14 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7}"
+  $h14 = $ctx14.Hwnd
+  Record-Scene "movetab" 40 $ctx14 {
+    Run-Cmd 'echo MOVER-13579' 3
+    $script:moverId = @((Daemon-Sessions | Where-Object { $_.attached }).id)[0]
+    Key 0x4E @([byte]$VK_CTRL, [byte]$VK_SHIFT)     # a second window
+    Start-Sleep -Seconds 9
+    # Back to the first window, and move its tab across.
+    [void]$U::SetForegroundWindow($h14)
+    Start-Sleep -Seconds 1
+    Focus-Pane $h14
+    Start-Sleep -Milliseconds 500
+    Right-Click ($h14) 120 33                       # the tab itself
+    Start-Sleep -Seconds 1
+    $script:tabMenuShot = Capture-Window $h14
+    # Rename tab, Suggest title…, Move to Window 2 - measured from a
+    # capture of the menu rather than counted from the source, which is
+    # how the click landed on Set badge… the first time.
+    Click ($h14) 200 108
+    Start-Sleep -Seconds 5
+    $script:afterMove = Daemon-Sessions
+    $script:windowsNow = App-Windows $ctx14.App.Id
+  }
+  Write-Host ("  moved id {0}; daemon: {1}" -f $moverId, (($afterMove | ForEach-Object { "$($_.id)(att=$($_.attached))" }) -join " ")) -ForegroundColor DarkGray
+  $moved = @($afterMove | Where-Object { $_.id -eq $moverId -and $_.attached -and $_.alive })
+  if ($moved.Count -eq 1) { Pass "the moved session is still alive and open" }
+  else { Fail "movetab" "the session did not survive being moved" }
+  # The window that lost it opens a fresh one rather than sitting empty,
+  # so a move that happened leaves three sessions where there were two.
+  # Without this the assertions above are also true of a move that never
+  # happened at all.
+  if ($afterMove.Count -ge 3) { Pass "and the window it left has a terminal of its own again" }
+  else {
+    Fail "movetab" "still $($afterMove.Count) sessions - the move did not happen"
+    $dump = Join-Path $outDir "menu-frames"
+    New-Item -ItemType Directory -Force $dump | Out-Null
+    $tabMenuShot.Save((Join-Path $dump "tab-menu.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+    Write-Host "  tab menu saved to $dump" -ForegroundColor DarkGray
+  }
+  $tabMenuShot.Dispose()
+  Stop-App $ctx14
+}
+
+# ══ scene: the hotkey means the window you were last in ═══════════════
+# With one window "the window" is a fact. With two it is a choice, and the
+# answer that needs no explaining is the one you were last using.
+if (-not $Only -or $Only -eq "lastfocused") {
+  $lfCfg = $baseCfg.Replace("Control+Alt+F9", "Control+Alt+F7")
+  $ctx15 = Start-App "{$lfCfg,`"default_shell`":`"pwsh`"}"
+  $h15 = $ctx15.Hwnd
+  Record-Scene "lastfocused" 34 $ctx15 {
+    Run-Cmd 'echo lastfocused-ready' 2
+    Key 0x4E @([byte]$VK_CTRL, [byte]$VK_SHIFT)
+    Start-Sleep -Seconds 9
+    $script:lfWins = App-Windows $ctx15.App.Id
+    $lfSecond = @($lfWins | Where-Object { $_ -ne $h15 })
+    # Focus the *first* window last, so it is the one the hotkey means.
+    [void]$U::SetForegroundWindow($h15)
+    Start-Sleep -Seconds 2
+    Release-Modifiers
+    $U::keybd_event(0x11,0,0,[UIntPtr]::Zero)
+    $U::keybd_event(0x12,0,0,[UIntPtr]::Zero)
+    $U::keybd_event(0x76,0,0,[UIntPtr]::Zero)       # Ctrl+Alt+F7
+    Start-Sleep -Milliseconds 80
+    $U::keybd_event(0x76,0,2,[UIntPtr]::Zero)
+    $U::keybd_event(0x12,0,2,[UIntPtr]::Zero)
+    $U::keybd_event(0x11,0,2,[UIntPtr]::Zero)
+    Start-Sleep -Seconds 4
+    $script:firstHidden = -not $U::IsWindowVisible($h15)
+    $script:secondStillUp = if ($lfSecond.Count) { $U::IsWindowVisible($lfSecond[0]) } else { $false }
+  }
+  if ($lfWins.Count -ge 2) { Pass "two windows to choose between" }
+  else { Fail "lastfocused" "the second window never opened" }
+  if ($firstHidden) { Pass "the hotkey puts away the window you were last in" }
+  else { Fail "lastfocused" "the hotkey did not hide the focused window" }
+  if ($secondStillUp) { Pass "and leaves the other one alone" }
+  else { Fail "lastfocused" "it took the other window with it" }
+  Stop-App $ctx15
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════

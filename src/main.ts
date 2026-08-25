@@ -44,6 +44,7 @@ import { visibilityReport } from "./controls";
 import { shouldSuggestThemes } from "./firstrun";
 import { storageKey, keysToClear, FIRST_WINDOW } from "./windows";
 import { retagKeyed, retagOrder } from "./retag";
+import { windowName, moveTargets } from "./windownames";
 import type { ControlRect } from "./controls";
 import { formatEvent, describeText, logLevel, shouldLog } from "./uilog";
 import type { UiEvent } from "./uilog";
@@ -4793,13 +4794,26 @@ async function showLogsFolder(button: HTMLButtonElement) {
   }
 }
 
+/// The windows this app has open, refreshed in the background.
+///
+/// The tab menu is built synchronously and cannot wait for an answer, so
+/// it reads the last one. A list that is a second stale offers a window
+/// that has just closed, and the move fails with a message rather than
+/// doing something wrong.
+let knownWindows: string[] = [];
+
+async function refreshWindowList() {
+  knownWindows = (await invoke<string[]>("window_labels").catch(() => [])) ?? [];
+}
+
 /// Another window onto the same daemon.
 ///
 /// Created from here rather than from Rust: WebviewWindow is the API
 /// built for it, and it resolves the app's own URL the way the first
 /// window's does instead of one assembled by hand.
 async function openAnotherWindow() {
-  const taken = new Set((await invoke<string[]>("window_labels").catch(() => [])) ?? []);
+  await refreshWindowList();
+  const taken = new Set(knownWindows);
   let n = 2;
   while (taken.has(`w${n}`)) n += 1;
   const label = `w${n}`;
@@ -5319,6 +5333,23 @@ function showTabContextMenu(x: number, y: number, id: number) {
   const current = groupState.assign[id];
   const items: CtxItem[] = [{ label: "Rename tab", action: () => renameTabAnywhere(id) }];
   items.push({ label: "Suggest title…", action: () => suggestTitles(id) });
+  // Moving a tab to another window. A drag would be the obvious gesture
+  // and is not available: two webviews share no drag context, so nothing
+  // dropped in one window is visible to the other.
+  //
+  // Listed only when there is somewhere to move it, since an option that
+  // does nothing is worse than an absent one.
+  for (const target of moveTargets(knownWindows, WINDOW_LABEL)) {
+    items.push({
+      label: `Move to ${windowName(target)}`,
+      action: () => {
+        logUi("session.move", { id, to: target });
+        void invoke("move_session", { id, to: target }).catch((err) =>
+          logUi("error", { message: `move to ${target}: ${String(err)}` })
+        );
+      },
+    });
+  }
   items.push({ label: "Set badge…", action: () => openBadgePicker(id) });
   if (customBadges[id]) {
     items.push({ label: "Reset badge to shell", action: () => clearBadge(id) });
@@ -8521,11 +8552,26 @@ async function main() {
     });
   }
 
+  // Another window asking this one to take a session. Attaching is the
+  // whole of it: the daemon hands it over and tells the window that had
+  // it, which drops its tab.
+  void listen<number>("adopt-session", (e) => {
+    const id = e.payload;
+    if (typeof id !== "number" || tabs.has(id)) return;
+    logUi("session.adopt", { id });
+    void (async () => {
+      await createTab(id, undefined, undefined, undefined, undefined, false);
+      void getCurrentWindow().setFocus();
+    })();
+  });
+
   // A second launch hands its arguments here and exits.
   void listen<string[]>("second-instance", (e) => {
     void openWorkspaceFromArgs(e.payload ?? []);
   });
   applyTabHideButton();
+  void refreshWindowList();
+  window.setInterval(() => void refreshWindowList(), 3000);
   void applySummonHotkey();
   // Arriving and leaving are both a fade of the window itself now, done
   // with layered-window alpha in lib.rs. Animating the page instead left

@@ -630,6 +630,21 @@ fn focused_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
         .or_else(|| app.webview_windows().into_values().next())
 }
 
+/// Ask another window to take a session.
+///
+/// Not a transfer this end performs: the target window attaches, the
+/// daemon hands the session over because the newest attach wins, and the
+/// window that had it is told and drops its tab. All of that already
+/// exists - moving a tab is just asking the other window to open it.
+#[tauri::command]
+fn move_session(app: AppHandle, id: u32, to: String) -> Result<(), String> {
+    if app.get_webview_window(&to).is_none() {
+        return Err(format!("no window {to}"));
+    }
+    app.emit_to(to.as_str(), "adopt-session", id)
+        .map_err(|e| e.to_string())
+}
+
 /// The labels already in use, so the frontend can pick a free one.
 #[tauri::command]
 fn window_labels(app: AppHandle) -> Vec<String> {
@@ -981,6 +996,7 @@ pub fn run() {
             log_ui,
             summon_toggle,
             window_labels,
+            move_session,
             write_session,
             resize_session,
             detach_session,

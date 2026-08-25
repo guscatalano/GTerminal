@@ -311,6 +311,21 @@ $ESC = [string][char]27
 # Ctrl+C against a *running* command, not a half-typed line. This is the
 # key experts hit most and the one the matrix above does not cover: it
 # has to reach the child process, stop it, and leave the shell usable.
+#
+# KNOWN: this fails on at least one developer machine and passes on every
+# CI runner. What was established there, so the next person does not
+# start from nothing:
+#
+#   - a native program (ping) *is* interrupted, so the keystroke reaches
+#     the console;
+#   - Start-Sleep is not, and behaves the same under pwsh 7.6.5 and
+#     Windows PowerShell 5.1 - so it is not a shell version;
+#   - nothing in this project's write path treats 0x03 specially: it is
+#     written to the pty like any other byte, and has been for months.
+#
+# The remaining suspect is the console input mode the shell leaves set
+# while a command runs - with processed input off, 0x03 arrives as a byte
+# rather than as an interrupt. Unproven.
 Type-Text "Start-Sleep -Seconds 30"
 Start-Sleep -Seconds 1
 $null = Drain 400
@@ -529,6 +544,13 @@ if ($frames.Length -gt 3000 -and $erases -ge 30) {
 } else {
   $failures += "tui-volume: three repaints came to only $($frames.Length) bytes / $erases erases"
 }
+# Not asserted: that the scrolling region was reset. ConPTY does not
+# forward what the program wrote - it keeps its own screen and emits its
+# own stream - so the program's [r never appears here, and looking for it
+# would be testing ConPTY's rendering rather than anything of ours. The
+# cursor mode below does come through, because ConPTY emits it itself.
+if ($frames.Contains("$esc[?25h")) { "PASS and gives the cursor back" }
+else { $failures += "tui-cursor: the cursor was left hidden" }
 if ($frames.Contains("$esc[?1049l")) { "PASS and it hands the screen back on exit" }
 else { $failures += "tui-restore: the alternate screen was never left" }
 Close-Shell $tui
