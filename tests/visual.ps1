@@ -508,6 +508,9 @@ if (-not $Only -or $Only -eq "pwsh") {
     Run-Cmd 'Get-ChildItem | Select-Object -First 4 Name, Length' 3
     # A failure, so the command-block mark has something to mark.
     Run-Cmd 'cmd /c exit 3' 2
+    # Arithmetic, so the output shares no text with what was typed: the
+    # only way to tell "the command ran" from "the characters appeared".
+    Run-Cmd 'echo (6*7)' 2
     # Multi-line: a for loop typed across two lines with a continuation.
     Run-Cmd '1..3 | ForEach-Object { "line $_" }' 3
     # Split, use the new pane, arrange, leave.
@@ -525,8 +528,20 @@ if (-not $Only -or $Only -eq "pwsh") {
     Start-Sleep -Seconds 2
     Key $VK_ESC
     Start-Sleep -Seconds 2
+    $script:pwshOut = Transcripts
   }
-  if ($U::IsWindowVisible($ctx.Hwnd)) { Pass "pwsh scene: the window came through it" }
+  # The scene was only ever asserting that a window existed. What it is
+  # actually for is that a shell ran what it was given: 42 from an
+  # expression that was never typed, a loop that produced three lines,
+  # and a second pane that is its own live session rather than a picture
+  # of one.
+  if ($pwshOut -match "42") { Pass "pwsh: a typed expression is evaluated, not just echoed" }
+  else { Fail "pwsh" "6*7 never produced 42 - the command did not run" }
+  if (($pwshOut -match "line 1") -and ($pwshOut -match "line 3")) { Pass "and a loop runs to completion" }
+  else { Fail "pwsh" "the ForEach-Object loop did not produce its lines" }
+  if ($pwshOut -match "second pane") { Pass "and a split pane is a live shell of its own" }
+  else { Fail "pwsh" "the second pane never ran anything" }
+  if ($U::IsWindowVisible($ctx.Hwnd)) { Pass "and the window came through it" }
   else { Fail "pwsh" "the window did not survive the scene" }
   Stop-App $ctx
 }
@@ -592,8 +607,18 @@ if (-not $Only -or $Only -eq "cmd") {
     Key 0x43 @([byte]$VK_CTRL)      # Ctrl+C
     Start-Sleep -Seconds 2
     Run-Cmd 'echo still alive' 3
+    $script:cmdOut = Transcripts
   }
-  if ($U::IsWindowVisible($ctx.Hwnd)) { Pass "cmd scene: the window came through it" }
+  if ($cmdOut -match "1235") { Pass "cmd: set /a is evaluated, not just echoed" }
+  else { Fail "cmd" "set /a 1234+1 never produced 1235" }
+  # Ctrl+C must abandon the line rather than run it. cmd would print the
+  # text if it ran, so its absence is the assertion - paired with a
+  # command afterwards, or "absent" would also be true of a dead shell.
+  if ($cmdOut -notmatch "this should never run") { Pass "and Ctrl+C abandons a half-typed line" }
+  else { Fail "cmd" "the abandoned line ran anyway" }
+  if ($cmdOut -match "still alive") { Pass "and the shell still works afterwards" }
+  else { Fail "cmd" "the shell was unusable after Ctrl+C" }
+  if ($U::IsWindowVisible($ctx.Hwnd)) { Pass "and the window came through it" }
   else { Fail "cmd" "the window did not survive the scene" }
   Stop-App $ctx
 }
