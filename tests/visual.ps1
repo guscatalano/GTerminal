@@ -602,20 +602,27 @@ if (-not $Only -or $Only -eq "cmd") {
     # A command that does not exist: cmd's error, and a block mark.
     Run-Cmd 'nosuchcommand-xyz' 2
     # Ctrl+C on a half-typed line: it must be abandoned, not run.
-    Send-Text 'echo this should never run'
+    #
+    # Arithmetic, because the transcript holds the *echo* of whatever was
+    # typed as well as anything it printed. "echo this should never run"
+    # is in the transcript either way, so its presence proves nothing;
+    # 24681 can only be there if the line ran.
+    Send-Text 'set /a 24680+1'
     Start-Sleep -Seconds 1
     Key 0x43 @([byte]$VK_CTRL)      # Ctrl+C
+    Start-Sleep -Seconds 1
+    Key $VK_RETURN                  # Enter on what must now be an empty line
     Start-Sleep -Seconds 2
     Run-Cmd 'echo still alive' 3
     $script:cmdOut = Transcripts
   }
   if ($cmdOut -match "1235") { Pass "cmd: set /a is evaluated, not just echoed" }
   else { Fail "cmd" "set /a 1234+1 never produced 1235" }
-  # Ctrl+C must abandon the line rather than run it. cmd would print the
-  # text if it ran, so its absence is the assertion - paired with a
-  # command afterwards, or "absent" would also be true of a dead shell.
-  if ($cmdOut -notmatch "this should never run") { Pass "and Ctrl+C abandons a half-typed line" }
-  else { Fail "cmd" "the abandoned line ran anyway" }
+  # The sum is the assertion: absent means the line never ran. Paired
+  # with a command afterwards, since "absent" is also true of a shell
+  # that died.
+  if ($cmdOut -notmatch "24681") { Pass "and Ctrl+C abandons a half-typed line" }
+  else { Fail "cmd" "the abandoned line ran anyway - 24681 is in the transcript" }
   if ($cmdOut -match "still alive") { Pass "and the shell still works afterwards" }
   else { Fail "cmd" "the shell was unusable after Ctrl+C" }
   if ($U::IsWindowVisible($ctx.Hwnd)) { Pass "and the window came through it" }
