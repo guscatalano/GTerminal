@@ -335,10 +335,24 @@ $ESC = [string][char]27
 #     nothing else;
 #   - there is no PowerShell profile on that machine to change any of it.
 #
-# So the remaining difference is the pty layer itself on that Windows
-# build (10.0.26200, pwsh 7.6.5) rather than anything this project does
-# with the byte. Unproven, and the next step would be driving portable-pty
-# directly, outside this daemon, to see whether it fails there too.
+# Three more things ruled out since, each by direct probe on that machine:
+#
+#   - it is not a regression. 0.6.0 built from its own tag fails exactly
+#     the same way as the current build, run side by side;
+#   - it is not the daemon's console. Spawning it detached the way the app
+#     does - CreateProcessW with DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB
+#     - fails identically to spawning it from a console session, which was
+#     the standing theory for why the app differs from this suite;
+#   - it is not the write path. The window sends exactly what this suite
+#     sends: term.onData hands the byte to write_session, with no special
+#     case for 0x03 anywhere between the keyboard and the pty.
+#
+# Which leaves an unresolved contradiction rather than a diagnosis. The
+# app is reported to interrupt a running command fine on the same machine
+# where every probe here says it cannot. Worth settling before theorising
+# further: what was interrupted there. Ctrl+C against a half-typed line
+# is cancelled by PSReadLine and works here too, and is what most people
+# mean when they say Ctrl+C works.
 Type-Text "Start-Sleep -Seconds 30"
 Start-Sleep -Seconds 1
 $null = Drain 400
