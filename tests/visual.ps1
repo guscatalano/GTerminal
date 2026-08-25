@@ -95,7 +95,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -250,9 +250,16 @@ function Capture-Window {
 # pixel is far more than enough to tell a full-screen repaint from a
 # blinking cursor.
 function Frame-Diff {
-  param($a, $b, $step = 8, $tolerance = 24)
+  # IgnoreBottom trims rows off the bottom of the comparison. The status
+  # bar lives there and carries a clock, CPU and memory, all of which move
+  # on their own every second. Left in, it lends every comparison a small
+  # constant change that has nothing to do with what was being tested -
+  # enough to pass an assertion about a few letters appearing on screen
+  # whether or not they appeared.
+  param($a, $b, $step = 8, $tolerance = 24, [int]$IgnoreBottom = 0)
   $w = [Math]::Min($a.Width, $b.Width)
-  $h = [Math]::Min($a.Height, $b.Height)
+  $h = [Math]::Min($a.Height, $b.Height) - $IgnoreBottom
+  if ($h -lt 1) { return 0.0 }
   $diff = 0
   $total = 0
   for ($y = 0; $y -lt $h; $y += $step) {
@@ -1433,6 +1440,101 @@ if (-not $Only -or $Only -eq "vim") {
     }
     foreach ($b in $vimShell, $vimOpen, $vimTyped, $vimGone) { $b.Dispose() }
     Stop-App $ctx16
+  }
+}
+
+# == scene: GitHub Copilot CLI ==========================================
+# The program the report was about is one of these: an agent CLI that owns
+# the screen and repaints it. vim proves the terminal can do full-screen
+# redraws at all; this proves it for the shape of program actually named,
+# a Node TUI with dialogs, a composer and a status line of its own.
+#
+# Signing in is not needed to test drawing, and is not attempted: what
+# arrives first is a dialog either way, and dialogs repaint. Skipped where
+# it is not installed, since a machine without it is not a broken terminal.
+if (-not $Only -or $Only -eq "copilot") {
+  $copilot = (Get-Command copilot -ErrorAction SilentlyContinue).Source
+  if (-not $copilot) {
+    Write-Host "  note: copilot CLI not installed, skipping" -ForegroundColor DarkYellow
+  } else {
+    $ctx17 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`"}"
+    $h17 = $ctx17.Hwnd
+    Record-Scene "copilot" 60 $ctx17 {
+      Run-Cmd 'echo before-copilot' 2
+      $script:cpShell = Capture-Window $h17
+      Run-Cmd "& '$copilot'" 0
+      Start-Sleep -Seconds 12
+      $script:cpStarted = Capture-Window $h17
+      # A control frame: the same wait with nothing sent. Whatever moves
+      # on its own moves here too, and input has to beat it.
+      Start-Sleep -Seconds 3
+      $script:cpIdle = Capture-Window $h17
+      # It opens on a folder-trust dialog, which takes arrows and Enter
+      # and ignores letters, so drive it the way it asks to be driven.
+      Key 0x28                        # Down
+      Start-Sleep -Seconds 2
+      $script:cpArrow = Capture-Window $h17
+      # Back to the first option before pressing anything. Down left the
+      # highlight on "Yes, and remember this folder for future sessions",
+      # and a test has no business making a lasting change to what the
+      # user's own copilot trusts. The first option is this session only.
+      Key 0x26                        # Up
+      Start-Sleep -Seconds 1
+      Key $VK_RETURN
+      Start-Sleep -Seconds 5
+      $script:cpOpen = Capture-Window $h17
+      # Type, but never submit: Enter would send a request on the user's
+      # account. Letters appearing in the composer are a redraw too, and
+      # only reachable on a machine that is signed in.
+      Send-Text "hello"
+      Start-Sleep -Seconds 3
+      $script:cpTyped = Capture-Window $h17
+      Key 0x43 @([byte]$VK_CTRL)
+      Start-Sleep -Seconds 1
+      Key 0x43 @([byte]$VK_CTRL)
+      Start-Sleep -Seconds 5
+      $script:cpGone = Capture-Window $h17
+    }
+    # A real program's text moves a small share of the pixels - vim's
+    # twelve lines came to 2% - so the fixture scene's thresholds do not
+    # belong here. The status bar is excluded from every comparison
+    # because its clock and CPU readout move on their own.
+    $floor = 0.001
+    $idle  = Frame-Diff $cpStarted $cpIdle -IgnoreBottom 40
+    $c1 = Frame-Diff $cpShell $cpStarted
+    if ($c1 -gt 0.01) { Pass "copilot takes the screen" }
+    else { Fail "copilot" ("the screen barely changed when it started ({0:p1})" -f $c1) }
+    $c2 = Frame-Diff $cpIdle $cpArrow -IgnoreBottom 40
+    if ($c2 -gt $floor -and $c2 -gt $idle) { Pass "and repaints when you drive it" }
+    else { Fail "copilot" ("an arrow key changed nothing on screen ({0:p2} against {1:p2} idle) - this is the reported symptom" -f $c2, $idle) }
+    # Letters reaching a composer prove the machine is signed in, which is
+    # what makes the screen before it a folder-trust dialog and Enter an
+    # answer to it. A signed-out runner gets a login screen instead, where
+    # Enter means something else entirely, so both of these are asserted
+    # only on the machine where they mean what they say - and reported
+    # either way, so a silent skip cannot pass for a pass.
+    $c3 = Frame-Diff $cpArrow $cpOpen -IgnoreBottom 40
+    $c4 = Frame-Diff $cpOpen $cpTyped -IgnoreBottom 40
+    $signedIn = $c4 -gt $floor -and $c4 -gt $idle
+    if ($signedIn) {
+      Pass "and letters land in its composer"
+      if ($c3 -gt $floor -and $c3 -gt $idle) { Pass "and redraws the screen behind a dismissed dialog" }
+      else { Fail "copilot" ("the dialog left no trace of being answered ({0:p2})" -f $c3) }
+    } else {
+      Write-Host ("  note: no composer to type into ({0:p2}) - signed out, so the dialog and composer checks are skipped" -f $c4) -ForegroundColor DarkYellow
+    }
+    Write-Host ("  changed: start {0:p1}, idle {1:p2}, arrow {2:p2}, dialog {3:p2}, letters {4:p2}, exit {5:p1}" -f $c1, $idle, $c2, $c3, $c4, (Frame-Diff $cpTyped $cpGone -IgnoreBottom 40)) -ForegroundColor DarkGray
+    if ($c1 -le 0.01 -or $c2 -le $idle -or ($signedIn -and $c3 -le $idle)) {
+      $dump = Join-Path $outDir "copilot-frames"
+      New-Item -ItemType Directory -Force $dump | Out-Null
+      $i = 0
+      foreach ($f in $cpShell, $cpStarted, $cpIdle, $cpArrow, $cpOpen, $cpTyped, $cpGone) {
+        $f.Save((Join-Path $dump "$i.png"), [System.Drawing.Imaging.ImageFormat]::Png); $i++
+      }
+      Write-Host "  frames saved to $dump" -ForegroundColor DarkGray
+    }
+    foreach ($b in $cpShell, $cpStarted, $cpIdle, $cpArrow, $cpOpen, $cpTyped, $cpGone) { $b.Dispose() }
+    Stop-App $ctx17
   }
 }
 

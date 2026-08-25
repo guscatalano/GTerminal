@@ -44,6 +44,14 @@ jobs:
       # A binary with the UI embedded. A plain `cargo build` points the
       # window at the vite dev server, which is not running here, and
       # every scene would fail against a blank window.
+      # A real agent TUI to point the copilot scene at. Not fatal if the
+      # registry is having a bad day: the scene skips itself when the
+      # binary is absent, and says so. The runner is not signed in, so
+      # that scene asserts only what holds without an account.
+      - name: Install GitHub Copilot CLI
+        continue-on-error: true
+        run: npm install -g @github/copilot
+
       - name: Build the app (UI embedded)
         run: npx tauri build --debug --no-bundle
 
