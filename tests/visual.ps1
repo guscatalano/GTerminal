@@ -95,7 +95,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "tui", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -984,6 +984,48 @@ if (-not $Only -or $Only -eq "clipboard") {
   if ($pastedByKey -match "PASTEKEY-13579") { Pass "and Ctrl+Shift+V pastes into the shell" }
   else { Fail "clip-paste" "the pasted text never reached the shell" }
   Stop-App $ctx9
+}
+
+# ══ scene: the clipboard history viewer ═══════════════════════════════
+# The third clipboard path, and the last one with no test: right-click →
+# "Clipboard history…" → Paste on an entry. It goes through pasteText
+# with its own source, and like the others it now reads the clipboard
+# through the app rather than the webview.
+#
+# Coordinates are derived rather than measured: the panel is 560px wide
+# and centred, the row's buttons sit at its right edge. The viewer is
+# photographed regardless, so a click that misses can be corrected from
+# the picture instead of from a guess.
+if (-not $Only -or $Only -eq "cliphist") {
+  $ctx10 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`"}"
+  $h10 = $ctx10.Hwnd
+  Record-Scene "cliphist" 30 $ctx10 {
+    Run-Cmd 'echo cliphist-ready' 2
+    # One entry only. With several, the menu grows "Paste: older" rows and
+    # every coordinate below moves - so the older-entry case is not
+    # covered here, deliberately.
+    Set-Clip 'echo HISTPASTE-97531' $h10
+    # No selection, so the menu is: Paste, separator, Clipboard history…,
+    # Select all. Rows are 28px apart and a separator adds 8.
+    Right-Click ($h10) 500 260
+    Start-Sleep -Seconds 1
+    Click ($h10) 560 316                 # "Clipboard history…"
+    Start-Sleep -Seconds 2
+    $script:viewer = Capture-Window $h10
+    Click ($h10) 882 386                 # first row's Paste button
+    Start-Sleep -Seconds 2
+    Key $VK_RETURN
+    Start-Sleep -Seconds 4
+    $script:histOut = Transcripts
+  }
+  if ($histOut -match "HISTPASTE-97531") { Pass "pasting from the clipboard history reaches the shell" }
+  else { Fail "cliphist" "nothing arrived - the viewer may not have opened, or Paste was not where it was clicked" }
+  $dump = Join-Path $outDir "clip-frames"
+  New-Item -ItemType Directory -Force $dump | Out-Null
+  $viewer.Save((Join-Path $dump "viewer.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+  $viewer.Dispose()
+  Write-Host "  viewer saved to $dump" -ForegroundColor DarkGray
+  Stop-App $ctx10
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════
