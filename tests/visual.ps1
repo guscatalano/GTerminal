@@ -1571,7 +1571,11 @@ if (-not $Only -or $Only -eq "copilot") {
       if ($c3 -gt $floor -and $c3 -gt $idle) { Pass "and redraws the screen behind a dismissed dialog" }
       else { Fail "copilot" ("the dialog left no trace of being answered ({0:p2})" -f $c3) }
     } elseif (-not $skipCopilot) {
-      Write-Host ("  note: no composer to type into ({0:p2}) - signed out, so the dialog and composer checks are skipped" -f $c4) -ForegroundColor DarkYellow
+      # Both numbers, and no claim about which. On a signed-out runner
+      # letters moved 6.5% of the screen while arrows moved nothing, and
+      # an earlier version of this note called that "no composer to type
+      # into" - which read as a failure to draw when it was the opposite.
+      Write-Host ("  note: signed-out layout (arrow {0:p2}, letters {1:p2}) - the dialog and composer checks need an account, so they are skipped" -f $c2, $c4) -ForegroundColor DarkYellow
     }
     # What a real TUI's control sequences look like after ConPTY has been
     # through them. Printed, never asserted - it is a diagnostic, and the
