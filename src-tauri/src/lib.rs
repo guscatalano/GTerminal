@@ -445,6 +445,44 @@ fn set_window_alpha(win: &tauri::WebviewWindow, alpha: u8) {
     }
 }
 
+/// Stop the window being layered.
+///
+/// WS_EX_LAYERED is how the fade works, and it is not free: a layered
+/// window is composited down a different path, which for a WebView2
+/// window showing a terminal means redraws that were free are no longer
+/// free. Left set — which is what happened, since the style was applied
+/// on the first fade and never removed — every keystroke after the first
+/// summon pays for an animation that finished long ago.
+///
+/// So it goes back off the moment the fade is done. The window spends
+/// microseconds layered per hide, instead of the rest of its life.
+#[cfg(windows)]
+fn clear_window_layer(win: &tauri::WebviewWindow) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, SWP_FRAMECHANGED,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_LAYERED,
+    };
+    let Ok(hwnd) = win.hwnd() else { return };
+    let h = hwnd.0 as *mut core::ffi::c_void;
+    unsafe {
+        let ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
+        if ex & (WS_EX_LAYERED as isize) == 0 {
+            return;
+        }
+        SetWindowLongPtrW(h, GWL_EXSTYLE, ex & !(WS_EX_LAYERED as isize));
+        // The style change needs a frame change to be picked up.
+        SetWindowPos(
+            h,
+            std::ptr::null_mut(),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        );
+    }
+}
+
 #[cfg(windows)]
 fn fade(win: &tauri::WebviewWindow, appearing: bool) {
     for i in 0..=FADE_STEPS {
@@ -475,7 +513,10 @@ fn leave(win: &tauri::WebviewWindow, app: &AppHandle) {
             // Summoned while it was on its way out. Undo the fade rather
             // than the summon.
             #[cfg(windows)]
-            set_window_alpha(&win, 255);
+            {
+                set_window_alpha(&win, 255);
+                clear_window_layer(&win);
+            }
             return;
         }
         let _ = win.hide();
@@ -483,7 +524,10 @@ fn leave(win: &tauri::WebviewWindow, app: &AppHandle) {
         // a second instance, the hotkey with the animation since turned
         // off — must never get a window that is still transparent.
         #[cfg(windows)]
-        set_window_alpha(&win, 255);
+        {
+            set_window_alpha(&win, 255);
+            clear_window_layer(&win);
+        }
         let _ = apply_tray_text(&handle);
     });
 }
@@ -526,8 +570,10 @@ fn summon(app: &AppHandle) {
             let w = win.clone();
             std::thread::spawn(move || {
                 fade(&w, true);
-                // Land exactly on opaque, whatever the arithmetic did.
+                // Land exactly on opaque, whatever the arithmetic did,
+                // and then stop paying for the layer.
                 set_window_alpha(&w, 255);
+                clear_window_layer(&w);
             });
         }
     }
