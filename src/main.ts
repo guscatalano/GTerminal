@@ -42,7 +42,7 @@ import type { DaemonInfo } from "./daemon";
 import { activates } from "./menus";
 import { visibilityReport } from "./controls";
 import { shouldSuggestThemes } from "./firstrun";
-import { storageKey, keysToClear } from "./windows";
+import { storageKey, keysToClear, FIRST_WINDOW } from "./windows";
 import type { ControlRect } from "./controls";
 import { formatEvent, describeText, logLevel, shouldLog } from "./uilog";
 import type { UiEvent } from "./uilog";
@@ -8498,11 +8498,20 @@ async function main() {
   // "gterm-layouts::w7" outlives every window that ever existed and the
   // store fills with the tab arrangements of windows nobody remembers.
   // Only its own keys: never a global one, never another window's.
-  void getCurrentWindow().onCloseRequested(() => {
-    for (const key of keysToClear(Object.keys(localStorage), WINDOW_LABEL)) {
-      localStorage.removeItem(key);
-    }
-  });
+  //
+  // Only for windows opened later. Registering it on the first window
+  // breaks closing it: Tauri's onCloseRequested prevents the close and
+  // then destroys the window, which overrides hiding to the tray - the
+  // window does not come back, and the summon hotkey has nothing left to
+  // summon. The first window has nothing to clear anyway; its keys are
+  // what start-up reads.
+  if (WINDOW_LABEL !== FIRST_WINDOW) {
+    void getCurrentWindow().onCloseRequested(() => {
+      for (const key of keysToClear(Object.keys(localStorage), WINDOW_LABEL)) {
+        localStorage.removeItem(key);
+      }
+    });
+  }
 
   // A second launch hands its arguments here and exits.
   void listen<string[]>("second-instance", (e) => {
