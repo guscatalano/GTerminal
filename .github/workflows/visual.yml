@@ -5,17 +5,17 @@ name: Visual
 # to run on the machine you are working at - it types into whatever you
 # have open - so it belongs on a runner instead.
 #
-# Not on every push: it takes ten minutes and it is the only suite here
-# that can be flaky, since it depends on a window appearing and a shell
-# starting. Nightly, plus on demand, plus on tags so a release is not cut
-# without it.
+# Not on every push: it takes twenty minutes and it is the only suite
+# here that depends on a window appearing and a shell starting. Nightly,
+# on demand, and called by the release pipeline - which will not publish
+# without it, so a tag runs it exactly once.
 
 on:
   workflow_dispatch:
+  # Called by the release pipeline, which will not publish without it.
+  workflow_call:
   schedule:
     - cron: "0 7 * * *"
-  push:
-    tags: ['v*']
 
 permissions:
   contents: read

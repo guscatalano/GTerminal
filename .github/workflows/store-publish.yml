@@ -22,7 +22,47 @@ permissions:
   contents: read
 
 jobs:
+  # Nothing was stopping a broken build reaching the Store. The GitHub
+  # release is gated on the test job in ci.yml, but this pipeline had no
+  # tests in it at all and no dependency on that one - so on v0.7.0 the
+  # test job failed and the Store publish succeeded anyway, from the same
+  # tag, minutes apart.
+  tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Typecheck frontend
+        run: npx tsc --noEmit
+
+      - name: Build daemon (debug, used by E2E suites)
+        run: cargo build --manifest-path src-tauri/Cargo.toml
+
+      - name: Every suite that does not need a screen
+        run: npm test
+
+  # And the ones that do. A release that ships a window which cannot
+  # redraw is exactly what went out in 0.7.0 and 0.8.0, and the scenes
+  # are the only thing that would have caught it.
+  visual:
+    uses: ./.github/workflows/visual.yml
+
   package:
+    needs: [tests, visual]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
