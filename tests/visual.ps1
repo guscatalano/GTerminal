@@ -69,6 +69,20 @@ function Fail { param($n, $d) $script:failures += "${n}: $d"; Write-Host "FAIL $
 . "$PSScriptRoot\lib\attended.ps1"
 Assert-Unattended -Force:$Force -What "The visual suite"
 
+# A locked workstation cannot be driven, and fails in a way that reads as
+# a broken app. Synthetic keystrokes go to the secure desktop while
+# PrintWindow still captures the window perfectly, so every scene reports
+# the same thing: the window is there, and nothing you typed ever ran.
+# That is indistinguishable from a terminal that draws but ignores input,
+# which is a real bug this suite exists to catch - so it has to say which
+# one it is looking at rather than leaving someone to guess.
+if (Get-Process LogonUI -ErrorAction SilentlyContinue) {
+  Write-Host "The workstation is locked. Synthetic input goes to the lock screen," -ForegroundColor Red
+  Write-Host "so every scene here would fail for a reason that is not the app's." -ForegroundColor Red
+  Write-Host "Sign in and run it again." -ForegroundColor Red
+  exit 2
+}
+
 # This test takes the foreground and types into whatever has focus. If
 # someone is using the machine, their typing lands in the recording and
 # the test's keystrokes land in their work — both ruined, with no warning

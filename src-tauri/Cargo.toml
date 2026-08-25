@@ -1,5 +1,8 @@
 [package]
 name = "gterminal"
+# Not the version anyone sees. What ships is tauri.conf.json's version,
+# which build.rs reads and exposes as GTERMINAL_VERSION - use that.
+# These were out of step for months, and the code reported this one.
 version = "0.2.0"
 description = "A lightweight terminal for Windows"
 authors = ["Gus Catalano"]
