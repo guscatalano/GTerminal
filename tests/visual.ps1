@@ -241,6 +241,31 @@ function Wait-Drawn {
   $frame
 }
 
+function Click-Effective {
+  # Clicks, then checks the screen changed, and clicks again if it did
+  # not. Returns whether it ever took.
+  #
+  # Every restore scene clicks fixed coordinates after a fixed wait, and
+  # on a slow runner the dialog is not up yet when the wait expires. The
+  # click lands on nothing, the scene carries on, and the *next* click -
+  # aimed at a button whose label depends on the first one having worked -
+  # does something entirely different. That is how "None, then Restore 0"
+  # became "Restore 5", reported as five sessions coming back when the app
+  # had done exactly what it was told.
+  param($hwnd, [int]$x, [int]$y, [int]$tries = 3, [double]$floor = 0.001, [int]$settleMs = 1200)
+  for ($i = 1; $i -le $tries; $i++) {
+    $before = Capture-Window $hwnd
+    Click $hwnd $x $y
+    Start-Sleep -Milliseconds $settleMs
+    $after = Capture-Window $hwnd
+    $moved = Frame-Diff $before $after -IgnoreBottom 40
+    $before.Dispose(); $after.Dispose()
+    if ($moved -gt $floor) { $script:LastClickTries = $i; return $true }
+  }
+  $script:LastClickTries = $tries
+  $false
+}
+
 function Wait-Settled {
   # Waits until the window stops changing on its own, and hands back the
   # frame it settled on.
@@ -775,8 +800,13 @@ if (-not $Only -or $Only -eq "switch") {
     # rows are plain divs, and the tab bar is display:none while it is on,
     # so this is a different click path from the one above, not a repeat.
     Key 0x42 @([byte]$VK_CTRL, [byte]$VK_SHIFT)    # Ctrl+Shift+B
-    Start-Sleep -Seconds 2
-    Click ($sh) 100 47                             # first row, on its label
+    # Wait for the sidebar to finish opening rather than for two seconds.
+    # A click that lands before it is there goes to the terminal instead,
+    # and the marker typed afterwards arrives in whichever session was
+    # already focused - reported as the sidebar row never being reached,
+    # which is true but is the test's doing.
+    $null = Wait-Settled ($sh) 20
+    $script:sideClicked = Click-Effective ($sh) 100 47    # first row, on its label
     Send-Text "echo XXTOP"
     Key $VK_RETURN
     Start-Sleep -Seconds 3
@@ -812,7 +842,8 @@ if (-not $Only -or $Only -eq "switch") {
     else { Fail "switch-key" "the Ctrl+Tab marker never arrived" }
     # The sidebar click sent focus back to the first tab, so re-read it.
     $t3 = Get-Content $firstTab -Raw
-    if ($t3 -match "XXTOP") { Pass "and survives a click on a sidebar row" }
+    if (-not $sideClicked) { Fail "switch-side" "the sidebar row never took a click - the marker below proves nothing" }
+    elseif ($t3 -match "XXTOP") { Pass "and survives a click on a sidebar row" }
     elseif ($t3 -match "XTOP") { Fail "switch-side" "the leading X was dropped after clicking the sidebar" }
     else { Fail "switch-side" "the sidebar marker never reached the row that was clicked" }
   }
@@ -904,13 +935,19 @@ if (-not $Only -or $Only -eq "restore-zero") {
   $seed = Seed-Daemon 5 $cfg
   $ctx4 = Start-AppSeeded $seed
   $hw4 = $ctx4.Hwnd
-  Record-Scene "restore-zero" 26 $ctx4 {
-    Start-Sleep -Seconds 4
-    Click $hw4 798 556             # None — unticks every row
-    Start-Sleep -Seconds 2
-    Click $hw4 895 556             # the button, now reading "Restore 0"
+  Record-Scene "restore-zero" 40 $ctx4 {
+    # Wait for the dialog to be up and still, rather than for four
+    # seconds and a hope. The second click below aims at a button whose
+    # label depends on the first click having landed, so a missed first
+    # click does not fail here - it quietly presses "Restore 5".
+    $null = Wait-Settled $hw4 30
+    $script:zeroNone = Click-Effective $hw4 798 556    # None - unticks every row
+    Start-Sleep -Seconds 1
+    $script:zeroGo = Click-Effective $hw4 895 556      # the button, now "Restore 0"
     Start-Sleep -Seconds 10
   }
+  if (-not $zeroNone) { Fail "restore-zero" "the None button never took - nothing below this was tested" }
+  if (-not $zeroGo) { Fail "restore-zero" "the Restore button never took - nothing below this was tested" }
   $now4 = Daemon-Sessions
   $back = @($now4 | Where-Object { $seed.Ids -contains $_.id -and $_.attached })
   if ($back.Count -eq 0) { Pass "None then Restore 0 restores nothing" }
