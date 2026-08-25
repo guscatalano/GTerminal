@@ -10,6 +10,10 @@ export interface RestorableSession {
   created_ms: number;
   /// Set while a killed session is in its grace window.
   expires_ms?: number | null;
+  /// Whether some window already has this session open. The daemon
+  /// allows one attacher at a time, so adopting one takes it from
+  /// whoever has it.
+  attached?: boolean;
 }
 
 /// Which list a session belongs in.
@@ -45,12 +49,18 @@ export function sessionState(
 
 /// Sessions worth reopening as tabs.
 ///
-/// Two exclusions, and both matter. A session in its grace window was
+/// Three exclusions, and each matters. A session in its grace window was
 /// *closed* by the user — attaching cancels the pending kill, so adopting
 /// one would resurrect every tab they had just closed, every restart.
 /// A hidden session was parked deliberately and should stay parked.
+///
+/// And a session another window already has open is not this window's to
+/// take. The daemon permits one attacher and honours the newest, so
+/// adopting one does not fail — it succeeds, and the other window watches
+/// its terminal disappear. That is the failure multi-window turns from a
+/// theoretical concern into the first thing that would happen.
 export function adoptable<T extends RestorableSession>(sessions: T[], hidden: Set<number>): T[] {
-  return sessions.filter((s) => !s.expires_ms && !hidden.has(s.id));
+  return sessions.filter((s) => !s.expires_ms && !hidden.has(s.id) && !s.attached);
 }
 
 /// The user's last tab order, with anything new at the end. Ties break on

@@ -683,6 +683,33 @@ foreach ($k in @($keep, $rz)) {
 }
 
 
+# ── a session moves between windows ──
+# One attacher at a time, newest wins: that is what makes a second window
+# safe, since a session is never shared - it is somewhere. The window
+# that had it must be told, or it keeps a tab that will never speak
+# again and looks hung.
+$moved = (Request2 $port '{"cmd":"create","cols":80,"rows":24}').id
+$first = New-Conn $port
+$first.Writer.WriteLine("{""cmd"":""attach"",""id"":$moved}")
+$null = Read-Line2 $first
+$null = Drain2 $first 600
+$second = New-Conn $port
+$second.Writer.WriteLine("{""cmd"":""attach"",""id"":$moved}")
+$okSecond = Read-Line2 $second
+if (($okSecond | ConvertFrom-Json).ok -eq $true) { Pass "a second window may take a session" }
+else { Fail "handover" "the second attach was refused: $okSecond" }
+$told = Drain2 $first 2000
+if ($told -match '"ev":"taken"') { Pass "and the first is told it lost it" }
+else { Fail "handover" "the displaced client was never told: $($told -replace '\s+', ' ')" }
+# The session itself is untouched by the move.
+$still = @(Get-Sessions $port | Where-Object { $_.id -eq $moved -and $_.alive })
+if ($still.Count -eq 1) { Pass "and the session itself is unharmed" }
+else { Fail "handover" "the session did not survive being handed over" }
+try { $first.Client.Close() } catch {}
+try { $second.Client.Close() } catch {}
+$null = Request2 $port "{""cmd"":""kill"",""id"":$moved}"
+try { $null = Request2 $port "{""cmd"":""kill"",""id"":$moved}" 0 } catch {}
+
 # ── the daemon says who it is ──
 # The daemon outlives the app that started it, so an update leaves a new
 # window talking to the previous release's daemon. Without these fields
@@ -690,7 +717,7 @@ foreach ($k in @($keep, $rz)) {
 # old to answer" — see docs/daemon-protocol.md.
 $hello = Request2 $port '{"cmd":"list"}'
 $proto = 0
-if ($null -ne $hello.protocol -and [int]::TryParse([string]$hello.protocol, [ref]$proto) -and $proto -ge 1) {
+if ($null -ne $hello.protocol -and [int]::TryParse([string]$hello.protocol, [ref]$proto) -and $proto -ge 2) {
   Pass "list reports a protocol number"
 } else { Fail "protocol" "no protocol in the list reply: $($hello.protocol)" }
 if ($hello.version -match '^\d+\.\d+\.\d+$') { Pass "and the version it is running" }

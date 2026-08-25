@@ -45,8 +45,10 @@ check(
   check("a second window clears only its own", keysToClear(all, "w2").sort(), ["gterm-layouts::w2", "gterm-order::w2"]);
   check("and never a global key", keysToClear(all, "w2").includes("gterm-titles"), false);
   check("nor another window's", keysToClear(all, "w2").includes("gterm-order::w3"), false);
-  check("the first window clears the unsuffixed ones", keysToClear(all, FIRST_WINDOW).sort(), ["gterm-layouts", "gterm-order"]);
-  check("and leaves global state alone", keysToClear(all, FIRST_WINDOW).includes("gterm-hidden"), false);
+  // The first window's keys are not a leak: they are what start-up reads
+  // to put the tabs back. Clearing them on close would make closing the
+  // app the same as discarding the layout.
+  check("the first window clears nothing", keysToClear(all, FIRST_WINDOW), []);
 }
 
 check("layouts are per window", isPerWindow("gterm-layouts"), true);

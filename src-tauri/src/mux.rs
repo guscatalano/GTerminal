@@ -139,7 +139,9 @@ class GTermPredictor : System.Management.Automation.Subsystem.Prediction.IComman
 /// 1: `peek` (read a session's scrollback without resurrecting it), and
 ///    the first version to report this number at all. A daemon that
 ///    reports nothing is older than this.
-pub const PROTOCOL: u32 = 1;
+/// 2: `{"ev":"taken"}` to a client whose session another window has just
+///    attached to.
+pub const PROTOCOL: u32 = 2;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
@@ -1114,6 +1116,15 @@ fn conn_loop(
                         write_line(&mut out, &json!({"ok": true}))?;
                         let replay = String::from_utf8_lossy(&s.ring).into_owned();
                         write_line(&mut out, &json!({"ev": "data", "data": replay}))?;
+                        // One attacher at a time, and the newest wins - a
+                        // session moves between windows rather than being
+                        // shared. Whoever had it is told, instead of
+                        // simply never hearing from it again: silence
+                        // looks identical to a session that has hung, and
+                        // the window would keep a dead tab for it.
+                        if let Some((_, mut old)) = s.attached.take() {
+                            let _ = write_line(&mut old, &json!({"ev": "taken"}));
+                        }
                         s.attached = Some((conn_id, out.try_clone()?));
                         *attached_id = Some(id);
                     }

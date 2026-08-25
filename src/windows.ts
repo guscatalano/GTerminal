@@ -28,9 +28,13 @@ export function storageKey(key: string, label: string): string {
 /// Everything a closing window should take with it. Never a global key,
 /// never another window's — a window closing must not tidy away the tab
 /// order of one still open.
+///
+/// And never the first window's, which is not a leak but the thing the
+/// restore feature reads on the next start: closing the app must not be
+/// the same as discarding your layout.
 export function keysToClear(allKeys: string[], label: string): string[] {
   if (label === FIRST_WINDOW) {
-    return allKeys.filter((k) => PER_WINDOW.has(k));
+    return [];
   }
   const suffix = `::${label}`;
   return allKeys.filter((k) => k.endsWith(suffix) && PER_WINDOW.has(k.slice(0, -suffix.length)));

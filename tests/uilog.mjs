@@ -1,6 +1,6 @@
 // The UI event log's shape and its redaction.
 // Run: node tests/uilog.mjs
-import { formatEvent, describeText } from "../src/uilog.ts";
+import { formatEvent, describeText, logLevel, shouldLog } from "../src/uilog.ts";
 
 let failed = 0;
 function check(name, got, want) {
@@ -32,6 +32,26 @@ check("empty text has no lines", describeText(""), { chars: 0, lines: 0 });
   check("the text itself never appears", line.includes("hunter2"), false);
   check("but its size does", JSON.parse(line).chars, 7);
 }
+
+// ── what gets recorded at which level ──────────────────────────────────
+// Errors by default: an exception says nothing about what was typed or
+// copied, and is the most useful line in the file.
+check("errors are recorded by default", shouldLog("error", logLevel(undefined)), true);
+check("and so are rejected promises", shouldLog("error.promise", logLevel(undefined)), true);
+check("but menus are not", shouldLog("menu.open", logLevel(undefined)), false);
+check("nor pastes", shouldLog("paste", logLevel(undefined)), false);
+// Asked for everything, everything is recorded.
+check("full records a paste", shouldLog("paste", logLevel("full")), true);
+check("full records an error too", shouldLog("error", logLevel("full")), true);
+// Off means off, including errors: someone who turned it off meant it.
+check("off records nothing", shouldLog("error", logLevel("off")), false);
+check("off really means nothing", shouldLog("menu.open", logLevel("off")), false);
+// The setting used to be a boolean, and configs written then still exist.
+check("the old true means full", logLevel(true), "full");
+check("the old false means off", logLevel(false), "off");
+check("anything unrecognised falls back to errors", logLevel("nonsense"), "errors");
+// A name that merely starts with the word must not sneak through.
+check("errorless is not an error", shouldLog("errorless.thing", logLevel(undefined)), false);
 
 if (failed) {
   console.log(`${failed} uilog test(s) failed`);

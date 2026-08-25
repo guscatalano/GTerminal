@@ -70,6 +70,14 @@ fn attach_internal(app: &AppHandle, state: &PtyManager, id: u32) -> Result<(), S
                             let _ = app.emit("pty-exit", PtyExit { id });
                             return;
                         }
+                        // Another window took this session. It is alive
+                        // and well somewhere else, so this is not an
+                        // exit: the tab goes, the session does not.
+                        Some("taken") => {
+                            attached.lock().unwrap().remove(&id);
+                            let _ = app.emit("pty-taken", PtyExit { id });
+                            return;
+                        }
                         _ => {}
                     }
                 }
@@ -545,7 +553,7 @@ fn animate() -> bool {
 /// can see but cannot type into still needs raising.
 fn summon(app: &AppHandle) {
     SUMMON_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    if let Some(win) = app.get_webview_window("main") {
+    if let Some(win) = focused_window(app) {
         if win.is_minimized().unwrap_or(false) {
             let _ = win.unminimize();
         }
@@ -579,6 +587,76 @@ fn summon(app: &AppHandle) {
     }
 }
 
+/// The window the summon hotkey and the tray mean.
+///
+/// With more than one window open, "the window" stops being a fact and
+/// becomes a choice. The last one focused is the answer that needs no
+/// explaining - it is the one you were just using - and it degrades
+/// correctly: with a single window it is always that window.
+static LAST_FOCUSED: Mutex<Option<String>> = Mutex::new(None);
+
+fn focused_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
+    let label = LAST_FOCUSED.lock().unwrap().clone();
+    label
+        .and_then(|l| app.get_webview_window(&l))
+        .or_else(|| app.get_webview_window("main"))
+        .or_else(|| app.webview_windows().into_values().next())
+}
+
+/// Open another window onto the same daemon.
+///
+/// Sessions are not duplicated: each window attaches to its own, and the
+/// daemon hands a session to whoever attached last. What a window owns is
+/// its layout - see docs/multi-window.md.
+#[tauri::command]
+fn new_window(app: AppHandle) -> Result<String, String> {
+    // Labels must be unique and stable for the life of the window; the
+    // frontend keys its layout off this one.
+    let mut n = 2;
+    while app.get_webview_window(&format!("w{n}")).is_some() {
+        n += 1;
+    }
+    let label = format!("w{n}");
+    let url = tauri::WebviewUrl::App("index.html".into());
+    let win = tauri::WebviewWindowBuilder::new(&app, &label, url)
+        .title("GTerminal")
+        .inner_size(1100.0, 720.0)
+        .min_inner_size(400.0, 300.0)
+        .decorations(false)
+        .background_color(tauri::window::Color(13, 17, 23, 255))
+        .build()
+        .map_err(|e| e.to_string())?;
+    watch_window(&win, &app);
+    Ok(label)
+}
+
+/// Wire a window up: remember it when focused, and decide what closing
+/// means. Closing the last window hides to the tray, which is what keeps
+/// the summon hotkey worth having; closing any other simply closes it.
+fn watch_window(win: &tauri::WebviewWindow, app: &AppHandle) {
+    let label = win.label().to_string();
+    let handle = app.clone();
+    let me = win.clone();
+    win.on_window_event(move |event| match event {
+        tauri::WindowEvent::Focused(true) => {
+            *LAST_FOCUSED.lock().unwrap() = Some(label.clone());
+        }
+        tauri::WindowEvent::CloseRequested { api, .. } => {
+            let last = handle.webview_windows().len() <= 1;
+            if last && close_hides() {
+                api.prevent_close();
+                if animate() {
+                    leave(&me, &handle);
+                } else {
+                    let _ = me.hide();
+                    let _ = apply_tray_text(&handle);
+                }
+            }
+        }
+        _ => {}
+    });
+}
+
 /// Is this window the one the user is looking at?
 ///
 /// Asked of the OS rather than of Tauri's `is_focused`, which answers for
@@ -601,7 +679,7 @@ fn is_foreground(win: &tauri::WebviewWindow) -> bool {
 /// gets wrong.
 #[tauri::command]
 fn summon_toggle(app: AppHandle) {
-    let Some(win) = app.get_webview_window("main") else {
+    let Some(win) = focused_window(&app) else {
         return;
     };
     let visible = win.is_visible().unwrap_or(false);
@@ -782,21 +860,7 @@ pub fn run() {
                 // Closing hides by default rather than ending the process,
                 // which is what keeps the summon hotkey alive. Sessions were
                 // never at stake either way — they live in the daemon.
-                let closing = win.clone();
-                let handle = app.handle().clone();
-                win.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        if close_hides() {
-                            api.prevent_close();
-                            if animate() {
-                                leave(&closing, &handle);
-                            } else {
-                                let _ = closing.hide();
-                                let _ = apply_tray_text(&handle);
-                            }
-                        }
-                    }
-                });
+                watch_window(&win, &app.handle().clone());
                 // Turn off Edge's accelerator keys. WebView2 leaves them on
                 // by default, which in a terminal means Ctrl+F opens
                 // find-on-page over ours, Ctrl+P offers to print the app,
@@ -867,6 +931,7 @@ pub fn run() {
             logs_path,
             log_ui,
             summon_toggle,
+            new_window,
             write_session,
             resize_session,
             detach_session,

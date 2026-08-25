@@ -41,8 +41,9 @@ import type { DaemonInfo } from "./daemon";
 import { activates } from "./menus";
 import { visibilityReport } from "./controls";
 import { shouldSuggestThemes } from "./firstrun";
+import { storageKey, keysToClear } from "./windows";
 import type { ControlRect } from "./controls";
-import { formatEvent, describeText } from "./uilog";
+import { formatEvent, describeText, logLevel, shouldLog } from "./uilog";
 import type { UiEvent } from "./uilog";
 import { BlockTracker } from "./blocks";
 import type { Block } from "./blocks";
@@ -177,11 +178,9 @@ interface AppConfig {
   close_action?: string;
   summon_animation?: string;
   restore_prompt?: boolean;
-  /// Record what the window does (menus, pastes, uncaught errors) to
-  /// ui.log. Off unless asked for: a terminal writing down what you did
-  /// with it, by default, is not a trade anyone agreed to — even when
-  /// the file never leaves the machine and holds no clipboard contents.
-  ui_log?: boolean;
+  /// How much goes to ui.log: "off", "errors" (the default) or "full".
+  /// Booleans from older configs still mean what they meant.
+  ui_log?: boolean | "off" | "errors" | "full";
   /// Set once the first-run theme hint has been shown — or once an
   /// existing install has been marked as not needing it. Never unset.
   themes_hint_shown?: boolean;
@@ -329,6 +328,24 @@ function expirySuffix(s: SessionInfo): string {
   return s.expires_ms ? ` · closes in ${minutesLeft(s.expires_ms)}m` : s.alive ? "" : " · ended";
 }
 
+/// This window's label, and the storage that respects it.
+///
+/// Two windows share one origin and therefore one localStorage. What is
+/// on screen *here* — tab order, pane layouts, split names, tab widths —
+/// must not be written to the same key as another window's, or whichever
+/// saves last silently wins. Which keys those are lives in windows.ts,
+/// with the tests. The first window keeps the plain keys, so an existing
+/// install opens exactly as it did.
+const WINDOW_LABEL = getCurrentWindow().label;
+
+function lsGet(key: string): string | null {
+  return localStorage.getItem(storageKey(key, WINDOW_LABEL));
+}
+
+function lsSet(key: string, value: string) {
+  localStorage.setItem(storageKey(key, WINDOW_LABEL), value);
+}
+
 const tabs = new Map<number, Tab>();
 // Output that arrives for a session before its tab is registered (the shell's
 // first prompt or the attach replay can beat the invoke resolving).
@@ -349,34 +366,34 @@ const sidebarList = document.getElementById("sidebar-list")!;
 // Sessions the user parked with "hide" — detached in the daemon but shown
 // as pills (or a chip) in the tab bar. Persisted across restarts.
 const hidden = new Set<number>(
-  JSON.parse(localStorage.getItem("gterm-hidden") ?? "[]") as number[]
+  JSON.parse(lsGet("gterm-hidden") ?? "[]") as number[]
 );
 function saveHidden() {
-  localStorage.setItem("gterm-hidden", JSON.stringify([...hidden]));
+  lsSet("gterm-hidden", JSON.stringify([...hidden]));
 }
 
 // Session ids reset when the daemon restarts, so stale entries are harmless.
 const titles: Record<string, string> = JSON.parse(
-  localStorage.getItem("gterm-titles") ?? "{}"
+  lsGet("gterm-titles") ?? "{}"
 );
 function saveTitle(id: number, title: string) {
   titles[id] = title;
-  localStorage.setItem("gterm-titles", JSON.stringify(titles));
+  lsSet("gterm-titles", JSON.stringify(titles));
 }
 
 // User-given names win over shell-reported titles and never get overwritten.
 const customTitles: Record<string, string> = JSON.parse(
-  localStorage.getItem("gterm-names") ?? "{}"
+  lsGet("gterm-names") ?? "{}"
 );
 function saveCustomTitles() {
-  localStorage.setItem("gterm-names", JSON.stringify(customTitles));
+  lsSet("gterm-names", JSON.stringify(customTitles));
 }
 
 // User-chosen badges: up to 3 per session (short text or emoji) replace
 // the automatic shell badge. Older single-string entries migrate to
 // one-element arrays on load.
 const customBadges: Record<string, string[]> = (() => {
-  const raw = JSON.parse(localStorage.getItem("gterm-cust-badges") ?? "{}") as Record<
+  const raw = JSON.parse(lsGet("gterm-cust-badges") ?? "{}") as Record<
     string,
     string | string[]
   >;
@@ -388,17 +405,17 @@ const customBadges: Record<string, string[]> = (() => {
   return out;
 })();
 function saveCustomBadges() {
-  localStorage.setItem("gterm-cust-badges", JSON.stringify(customBadges));
+  lsSet("gterm-cust-badges", JSON.stringify(customBadges));
 }
 
 // Per-tab widths from dragging a tab's right edge. A stored width
 // overrides the global tab-width setting for that session only; keys
 // are daemon session ids, so widths survive restarts and reboots.
 const tabWidths: Record<string, number> = JSON.parse(
-  localStorage.getItem("gterm-tab-widths") ?? "{}"
+  lsGet("gterm-tab-widths") ?? "{}"
 );
 function saveTabWidths() {
-  localStorage.setItem("gterm-tab-widths", JSON.stringify(tabWidths));
+  lsSet("gterm-tab-widths", JSON.stringify(tabWidths));
 }
 const TAB_W_MIN = 90;
 const TAB_W_MAX = 400;
@@ -415,10 +432,10 @@ function applyTabWidth(button: HTMLElement, id: number) {
 
 // AI-suggested titles: outrank shell/cwd labels, lose to user renames.
 const aiTitles: Record<string, string> = JSON.parse(
-  localStorage.getItem("gterm-ai-titles") ?? "{}"
+  lsGet("gterm-ai-titles") ?? "{}"
 );
 function saveAiTitles() {
-  localStorage.setItem("gterm-ai-titles", JSON.stringify(aiTitles));
+  lsSet("gterm-ai-titles", JSON.stringify(aiTitles));
 }
 // Shell-reported titles that carry no information: the bare shell exe
 // path/name (every pwsh tab reports the same one), the Administrator
@@ -738,14 +755,14 @@ interface SplitMeta {
   auto: boolean;
 }
 const splitMeta: Record<string, SplitMeta> = JSON.parse(
-  localStorage.getItem("gterm-split-meta") ?? "{}"
+  lsGet("gterm-split-meta") ?? "{}"
 );
 // Auto names were "Group N" before splits and groups were told apart.
 for (const m of Object.values(splitMeta)) {
   if (m.auto) m.name = m.name.replace(/^Group /, "Split ");
 }
 function saveSplitMeta() {
-  localStorage.setItem("gterm-split-meta", JSON.stringify(splitMeta));
+  lsSet("gterm-split-meta", JSON.stringify(splitMeta));
 }
 
 /// Name a tab the first time it holds more than one pane. Numbered past
@@ -805,10 +822,10 @@ interface TabGroup {
 }
 const GROUP_COLORS = ["#61afef", "#98c379", "#e5c07b", "#e06c75", "#c678dd", "#56b6c2"];
 const groupState: { groups: TabGroup[]; assign: Record<string, string> } = JSON.parse(
-  localStorage.getItem("gterm-groups") ?? '{"groups":[],"assign":{}}'
+  lsGet("gterm-groups") ?? '{"groups":[],"assign":{}}'
 );
 function saveGroups() {
-  localStorage.setItem("gterm-groups", JSON.stringify(groupState));
+  lsSet("gterm-groups", JSON.stringify(groupState));
 }
 function groupById(gid: string | undefined): TabGroup | undefined {
   return groupState.groups.find((g) => g.id === gid);
@@ -846,7 +863,7 @@ function pruneGroups() {
 // drag-and-drop rearranges. Persisted so ordering survives restarts.
 let tabOrder: number[] = [];
 function saveOrder() {
-  localStorage.setItem("gterm-order", JSON.stringify(tabOrder));
+  lsSet("gterm-order", JSON.stringify(tabOrder));
 }
 
 // ── drag reordering (pointer-based) ─────────────────────────────────────
@@ -3005,7 +3022,7 @@ function saveLayouts() {
   for (const [key, root] of layouts) {
     out[key] = { root: zoomed.get(key) ?? root, focus: focusedOf(key) };
   }
-  localStorage.setItem("gterm-layouts", JSON.stringify(out));
+  lsSet("gterm-layouts", JSON.stringify(out));
   // Split names outlive nothing: drop the ones whose tab is gone, and the
   // auto-assigned ones for tabs that are no longer split.
   let dropped = false;
@@ -3021,7 +3038,7 @@ function saveLayouts() {
 
 function loadLayouts(): Record<string, { root: LayoutNode; focus: number }> {
   try {
-    return JSON.parse(localStorage.getItem("gterm-layouts") ?? "{}");
+    return JSON.parse(lsGet("gterm-layouts") ?? "{}");
   } catch {
     return {};
   }
@@ -3842,6 +3859,10 @@ function makeShortcutHandler(getId: () => number) {
         restoreLast();
         return false;
       }
+      if (key === "N") {
+        void invoke("new_window").catch(() => {});
+        return false;
+      }
       if (key === "C") {
         const tab = tabs.get(getId());
         const sel = tab?.term.getSelection();
@@ -3995,9 +4016,9 @@ function cycleTab(dir: number) {
 // clipboard (in-app copies plus whatever's current when the terminal
 // menu opens). Newest first, deduped, capped.
 const CLIP_MAX = 3;
-const clipHist: string[] = JSON.parse(localStorage.getItem("gterm-cliphist") ?? "[]");
+const clipHist: string[] = JSON.parse(lsGet("gterm-cliphist") ?? "[]");
 function saveClipHist() {
-  localStorage.setItem("gterm-cliphist", JSON.stringify(clipHist));
+  lsSet("gterm-cliphist", JSON.stringify(clipHist));
 }
 function pushClip(text: string) {
   if (!text) return;
@@ -5463,7 +5484,7 @@ function groupMenuItems(g: TabGroup, nameEl: HTMLElement): CtxItem[] {
 /// throw: a log that can break the thing it is logging is worse than no
 /// log. See src/uilog.ts for what may and may not be written.
 function logUi(ev: string, fields: Record<string, unknown> = {}) {
-  if (config.ui_log !== true) return;
+  if (!shouldLog(ev, logLevel(config.ui_log))) return;
   try {
     const line = formatEvent({ ev, ...fields } as UiEvent, new Date().toISOString());
     void invoke("log_ui", { line }).catch(() => {});
@@ -6128,7 +6149,7 @@ function refreshChrome() {
 
 function toggleSidebar() {
   const on = app.classList.toggle("sidebar-on");
-  localStorage.setItem("gterm-sidebar", on ? "1" : "0");
+  lsSet("gterm-sidebar", on ? "1" : "0");
   sidebarSig = ""; // force a fresh render on re-open
   refreshChrome();
   const tab = activeId !== null ? tabs.get(activeId) : undefined;
@@ -6167,7 +6188,7 @@ async function toggleZen() {
 function initZenPill() {
   const pill = document.getElementById("zen-pill")!;
   // restore saved position (clamped into the viewport)
-  const saved = localStorage.getItem("gterm-zen-pos");
+  const saved = lsGet("gterm-zen-pos");
   if (saved) {
     try {
       const [px, py] = JSON.parse(saved) as [number, number];
@@ -6199,7 +6220,7 @@ function initZenPill() {
       pill.removeEventListener("pointermove", onMove);
       if (dragging) {
         const r = pill.getBoundingClientRect();
-        localStorage.setItem("gterm-zen-pos", JSON.stringify([Math.round(r.left), Math.round(r.top)]));
+        lsSet("gterm-zen-pos", JSON.stringify([Math.round(r.left), Math.round(r.top)]));
       } else {
         void toggleZen(); // plain click exits
       }
@@ -6212,7 +6233,7 @@ function initZenPill() {
 // Sidebar width: draggable via the edge handle, persisted, terminal
 // refit live so the pane always fills the remaining space.
 function initSidebarResize() {
-  const saved = Number(localStorage.getItem("gterm-sidebar-w"));
+  const saved = Number(lsGet("gterm-sidebar-w"));
   if (saved >= 150 && saved <= 520) {
     document.documentElement.style.setProperty("--sidebar-w", `${saved}px`);
   }
@@ -6238,7 +6259,7 @@ function initSidebarResize() {
       handle.removeEventListener("pointermove", onMove);
       handle.classList.remove("dragging");
       const wpx = Math.min(520, Math.max(150, Math.round(ev.clientX)));
-      localStorage.setItem("gterm-sidebar-w", String(wpx));
+      lsSet("gterm-sidebar-w", String(wpx));
       const tab = activeId !== null ? tabs.get(activeId) : undefined;
       if (tab) fitTab(tab);
     };
@@ -7395,12 +7416,12 @@ function buildSettingsPage() {
   settingsSection("Diagnostics");
   settingRow(
     "Log what this window does",
-    "Off by default. Turn it on while chasing a bug and ui.log records menus opening, what was chosen — or refused — where each paste came from, and any error the window threw. Sizes only: what you copied is never written down.",
+    "Errors only, by default: if the window throws, ui.log says so, and that line carries nothing about what you typed. Everything adds menus opening, what was chosen — or refused — and where each paste came from, which is what to turn on while chasing a bug. Sizes only either way: what you copied is never written down.",
     mkSelect(
-      [["on", "On"], ["off", "Off"]],
-      config.ui_log === true ? "on" : "off",
+      [["errors", "Errors only"], ["full", "Everything"], ["off", "Nothing"]],
+      logLevel(config.ui_log),
       (v) => {
-        config.ui_log = v === "on";
+        config.ui_log = v as "off" | "errors" | "full";
         saveConfig();
       }
     )
@@ -8275,7 +8296,7 @@ async function main() {
   // and every later write would make it look established.
   const freshInstall = Object.keys(config).length === 0;
   registerCustomThemes();
-  applyTheme(config.theme ?? localStorage.getItem("gterm-theme") ?? "plain");
+  applyTheme(config.theme ?? lsGet("gterm-theme") ?? "plain");
   applyBackground();
   // The window starts hidden (tauri.conf visible:false) so users never
   // see the webview's white pre-paint flash; show once themed.
@@ -8295,6 +8316,15 @@ async function main() {
       pending.set(event.payload.id, backlog);
     }
   });
+  // Another window opened this session. It is still running - it is just
+  // not ours any more - so the tab goes without the session being touched.
+  await listen<{ id: number }>("pty-taken", (event) => {
+    logUi("session.taken", { id: event.payload.id });
+    removeTab(event.payload.id, false);
+    if (tabCount() === 0) void createTab();
+    window.setTimeout(() => refreshChrome(), 300);
+  });
+
   await listen<{ id: number }>("pty-exit", (event) => {
     // Titles are kept: the session may sit in its grace window and come
     // back. Stale titles get pruned against the daemon list at startup.
@@ -8439,6 +8469,16 @@ async function main() {
       stack: String((e.reason as Error | undefined)?.stack ?? "").slice(0, 400),
     });
   });
+  // A window taking its layout with it when it closes. Without this,
+  // "gterm-layouts::w7" outlives every window that ever existed and the
+  // store fills with the tab arrangements of windows nobody remembers.
+  // Only its own keys: never a global one, never another window's.
+  void getCurrentWindow().onCloseRequested(() => {
+    for (const key of keysToClear(Object.keys(localStorage), WINDOW_LABEL)) {
+      localStorage.removeItem(key);
+    }
+  });
+
   // A second launch hands its arguments here and exits.
   void listen<string[]>("second-instance", (e) => {
     void openWorkspaceFromArgs(e.payload ?? []);
@@ -8571,7 +8611,7 @@ async function main() {
   window.setInterval(updateLiveInfo, 5000);
   window.setInterval(aiAutoTitleTick, 120_000);
 
-  if (localStorage.getItem("gterm-sidebar") === "1") {
+  if (lsGet("gterm-sidebar") === "1") {
     app.classList.add("sidebar-on");
   }
 
@@ -8593,7 +8633,7 @@ async function main() {
   }
   saveCustomBadges();
   // Restore last session's tab order; unknown sessions go to the end.
-  const savedOrder: number[] = JSON.parse(localStorage.getItem("gterm-order") ?? "[]");
+  const savedOrder: number[] = JSON.parse(lsGet("gterm-order") ?? "[]");
   const ordered = inSavedOrder(sessions, savedOrder);
   // Never re-adopt a session the user closed: attaching cancels its
   // pending kill, so an app restart would resurrect every tab still in

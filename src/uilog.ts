@@ -10,12 +10,15 @@
 // send should not carry what they copied, so text is reduced to a size
 // and a line count before it goes anywhere near the file.
 //
-// And it is off unless switched on. A terminal that records what you did
-// with it, by default, is not a trade anyone agreed to - the file staying
-// on the machine does not make it one. The cost is real and worth stating:
-// when something breaks unexpectedly there is nothing to look at, and the
-// first thing anyone can do is turn this on and try to make it happen
-// again.
+// Three levels, because the two obvious ones are both wrong. Recording
+// everything by default is a trade nobody agreed to; recording nothing
+// means the first thing anyone can say about an unexpected bug is "turn
+// on logging and try to make it happen again".
+//
+// So errors by default: a thrown exception says nothing about what you
+// typed, pasted or copied - it is the app admitting it broke - and it is
+// the single most useful line in the file. Everything else waits to be
+// asked for.
 
 export interface UiEvent {
   ev: string;
@@ -35,4 +38,22 @@ export function formatEvent(e: UiEvent, now: string): string {
 /// one, and the first thing anyone asks about a paste bug.
 export function describeText(text: string): { chars: number; lines: number } {
   return { chars: text.length, lines: text ? text.split(/\r\n|\r|\n/).length : 0 };
+}
+
+export type LogLevel = "off" | "errors" | "full";
+
+/// What the setting means, including the booleans it used to be.
+export function logLevel(setting: unknown): LogLevel {
+  if (setting === true || setting === "full") return "full";
+  if (setting === false || setting === "off") return "off";
+  return "errors";
+}
+
+/// Errors are recorded at the default level; everything else is not.
+/// The prefix is the rule: `error` and `error.promise` are the window
+/// saying it broke, and carry no trace of what was typed or copied.
+export function shouldLog(ev: string, level: LogLevel): boolean {
+  if (level === "off") return false;
+  if (level === "full") return true;
+  return ev === "error" || ev.startsWith("error.");
 }
