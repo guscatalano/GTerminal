@@ -95,7 +95,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -443,7 +443,7 @@ function Daemon-Sessions {
 # Sessions for a restore scene to find: a daemon of its own, started before
 # the window exists, with N shells already in it.
 function Seed-Daemon {
-  param([int]$count, [string]$config)
+  param([int]$count, [string]$config, [switch]$Typed)
   Remove-Item "$scratch\GTerminal" -Recurse -Force -ErrorAction SilentlyContinue
   Remove-Item $env:WEBVIEW2_USER_DATA_FOLDER -Recurse -Force -ErrorAction SilentlyContinue
   New-Item -ItemType Directory -Force "$scratch\GTerminal" | Out-Null
@@ -461,8 +461,26 @@ function Seed-Daemon {
     $w = [System.IO.StreamWriter]::new($c.GetStream()); $w.NewLine = "`n"; $w.AutoFlush = $true
     $rd = [System.IO.StreamReader]::new($c.GetStream())
     $w.WriteLine('{"cmd":"create","cols":100,"rows":30}')
-    $ids += ($rd.ReadLine() | ConvertFrom-Json).id
+    $newId = ($rd.ReadLine() | ConvertFrom-Json).id
+    $ids += $newId
     $c.Close()
+    # A session nobody ever typed into is discarded when the daemon
+    # restarts - deliberately, so husks do not pile up. A scene that
+    # needs its sessions to survive a restart has to use them.
+    if ($Typed) {
+      $t = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $port)
+      $tw = [System.IO.StreamWriter]::new($t.GetStream()); $tw.NewLine = "`n"; $tw.AutoFlush = $true
+      $trd = [System.IO.StreamReader]::new($t.GetStream())
+      $tw.WriteLine("{""cmd"":""attach"",""id"":$newId}")
+      $null = $trd.ReadLine()
+      $tw.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')
+      Start-Sleep -Seconds 3
+      $tw.WriteLine('{"cmd":"write","data":"echo seeded-' + $newId + '\r"}')
+      Start-Sleep -Seconds 2
+      $tw.WriteLine('{"cmd":"detach"}')
+      Start-Sleep -Milliseconds 300
+      $t.Close()
+    }
   }
   [pscustomobject]@{ Daemon = $d; Port = $port; Ids = $ids }
 }
@@ -1154,6 +1172,98 @@ if (-not $Only -or $Only -eq "multiwindow") {
   }
   Write-Host "  windows saved to $dump" -ForegroundColor DarkGray
   Stop-App $ctx11
+}
+
+# ══ scene: two windows keep their own tabs ════════════════════════════
+# The multiwindow scene proves a second window works. This one proves the
+# first one is not damaged by it, which is the failure the whole design is
+# about: two windows sharing one localStorage, both writing the same tab
+# order, last save winning.
+#
+# Asserted through the daemon, because "what is in this window" is not a
+# question a screenshot answers: four attached sessions with two windows
+# open, and exactly the original one attached after the second window has
+# been and gone.
+if (-not $Only -or $Only -eq "twowindows") {
+  $ctx12 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`"}"
+  $h12 = $ctx12.Hwnd
+  Record-Scene "twowindows" 40 $ctx12 {
+    Run-Cmd 'echo first-window-tab' 3
+    $script:beforeIds = @((Daemon-Sessions | Where-Object { $_.attached }).id)
+    Key 0x4E @([byte]$VK_CTRL, [byte]$VK_SHIFT)     # Ctrl+Shift+N
+    Start-Sleep -Seconds 9
+    # Two more tabs, in the second window.
+    Key 0x54 @([byte]$VK_CTRL, [byte]$VK_SHIFT)
+    Start-Sleep -Seconds 5
+    Key 0x54 @([byte]$VK_CTRL, [byte]$VK_SHIFT)
+    Start-Sleep -Seconds 5
+    $script:whileTwo = Daemon-Sessions
+    $script:winsNow = App-Windows $ctx12.App.Id
+    $second = @($winsNow | Where-Object { $_ -ne $h12 })
+    if ($second.Count) { [void]$U::PostMessage($second[0], 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) }
+    Start-Sleep -Seconds 8
+    $script:afterOne = Daemon-Sessions
+    $script:winsAfter = App-Windows $ctx12.App.Id
+  }
+  if ($winsAfter.Count -eq 1) { Pass "the second window closes" }
+  else { Fail "twowindows" "$($winsAfter.Count) window(s) still open after closing the second" }
+  $attachedTwo = @($whileTwo | Where-Object { $_.attached })
+  if ($attachedTwo.Count -ge 4) { Pass "two windows hold four sessions between them" }
+  else { Fail "twowindows" "only $($attachedTwo.Count) attached with two windows and four tabs" }
+  # The first window's own session, still its own: not adopted by the
+  # second window, and not closed when the second window went.
+  $stillMine = @($afterOne | Where-Object { $_.attached })
+  if ($stillMine.Count -eq 1) { Pass "and one is left attached when the second window closes" }
+  else { Fail "twowindows" "$($stillMine.Count) attached after closing the second window" }
+  if ($beforeIds.Count -and $stillMine.Count -eq 1 -and $stillMine[0].id -eq $beforeIds[0]) {
+    Pass "and it is the same session the first window started with"
+  } else { Fail "twowindows" "the first window ended up on a different session" }
+  # The second window's sessions are detached, not destroyed - closing a
+  # window is not closing its terminals.
+  $survivors = @($afterOne | Where-Object { -not $_.attached -and $_.alive })
+  if ($survivors.Count -ge 2) { Pass "and the closed window's terminals are still running" }
+  else { Fail "twowindows" "the second window took its sessions down with it" }
+  Stop-App $ctx12
+}
+
+# ══ scene: reading an ended session does not revive it ════════════════
+# Clicking a session whose shell is gone shows its output read-only and
+# offers a shell. The promise worth testing is the restraint: looking at
+# one must not start a process, because attaching is what resurrects it
+# and a list you click through would start a shell for every glance.
+if (-not $Only -or $Only -eq "preview") {
+  $cfg = "{$baseCfg,`"restore_prompt`":true,`"restore_prompt_at`":1}"
+  $seed = Seed-Daemon 2 $cfg -Typed
+  # Checkpoints flush every few seconds, and "was this ever typed into" is
+  # part of them. Killing the daemon before that lands loses the fact, and
+  # the sessions are discarded on the way back as ones nobody used.
+  Start-Sleep -Seconds 7
+  # Kill the daemon outright: its sessions persist as checkpoints and come
+  # back as ended ones, which is how they arise in the first place.
+  Stop-Process -Id $seed.Daemon.Id -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Seconds 2
+  Write-Host ("  checkpoints: {0}" -f ((Get-ChildItem "$scratch\GTerminal\sessions" -Filter *.json -ErrorAction SilentlyContinue | ForEach-Object { $_.Name + "=" + ((Get-Content $_.FullName -Raw | ConvertFrom-Json).saw_input) }) -join " ")) -ForegroundColor DarkGray
+  $ctx13 = Start-AppSeeded $seed
+  $h13 = $ctx13.Hwnd
+  Record-Scene "preview" 30 $ctx13 {
+    Start-Sleep -Seconds 5
+    Key $VK_ESC                       # restore none: leave them ended
+    Start-Sleep -Seconds 6
+    Key 0x42 @([byte]$VK_CTRL, [byte]$VK_SHIFT)   # sidebar
+    Start-Sleep -Seconds 2
+    Click ($h13) 100 47               # the first ended session
+    Start-Sleep -Seconds 4
+    $script:afterClick = Daemon-Sessions
+  }
+  Write-Host ("  seeded ids: {0}" -f ($seed.Ids -join ",")) -ForegroundColor DarkGray
+  Write-Host ("  daemon now: {0}" -f (($afterClick | ForEach-Object { "$($_.id)(alive=$($_.alive),att=$($_.attached))" }) -join " ")) -ForegroundColor DarkGray
+  $revived = @($afterClick | Where-Object { $seed.Ids -contains $_.id -and $_.alive })
+  if ($revived.Count -eq 0) { Pass "opening an ended session does not start a shell" }
+  else { Fail "preview" "$($revived.Count) ended session(s) were resurrected just by being opened" }
+  $kept = @($afterClick | Where-Object { $seed.Ids -contains $_.id })
+  if ($kept.Count -eq 2) { Pass "and both are still there to reopen" }
+  else { Fail "preview" "only $($kept.Count) of 2 ended sessions survived being looked at" }
+  Stop-App $ctx13
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════

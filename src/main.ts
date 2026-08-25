@@ -43,6 +43,7 @@ import { activates } from "./menus";
 import { visibilityReport } from "./controls";
 import { shouldSuggestThemes } from "./firstrun";
 import { storageKey, keysToClear, FIRST_WINDOW } from "./windows";
+import { retagKeyed, retagOrder } from "./retag";
 import type { ControlRect } from "./controls";
 import { formatEvent, describeText, logLevel, shouldLog } from "./uilog";
 import type { UiEvent } from "./uilog";
@@ -3066,22 +3067,21 @@ function retagTab(oldKey: number, newKey: number) {
   // The split's name belongs to the tab, not to whichever session is
   // currently carrying its identity.
   if (splitMeta[oldKey]) {
-    splitMeta[newKey] = splitMeta[oldKey];
+    Object.assign(splitMeta, retagKeyed(splitMeta, oldKey, newKey));
     delete splitMeta[oldKey];
     saveSplitMeta();
   }
   tabFocus.delete(oldKey);
   for (const leaf of leavesOf(tree)) paneTab.set(leaf, newKey);
-  tabOrder = tabOrder.map((t) => (t === oldKey ? newKey : t));
+  tabOrder = retagOrder(tabOrder, oldKey, newKey);
   saveOrder();
-  const group = groupState.assign[oldKey];
-  if (group) {
+  if (groupState.assign[oldKey]) {
+    Object.assign(groupState.assign, retagKeyed(groupState.assign, oldKey, newKey));
     delete groupState.assign[oldKey];
-    groupState.assign[newKey] = group;
     saveGroups();
   }
   if (tabWidths[oldKey] !== undefined) {
-    tabWidths[newKey] = tabWidths[oldKey];
+    Object.assign(tabWidths, retagKeyed(tabWidths, oldKey, newKey));
     delete tabWidths[oldKey];
     saveTabWidths();
   }

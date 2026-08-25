@@ -25,9 +25,20 @@ struct PtyExit {
 #[derive(Clone, Default)]
 struct PtyManager {
     attached: Arc<Mutex<HashMap<u32, TcpStream>>>,
+    /// Which window each session is open in.
+    ///
+    /// The attach connections belong to the process, not to a window, so
+    /// closing a window used to leave its sessions attached for as long
+    /// as the app ran: the daemon believed they were in use, and no other
+    /// window would adopt one, because adopting a session someone else
+    /// has open is exactly what must not happen. They were stranded.
+    owners: Arc<Mutex<HashMap<u32, String>>>,
 }
 
-fn attach_internal(app: &AppHandle, state: &PtyManager, id: u32) -> Result<(), String> {
+fn attach_internal(app: &AppHandle, state: &PtyManager, id: u32, owner: Option<&str>) -> Result<(), String> {
+    if let Some(owner) = owner {
+        state.owners.lock().unwrap().insert(id, owner.to_string());
+    }
     let mut stream = mux::client::ensure()?;
     mux::write_line(&mut stream, &serde_json::to_value(Request::Attach { id }).unwrap())
         .map_err(|e| e.to_string())?;
@@ -116,6 +127,7 @@ fn list_sessions() -> Result<Vec<mux::SessionInfo>, String> {
 #[tauri::command]
 fn create_session(
     app: AppHandle,
+    window: tauri::Window,
     state: State<PtyManager>,
     cols: u16,
     rows: u16,
@@ -124,19 +136,20 @@ fn create_session(
 ) -> Result<u32, String> {
     let v = mux::client::control(&Request::Create { cols, rows, shell, cwd })?;
     let id = v.get("id").and_then(Value::as_u64).ok_or("bad response")? as u32;
-    attach_internal(&app, &state, id)?;
+    attach_internal(&app, &state, id, Some(window.label()))?;
     Ok(id)
 }
 
 #[tauri::command]
 fn attach_session(
     app: AppHandle,
+    window: tauri::Window,
     state: State<PtyManager>,
     id: u32,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    attach_internal(&app, &state, id)?;
+    attach_internal(&app, &state, id, Some(window.label()))?;
     send_to(&state, id, Request::Resize { cols, rows })
 }
 
@@ -269,6 +282,7 @@ fn resize_session(state: State<PtyManager>, id: u32, cols: u16, rows: u16) -> Re
 
 #[tauri::command]
 fn detach_session(state: State<PtyManager>, id: u32) -> Result<(), String> {
+    state.owners.lock().unwrap().remove(&id);
     let stream = state.attached.lock().unwrap().remove(&id);
     if let Some(mut stream) = stream {
         let _ = mux::write_line(&mut stream, &serde_json::to_value(Request::Detach).unwrap());
@@ -609,31 +623,62 @@ fn window_labels(app: AppHandle) -> Vec<String> {
     app.webview_windows().keys().cloned().collect()
 }
 
-/// Wire a window up: remember it when focused, and decide what closing
-/// means. Closing the last window hides to the tray, which is what keeps
-/// the summon hotkey worth having; closing any other simply closes it.
-fn watch_window(win: &tauri::WebviewWindow, app: &AppHandle) {
+/// Everything that must happen to a window, whichever window it is.
+///
+/// Attached by the builder rather than per window, because windows are
+/// created by the page now and a per-window hook only ever covered the
+/// first one - which is how a closed window went on owning its sessions.
+fn on_any_window_event(win: &tauri::Window, event: &tauri::WindowEvent) {
+    let handle = win.app_handle().clone();
     let label = win.label().to_string();
-    let handle = app.clone();
-    let me = win.clone();
-    win.on_window_event(move |event| match event {
+    match event {
         tauri::WindowEvent::Focused(true) => {
-            *LAST_FOCUSED.lock().unwrap() = Some(label.clone());
+            *LAST_FOCUSED.lock().unwrap() = Some(label);
         }
+        // A window that has gone cannot own a session. Released here
+        // rather than from the page, because a window can also be
+        // destroyed without its JavaScript getting a say.
+        tauri::WindowEvent::Destroyed => {
+            if let Some(state) = handle.try_state::<PtyManager>() {
+                let mine: Vec<u32> = state
+                    .owners
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|(_, owner)| *owner == &label)
+                    .map(|(id, _)| *id)
+                    .collect();
+                for id in mine {
+                    state.owners.lock().unwrap().remove(&id);
+                    let stream = state.attached.lock().unwrap().remove(&id);
+                    if let Some(mut stream) = stream {
+                        let _ = mux::write_line(
+                            &mut stream,
+                            &serde_json::to_value(Request::Detach).unwrap(),
+                        );
+                    }
+                }
+            }
+        }
+        // Closing the last window hides it to the tray, which is what
+        // keeps the summon hotkey worth having. Closing any other simply
+        // closes it.
         tauri::WindowEvent::CloseRequested { api, .. } => {
             let last = handle.webview_windows().len() <= 1;
             if last && close_hides() {
                 api.prevent_close();
-                if animate() {
-                    leave(&me, &handle);
-                } else {
-                    let _ = me.hide();
-                    let _ = apply_tray_text(&handle);
+                if let Some(w) = handle.get_webview_window(&win.label().to_string()) {
+                    if animate() {
+                        leave(&w, &handle);
+                    } else {
+                        let _ = w.hide();
+                        let _ = apply_tray_text(&handle);
+                    }
                 }
             }
         }
         _ => {}
-    });
+    }
 }
 
 /// Is this window the one the user is looking at?
@@ -797,6 +842,7 @@ pub fn run() {
         }));
     }
     builder
+        .on_window_event(|win, event| on_any_window_event(win, event))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -851,7 +897,6 @@ pub fn run() {
                 // Closing hides by default rather than ending the process,
                 // which is what keeps the summon hotkey alive. Sessions were
                 // never at stake either way — they live in the daemon.
-                watch_window(&win, &app.handle().clone());
                 // Turn off Edge's accelerator keys. WebView2 leaves them on
                 // by default, which in a terminal means Ctrl+F opens
                 // find-on-page over ours, Ctrl+P offers to print the app,
