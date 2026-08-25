@@ -809,6 +809,37 @@ if (-not (@(Get-Sessions $port) | Where-Object { $_.id -eq $instant })) {
 Set-Content "$env:LOCALAPPDATA\GTerminal\config.json" '{"grace_minutes": 5}'
 foreach ($m in $many) { try { $null = Request2 $port "{""cmd"":""kill"",""id"":$m}" 0 } catch {} }
 
+# == two daemons, one state directory ==
+# A second daemon used to write its own port into the file and walk off
+# with every client that looked the daemon up afterwards. Nothing
+# crashed. The daemon holding the sessions kept running, unreachable,
+# while the window found the newcomer and showed an empty sidebar - which
+# is indistinguishable, from the outside, from having lost the lot.
+#
+# Hit for real: a stray daemon started by hand against the live state
+# directory moved the port file, and the running sessions became
+# unfindable until it was put back.
+$portBefore = Start-Daemon
+$firstPid = $script:daemons[-1]
+# Deliberately not Start-Daemon: it clears the port file first, which is
+# the one thing that makes a second daemon legitimate.
+$second = Start-Process -FilePath $exe -ArgumentList "--daemon" -WindowStyle Hidden -PassThru
+$script:daemons += $second.Id
+Start-Sleep -Seconds 3
+$portAfter = (Get-Content "$env:LOCALAPPDATA\GTerminal\daemon.port" -Raw).Trim()
+$secondAlive = $null -ne (Get-Process -Id $second.Id -ErrorAction SilentlyContinue)
+
+if ($portAfter -eq "$portBefore") { Pass "a second daemon leaves the port file pointing at the first" }
+else { Fail "second-daemon" "the port file moved from $portBefore to $portAfter" }
+if (-not $secondAlive) { Pass "and stands down instead of running alongside it" }
+else { Fail "second-daemon" "the second daemon is still running" }
+# Still serving, not just still named in a file.
+try {
+  $still = Request2 $portBefore '{"cmd":"list"}'
+  if ($still.ok) { Pass "and the first daemon is still answering" }
+  else { Fail "second-daemon" "the first daemon answered without ok: $($still | ConvertTo-Json -Compress)" }
+} catch { Fail "second-daemon" "the first daemon stopped answering: $_" }
+
 # ════ cleanup ════
 foreach ($d in $script:daemons) {
   if (Get-Process -Id $d -ErrorAction SilentlyContinue) { Stop-DaemonTree $d }

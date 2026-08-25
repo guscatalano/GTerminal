@@ -249,6 +249,49 @@ fn yes() -> bool {
 }
 
 #[cfg(test)]
+mod second_daemon_tests {
+    use super::another_daemon_is_serving;
+
+    /// A live daemon must keep its port file. The alternative is what was
+    /// observed: the newcomer writes its own port, and every session in
+    /// the running daemon becomes unfindable while still running.
+    #[test]
+    fn a_daemon_that_answers_keeps_its_port_file() {
+        assert!(another_daemon_is_serving(Some("54409"), |p| p == 54409));
+    }
+
+    /// A port file left behind by a daemon that died must not stop the
+    /// next one starting - that would turn a crash into a terminal that
+    /// never comes back.
+    #[test]
+    fn a_stale_port_file_is_not_an_obstacle() {
+        assert!(!another_daemon_is_serving(Some("54409"), |_| false));
+    }
+
+    #[test]
+    fn no_port_file_at_all_is_the_ordinary_first_start() {
+        assert!(!another_daemon_is_serving(None, |_| panic!("must not probe")));
+    }
+
+    /// Junk in the file is treated as no file rather than as a reason to
+    /// refuse to start, and must not be probed as though it were a port.
+    #[test]
+    fn junk_is_not_a_port() {
+        assert!(!another_daemon_is_serving(Some(""), |_| panic!("must not probe")));
+        assert!(!another_daemon_is_serving(Some("not-a-port"), |_| panic!("must not probe")));
+        assert!(!another_daemon_is_serving(Some("0"), |_| panic!("must not probe")));
+        assert!(!another_daemon_is_serving(Some("99999999"), |_| panic!("must not probe")));
+    }
+
+    /// Written with a trailing newline by some hands, and by none here.
+    #[test]
+    fn surrounding_whitespace_still_names_a_port() {
+        assert!(another_daemon_is_serving(Some(" 54409
+"), |p| p == 54409));
+    }
+}
+
+#[cfg(test)]
 mod daemon_binary_tests {
     /// A Store update replaces the package, and a running process holds
     /// its own file open. The daemon outlives the app by design, so if it
@@ -675,7 +718,55 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// Whether the port file already points at a daemon that is answering.
+///
+/// Two daemons on one state directory is not a survivable arrangement:
+/// the second one writes its own port into the file, and every client
+/// that looks the daemon up afterwards reaches the newcomer instead of
+/// the one holding the sessions. Nothing crashes. The sessions are simply
+/// gone as far as anyone can tell, while the daemon that owns them keeps
+/// running with no way for anyone to find it.
+///
+/// Split out from the connecting so it can be tested: the probe answers
+/// "is something serving this port", and the decision is the same either
+/// way it is answered.
+fn another_daemon_is_serving(recorded: Option<&str>, probe: impl Fn(u16) -> bool) -> bool {
+    match recorded.map(str::trim).and_then(|p| p.parse::<u16>().ok()) {
+        Some(port) if port != 0 => probe(port),
+        _ => false,
+    }
+}
+
+/// Connect to a port and see whether a daemon answers. A short timeout,
+/// because this runs on the way to starting up and a wrong answer here
+/// costs a startup rather than a session.
+fn daemon_answers(port: u16) -> bool {
+    use std::io::{BufRead, BufReader, Write};
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let Ok(mut sock) = TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(400))
+    else {
+        return false;
+    };
+    sock.set_read_timeout(Some(std::time::Duration::from_millis(600))).ok();
+    if sock.write_all(b"{\"cmd\":\"list\"}
+").is_err() {
+        return false;
+    }
+    let mut line = String::new();
+    BufReader::new(sock).read_line(&mut line).is_ok() && line.contains("\"ok\"")
+}
+
 pub fn run_daemon() {
+    // Refuse to become the second daemon on this state directory. Hit
+    // during testing by starting a daemon by hand while a real one was
+    // running: the port file moved to the new one, and every session in
+    // the old one became unreachable while still running.
+    let recorded = std::fs::read_to_string(port_file()).ok();
+    if another_daemon_is_serving(recorded.as_deref(), daemon_answers) {
+        eprintln!("gterminal: a daemon is already serving {}", state_dir().display());
+        return;
+    }
+
     let sessions: Sessions = Arc::new(Mutex::new(DaemonState::default()));
     load_cold(&mut sessions.lock().unwrap());
 
