@@ -494,6 +494,45 @@ if ($sawExit) { "PASS a shell that exits ends the session and the daemon reports
 else { $failures += "exit: no exit event after the shell quit" }
 $eof.Client.Close()
 
+# ── a full-screen program's frames, byte for byte ──
+# The pixel side of this lives in the visual suite; this is the half that
+# can run anywhere: whatever a TUI draws has to survive the pty, the ring
+# and the socket intact and in order. Cursor-addressed repaints are the
+# case that breaks when something reorders or coalesces writes, and they
+# are how Claude Code, Agency, Hermes and vim all draw.
+$tui = Open-Shell "pwsh"
+$fixture = Join-Path $repo "testsixtures	ui.ps1"
+Type-Text "& '$fixture' -Frames 3 -Ms 500"
+Send-Key "`r"
+Start-Sleep -Seconds 6
+$frames = Raw-Data (Drain 1500)
+$esc = [string][char]27
+if ($frames.Contains("$esc[?1049h")) { "PASS a TUI's alternate screen arrives" }
+else { $failures += "tui-altscreen: no alternate screen switch in the output" }
+$seen = @(1, 2, 3 | Where-Object { $frames.Contains("FRAME-$_") })
+if ($seen.Count -eq 3) { "PASS all three frames arrive" }
+else { $failures += "tui-frames: only $($seen.Count) of 3 frames arrived" }
+# In order, and not merged into each other: a repaint that overtakes its
+# predecessor is how a screen ends up showing a mixture of two frames.
+$i1 = $frames.IndexOf("FRAME-1"); $i2 = $frames.IndexOf("FRAME-2"); $i3 = $frames.IndexOf("FRAME-3")
+if ($i1 -ge 0 -and $i1 -lt $i2 -and $i2 -lt $i3) { "PASS and in the order they were drawn" }
+else { $failures += "tui-order: frames arrived out of order ($i1, $i2, $i3)" }
+# Volume, not the app's own sequences: ConPTY does not forward what the
+# program wrote. It keeps a screen, works out what changed, and emits its
+# own stream — so counting the program's cursor addressing measures
+# ConPTY's rendering strategy rather than anything this project controls.
+# What is ours is that three full-screen repaints arrive as three
+# screensful of redrawing, not as a handful of bytes.
+$erases = ([regex]::Matches($frames, "$([char]27)\[K")).Count
+if ($frames.Length -gt 3000 -and $erases -ge 30) {
+  "PASS three full-screen repaints arrive in full ($($frames.Length) bytes, $erases line erases)"
+} else {
+  $failures += "tui-volume: three repaints came to only $($frames.Length) bytes / $erases erases"
+}
+if ($frames.Contains("$esc[?1049l")) { "PASS and it hands the screen back on exit" }
+else { $failures += "tui-restore: the alternate screen was never left" }
+Close-Shell $tui
+
 # ── latency, measured on the default shell ────────────────────────────
 $latSess = Open-Shell "pwsh"
 # ── latency: per-keystroke echo roundtrip, on the default shell ──

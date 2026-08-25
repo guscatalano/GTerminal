@@ -52,6 +52,7 @@ if (-not (Get-NetTCPConnection -State Listen -LocalPort 1420 -ErrorAction Silent
   Write-Host "        its window will be blank — use a 'tauri build --debug' binary via -Exe." -ForegroundColor DarkYellow
 }
 
+Add-Type -AssemblyName System.Drawing
 $failures = @()
 function Pass { param($n) Write-Host "PASS $n" -ForegroundColor Green }
 function Fail { param($n, $d) $script:failures += "${n}: $d"; Write-Host "FAIL ${n}: $d" -ForegroundColor Red }
@@ -94,7 +95,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "tui", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -125,6 +126,7 @@ $sig = @'
 [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
 [DllImport("user32.dll")] public static extern bool GetLayeredWindowAttributes(IntPtr h, out uint key, out byte alpha, out uint flags);
 [DllImport("user32.dll", EntryPoint="GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
+[DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
 public struct RECT { public int L,T,R,B; }
 '@
@@ -192,6 +194,51 @@ function Drag {
   }
   $U::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
   Start-Sleep -Milliseconds 300
+}
+
+# What the window is actually showing, not what it was sent.
+#
+# Every other assertion in these suites is about bytes: what reached the
+# shell, what the daemon holds. A window can be given a correct frame and
+# fail to put it on screen — which is what "stuck on old output" was —
+# and no byte-level test can see that. PrintWindow renders the window's
+# own content, so this works without the window being in front.
+function Capture-Window {
+  param($hwnd)
+  $r = New-Object 'GTerm.Vis+RECT'
+  [void]$U::GetWindowRect($hwnd, [ref]$r)
+  $w = $r.R - $r.L
+  $h = $r.B - $r.T
+  $bmp = New-Object System.Drawing.Bitmap($w, $h)
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $dc = $g.GetHdc()
+  [void]$U::PrintWindow($hwnd, $dc, 2)   # PW_RENDERFULLCONTENT
+  $g.ReleaseHdc($dc)
+  $g.Dispose()
+  $bmp
+}
+
+# The fraction of sampled pixels that differ. Sampled rather than
+# exhaustive because a 1280x800 comparison pixel by pixel through
+# GetPixel takes longer than the thing being measured; every eighth
+# pixel is far more than enough to tell a full-screen repaint from a
+# blinking cursor.
+function Frame-Diff {
+  param($a, $b, $step = 8, $tolerance = 24)
+  $w = [Math]::Min($a.Width, $b.Width)
+  $h = [Math]::Min($a.Height, $b.Height)
+  $diff = 0
+  $total = 0
+  for ($y = 0; $y -lt $h; $y += $step) {
+    for ($x = 0; $x -lt $w; $x += $step) {
+      $pa = $a.GetPixel($x, $y)
+      $pb = $b.GetPixel($x, $y)
+      $total++
+      $d = [Math]::Abs($pa.R - $pb.R) + [Math]::Abs($pa.G - $pb.G) + [Math]::Abs($pa.B - $pb.B)
+      if ($d -gt $tolerance) { $diff++ }
+    }
+  }
+  if ($total -eq 0) { 0.0 } else { [double]$diff / $total }
 }
 
 function Move-Pointer {
@@ -812,6 +859,55 @@ if (-not $Only -or $Only -eq "hover") {
   if ($all -match "hover-scene-ready") { Pass "and the session was live throughout" }
   else { Fail "hover" "the scene never got a working shell, so it proves nothing" }
   Stop-App $ctx7
+}
+
+# ══ scene: a full-screen program actually redrawing ════════════════════
+# The gap this closes: everything else here asserts on bytes, and the
+# bytes were fine. A window can be handed a correct frame and never put
+# it on screen — reported as "Agency gets stuck on old output, when it
+# redraws the whole screen it doesn't do it" — and only pixels can tell.
+#
+# The fixture alternates full-screen fills on the alternate screen, which
+# is how Claude Code, Agency, Hermes, vim and lazygit all draw. A repaint
+# that does not reach the screen leaves the previous colour there, so the
+# assertion is simply: the window looks different between frames.
+if (-not $Only -or $Only -eq "tui") {
+  $ctx8 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`"}"
+  $h8 = $ctx8.Hwnd
+  $fixture = Join-Path $repo "testsixtures	ui.ps1"
+  Record-Scene "tui" 30 $ctx8 {
+    Run-Cmd 'echo before-the-tui' 2
+    $script:shotShell = Capture-Window $h8
+    Run-Cmd "& '$fixture' -Frames 3 -Ms 2600" 0
+    Start-Sleep -Milliseconds 1400          # into the first frame
+    $script:shotA = Capture-Window $h8
+    Start-Sleep -Milliseconds 2600          # into the second
+    $script:shotB = Capture-Window $h8
+    Start-Sleep -Milliseconds 2600          # into the third
+    $script:shotC = Capture-Window $h8
+    Start-Sleep -Seconds 4                  # it leaves the alt screen
+    $script:shotAfter = Capture-Window $h8
+  }
+  # Painted at all: the alternate screen replaced the shell.
+  $d1 = Frame-Diff $shotShell $shotA
+  if ($d1 -gt 0.30) { Pass "a full-screen program takes over the screen" }
+  else { Fail "tui" ("the screen barely changed when the program started ({0:p0})" -f $d1) }
+  # And redrew: frame two must not look like frame one. This is the one
+  # that fails when a redraw is composed but never presented.
+  $d2 = Frame-Diff $shotA $shotB
+  if ($d2 -gt 0.30) { Pass "and each redraw reaches the screen" }
+  else { Fail "tui" ("frame 2 looks like frame 1 ({0:p0} changed) - the redraw did not appear" -f $d2) }
+  $d3 = Frame-Diff $shotB $shotC
+  if ($d3 -gt 0.30) { Pass "and keeps reaching it, frame after frame" }
+  else { Fail "tui" ("frame 3 looks like frame 2 ({0:p0} changed)" -f $d3) }
+  # Leaving the alternate screen puts the shell back, rather than
+  # stranding the last frame on screen.
+  $d4 = Frame-Diff $shotC $shotAfter
+  if ($d4 -gt 0.30) { Pass "and the shell comes back when it exits" }
+  else { Fail "tui" ("the last frame stayed on screen after it exited ({0:p0} changed)" -f $d4) }
+  Write-Host ("  changed: start {0:p0}, frame2 {1:p0}, frame3 {2:p0}, exit {3:p0}" -f $d1, $d2, $d3, $d4) -ForegroundColor DarkGray
+  foreach ($b in $shotShell, $shotA, $shotB, $shotC, $shotAfter) { $b.Dispose() }
+  Stop-App $ctx8
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════
