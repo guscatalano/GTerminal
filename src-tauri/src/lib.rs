@@ -156,7 +156,20 @@ fn attach_session(
 /// Where the logs live, so the window can offer to open the folder.
 #[tauri::command]
 fn logs_path() -> String {
-    mux::state_dir_path().to_string_lossy().into_owned()
+    let dir = mux::state_dir_path();
+    // Create it first: a path that does not exist cannot be resolved, and
+    // on a fresh install nothing has written here yet.
+    let _ = std::fs::create_dir_all(&dir);
+    // Packaged, writes under %LOCALAPPDATA% are redirected into the
+    // package's LocalCache. The unredirected path is what the environment
+    // variable says and is not where the files are - showing it sends
+    // someone to an empty folder, or to no folder at all. Canonicalising
+    // resolves the redirection.
+    let real = std::fs::canonicalize(&dir).unwrap_or(dir);
+    let shown = real.to_string_lossy().into_owned();
+    // Canonicalising yields a \\?\ prefix, which is correct and which
+    // no file manager should be asked to display.
+    shown.strip_prefix(r"\\?\").unwrap_or(&shown).to_string()
 }
 
 /// Append one line to the UI event log.

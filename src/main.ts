@@ -4774,6 +4774,25 @@ function suggestThemesOnce(freshInstall: boolean) {
   go.focus();
 }
 
+/// Open the folder the logs are in, and say so when it cannot.
+///
+/// It used to swallow the failure, so a button that did nothing looked
+/// like a button that was broken for no reason - which is exactly what it
+/// was: opening a path needs its own permission, and without it the call
+/// was rejected every time, silently.
+async function showLogsFolder(button: HTMLButtonElement) {
+  const original = button.textContent ?? "Open logs folder";
+  try {
+    const dir = await invoke<string>("logs_path");
+    if (!dir) throw new Error("no path");
+    await openPath(dir);
+  } catch (err) {
+    logUi("error", { message: `open logs folder: ${String(err)}` });
+    button.textContent = "Could not open it";
+    window.setTimeout(() => (button.textContent = original), 2500);
+  }
+}
+
 /// Another window onto the same daemon.
 ///
 /// Created from here rather than from Rust: WebviewWindow is the API
@@ -7463,12 +7482,7 @@ function buildSettingsPage() {
       const open = document.createElement("button");
       open.className = "set-control";
       open.textContent = "Open logs folder";
-      open.addEventListener("click", () => {
-        void (async () => {
-          const dir = await invoke<string>("logs_path").catch(() => "");
-          if (dir) await openPath(dir).catch(() => {});
-        })();
-      });
+      open.addEventListener("click", () => void showLogsFolder(open));
       wrap.append(open, where);
       return wrap;
     })()
@@ -7490,13 +7504,7 @@ function buildSettingsPage() {
   logsBtn.className = "set-control about-logs";
   logsBtn.textContent = "Open logs folder";
   logsBtn.title = "ui.log (what this window did), history (session transcripts), sessions (checkpoints)";
-  logsBtn.addEventListener("click", () => {
-    void (async () => {
-      const dir = await invoke<string>("logs_path").catch(() => "");
-      if (!dir) return;
-      await openPath(dir).catch(() => {});
-    })();
-  });
+  logsBtn.addEventListener("click", () => void showLogsFolder(logsBtn));
   aboutApp.appendChild(logsBtn);
   const aboutBy = document.createElement("div");
   aboutBy.textContent = "Made by Gus Catalano";

@@ -33,6 +33,8 @@
     "clipboard-manager:allow-write-text",
     "core:webview:allow-create-webview-window",
     "core:window:allow-create",
-    "core:window:allow-destroy"
+    "core:window:allow-destroy",
+    "opener:allow-open-path",
+    "opener:allow-reveal-item-in-dir"
   ]
 }

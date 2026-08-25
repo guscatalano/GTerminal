@@ -249,6 +249,49 @@ fn yes() -> bool {
 }
 
 #[cfg(test)]
+mod daemon_binary_tests {
+    /// A Store update replaces the package, and a running process holds
+    /// its own file open. The daemon outlives the app by design, so if it
+    /// runs from the package it is the thing blocking the update - the
+    /// symptom being a launch that says another program is using this
+    /// file.
+    #[test]
+    fn the_daemon_runs_from_a_copy_beside_the_sessions() {
+        let tmp = std::env::temp_dir().join(format!("gterm-binary-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("temp dir");
+        let previous = std::env::var("LOCALAPPDATA").ok();
+        std::env::set_var("LOCALAPPDATA", &tmp);
+
+        let chosen = super::client::daemon_binary().expect("a path");
+
+        if let Some(p) = previous {
+            std::env::set_var("LOCALAPPDATA", p);
+        }
+
+        assert!(
+            chosen.starts_with(&tmp),
+            "the daemon binary must live beside the sessions, not in the package: {chosen:?}"
+        );
+        assert!(chosen.exists(), "the copy was never made: {chosen:?}");
+        let name = chosen.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            name.contains(env!("CARGO_PKG_VERSION")),
+            "named for its version, so an update does not reuse the old copy: {name}"
+        );
+        // Same bytes, or the daemon and the window disagree about the
+        // protocol they speak.
+        let here = std::env::current_exe().unwrap();
+        assert_eq!(
+            std::fs::metadata(&here).unwrap().len(),
+            std::fs::metadata(&chosen).unwrap().len(),
+            "the copy must be this binary, not some other one"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
+
+#[cfg(test)]
 mod keep_tests {
     use super::{is_typing, worth_keeping};
 
@@ -1461,12 +1504,52 @@ pub mod client {
         Err("session daemon did not start".into())
     }
 
+    /// The binary the daemon runs from: a copy of this one, kept beside
+    /// the sessions rather than inside the installed package.
+    ///
+    /// The daemon outlives the app - that is the point of it - and a
+    /// running process holds its own file open. Run straight from the
+    /// package and a Store update cannot replace that file: the update
+    /// half-applies and the next launch says another program is using
+    /// this file. The app itself may hold the package open while it runs,
+    /// which is ordinary and expected; the daemon lingering afterwards is
+    /// not, and it is the one that blocks the update.
+    ///
+    /// Named for the version, so an update spawns its own daemon rather
+    /// than reusing a stale copy, and older copies are removed when no
+    /// longer running.
+    pub(super) fn daemon_binary() -> Result<PathBuf, String> {
+        let current = std::env::current_exe().map_err(|e| e.to_string())?;
+        let dir = state_dir().join("bin");
+        if std::fs::create_dir_all(&dir).is_err() {
+            return Ok(current);
+        }
+        let want = dir.join(format!("gterminal-daemon-{}.exe", env!("CARGO_PKG_VERSION")));
+        if !want.exists() {
+            // A copy that fails - antivirus, a full disk - is not worth
+            // failing to start over: the package binary still works, it
+            // just holds the file.
+            if std::fs::copy(&current, &want).is_err() {
+                return Ok(current);
+            }
+            // Older versions' copies, once nothing is running them.
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for e in entries.flatten() {
+                    if e.path() != want {
+                        let _ = std::fs::remove_file(e.path());
+                    }
+                }
+            }
+        }
+        Ok(want)
+    }
+
     #[cfg(windows)]
     fn spawn_daemon() -> Result<(), String> {
         use std::os::windows::process::CommandExt;
         const DETACHED_PROCESS: u32 = 0x0000_0008;
         const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
-        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let exe = daemon_binary()?;
         // Breakaway lets the daemon survive `tauri dev` job cleanup; fall
         // back for environments whose job object forbids breakaway.
         let spawn = |flags: u32| {
