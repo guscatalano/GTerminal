@@ -1460,6 +1460,7 @@ if (-not $Only -or $Only -eq "copilot") {
     # History on: what a real agent TUI's bytes look like after ConPTY has
     # been through them is the evidence for every question this scene was
     # written to answer, and it costs nothing to keep.
+    $skipCopilot = $false
     $ctx17 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7}"
     $h17 = $ctx17.Hwnd
     Record-Scene "copilot" 60 $ctx17 {
@@ -1505,10 +1506,27 @@ if (-not $Only -or $Only -eq "copilot") {
     $floor = 0.001
     $idle  = Frame-Diff $cpStarted $cpIdle -IgnoreBottom 40
     $c1 = Frame-Diff $cpShell $cpStarted
-    if ($c1 -gt 0.01) { Pass "copilot takes the screen" }
-    else { Fail "copilot" ("the screen barely changed when it started ({0:p1})" -f $c1) }
+    # Signed out, copilot prints a line and exits rather than opening a
+    # UI at all, so there is nothing here to test and a runner would fail
+    # on the absence of a program rather than on this terminal.
+    #
+    # The transcript decides that, not the pixels. "Few pixels changed"
+    # is exactly what the reported bug looks like too, so skipping on it
+    # would hide the thing this scene exists to catch. Entering the
+    # alternate screen is the divide: those bytes arriving and no picture
+    # appearing is our bug, and is asserted; those bytes never arriving
+    # means no full-screen program ever ran, which is not ours to fail.
+    $screenTaken = (Transcripts) -match [regex]::Escape("$([char]27)[?1049h")
+    if (-not $screenTaken) {
+      Write-Host "  note: copilot never opened a full-screen UI (not signed in) - nothing for this scene to test" -ForegroundColor DarkYellow
+      $skipCopilot = $true
+    }
+    if ($skipCopilot) { }
+    elseif ($c1 -gt 0.01) { Pass "copilot takes the screen" }
+    else { Fail "copilot" ("the screen barely changed when it started ({0:p1}), though it did enter the alternate screen" -f $c1) }
     $c2 = Frame-Diff $cpIdle $cpArrow -IgnoreBottom 40
-    if ($c2 -gt $floor -and $c2 -gt $idle) { Pass "and repaints when you drive it" }
+    if ($skipCopilot) { }
+    elseif ($c2 -gt $floor -and $c2 -gt $idle) { Pass "and repaints when you drive it" }
     else { Fail "copilot" ("an arrow key changed nothing on screen ({0:p2} against {1:p2} idle) - this is the reported symptom" -f $c2, $idle) }
     # Letters reaching a composer prove the machine is signed in, which is
     # what makes the screen before it a folder-trust dialog and Enter an
@@ -1518,12 +1536,12 @@ if (-not $Only -or $Only -eq "copilot") {
     # either way, so a silent skip cannot pass for a pass.
     $c3 = Frame-Diff $cpArrow $cpOpen -IgnoreBottom 40
     $c4 = Frame-Diff $cpOpen $cpTyped -IgnoreBottom 40
-    $signedIn = $c4 -gt $floor -and $c4 -gt $idle
+    $signedIn = -not $skipCopilot -and $c4 -gt $floor -and $c4 -gt $idle
     if ($signedIn) {
       Pass "and letters land in its composer"
       if ($c3 -gt $floor -and $c3 -gt $idle) { Pass "and redraws the screen behind a dismissed dialog" }
       else { Fail "copilot" ("the dialog left no trace of being answered ({0:p2})" -f $c3) }
-    } else {
+    } elseif (-not $skipCopilot) {
       Write-Host ("  note: no composer to type into ({0:p2}) - signed out, so the dialog and composer checks are skipped" -f $c4) -ForegroundColor DarkYellow
     }
     # What a real TUI's control sequences look like after ConPTY has been
@@ -1539,7 +1557,7 @@ if (-not $Only -or $Only -eq "copilot") {
     $alt = ([regex]::Matches($t17, [regex]::Escape("$esc[?1049h"))).Count
     Write-Host ("  sequences: {0} chars, sync-output open x{1} close x{2}, alt-screen enter x{3}" -f $t17.Length, $bsu, $esu, $alt) -ForegroundColor DarkGray
     Write-Host ("  changed: start {0:p1}, idle {1:p2}, arrow {2:p2}, dialog {3:p2}, letters {4:p2}, exit {5:p1}" -f $c1, $idle, $c2, $c3, $c4, (Frame-Diff $cpTyped $cpGone -IgnoreBottom 40)) -ForegroundColor DarkGray
-    if ($c1 -le 0.01 -or $c2 -le $idle -or ($signedIn -and $c3 -le $idle)) {
+    if (-not $skipCopilot -and ($c1 -le 0.01 -or $c2 -le $idle -or ($signedIn -and $c3 -le $idle))) {
       $dump = Join-Path $outDir "copilot-frames"
       New-Item -ItemType Directory -Force $dump | Out-Null
       $i = 0
@@ -1583,6 +1601,7 @@ if (-not $Only -or $Only -eq "copilot-mcp") {
       '$env:MCP_SLOW_MS = "6000"'
       "& '$copilot' --additional-mcp-config '$mcpJson'"
     ) | Set-Content -Path $launcher -Encoding UTF8
+    $skipMcp = $false
     $ctx18 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7}"
     $h18 = $ctx18.Hwnd
     Record-Scene "copilot-mcp" 70 $ctx18 {
@@ -1619,17 +1638,26 @@ if (-not $Only -or $Only -eq "copilot-mcp") {
     $floor = 0.001
     $idle = Frame-Diff $mcAfter $mcIdle -IgnoreBottom 40
     $m1 = Frame-Diff $mcShell $mcTrust
-    if ($m1 -gt 0.01) { Pass "an agent CLI with MCP servers takes the screen while they start" }
-    else { Fail "copilot-mcp" ("nothing was drawn during setup ({0:p1})" -f $m1) }
+    # As in the scene above: no alternate screen means no full-screen
+    # program ran here, which is a signed-out machine rather than a fault.
+    if (-not ((Transcripts) -match [regex]::Escape("$([char]27)[?1049h"))) {
+      Write-Host "  note: copilot never opened a full-screen UI (not signed in) - nothing for this scene to test" -ForegroundColor DarkYellow
+      $skipMcp = $true
+    }
+    if ($skipMcp) { }
+    elseif ($m1 -gt 0.01) { Pass "an agent CLI with MCP servers takes the screen while they start" }
+    else { Fail "copilot-mcp" ("nothing was drawn during setup ({0:p1}), though it did enter the alternate screen" -f $m1) }
     # Trust answered to finished screen, with a slow child starting
     # underneath it the whole time. Not measured from the mid-setup frame:
     # copilot does not wait for its servers before drawing, so that frame
     # already matched the finished one and the comparison said nothing.
     $m2 = Frame-Diff $mcTrust $mcAfter -IgnoreBottom 40
-    if ($m2 -gt $floor -and $m2 -gt $idle) { Pass "and draws its way to a finished screen while they start" }
+    if ($skipMcp) { }
+    elseif ($m2 -gt $floor -and $m2 -gt $idle) { Pass "and draws its way to a finished screen while they start" }
     else { Fail "copilot-mcp" ("the screen never moved past setup ({0:p2} against {1:p2} idle) - this is the reported symptom" -f $m2, $idle) }
     $m3 = Frame-Diff $mcIdle $mcTyped -IgnoreBottom 40
-    if ($m3 -gt $floor -and $m3 -gt $idle) { Pass "and it still repaints on input afterwards" }
+    if ($skipMcp) { }
+    elseif ($m3 -gt $floor -and $m3 -gt $idle) { Pass "and it still repaints on input afterwards" }
     else { Fail "copilot-mcp" ("input stopped repainting after setup ({0:p2}) - this is the reported symptom" -f $m3) }
     # Reported, not asserted: whether the server's stderr survived in the
     # transcript. It is written straight into someone else's alternate
@@ -1643,7 +1671,7 @@ if (-not $Only -or $Only -eq "copilot-mcp") {
     Write-Host ("  changed: setup {0:p1}, draw {1:p2}, idle {2:p2}, input {3:p2}; server noise in transcript: {4}" -f $m1, $m2, $idle, $m3, $noise) -ForegroundColor DarkGray
     # Mirrors the assertions above exactly. An earlier version did not,
     # and a failing run saved nothing to look at.
-    if ($m1 -le 0.01 -or -not ($m2 -gt $floor -and $m2 -gt $idle) -or -not ($m3 -gt $floor -and $m3 -gt $idle)) {
+    if (-not $skipMcp -and ($m1 -le 0.01 -or -not ($m2 -gt $floor -and $m2 -gt $idle) -or -not ($m3 -gt $floor -and $m3 -gt $idle))) {
       $dump = Join-Path $outDir "copilot-mcp-frames"
       New-Item -ItemType Directory -Force $dump | Out-Null
       $i = 0
