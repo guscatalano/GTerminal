@@ -1,0 +1,76 @@
+name: Visual
+
+# The scenes drive a real window: they take the foreground, type into it,
+# click menus by coordinate and photograph the result. That is unpleasant
+# to run on the machine you are working at - it types into whatever you
+# have open - so it belongs on a runner instead.
+#
+# Not on every push: it takes ten minutes and it is the only suite here
+# that can be flaky, since it depends on a window appearing and a shell
+# starting. Nightly, plus on demand, plus on tags so a release is not cut
+# without it.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 7 * * *"
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  visual:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # A binary with the UI embedded. A plain `cargo build` points the
+      # window at the vite dev server, which is not running here, and
+      # every scene would fail against a blank window.
+      - name: Build the app (UI embedded)
+        run: npx tauri build --debug --no-bundle
+
+      # The runner starts at 1024x768 and the scenes size their window to
+      # 1280x800, with menu coordinates measured at that size. A window
+      # bigger than the screen gets clipped, and the clicks land nowhere.
+      - name: Give the runner a screen the window fits on
+        shell: pwsh
+        run: |
+          Set-DisplayResolution -Width 1920 -Height 1080 -Force
+          Add-Type -AssemblyName System.Windows.Forms
+          "screen: $([System.Windows.Forms.Screen]::PrimaryScreen.Bounds)"
+
+      # -Force because nobody is at this keyboard: the idle check exists
+      # to protect a person, and there is not one here.
+      - name: Visual scenes
+        run: npm run test:visual -- -Yes -Force -Exe "src-tauri/target/debug/gterminal.exe"
+
+      # The videos and any saved frames are the point when something
+      # fails: a scene that says "frame 2 looks like frame 1" is far
+      # easier to judge with the pictures in front of you.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: visual-recordings
+          path: |
+            docs/visual/*.avi
+            docs/visual/*.gif
+            docs/visual/tui-frames/*.png
+          if-no-files-found: warn

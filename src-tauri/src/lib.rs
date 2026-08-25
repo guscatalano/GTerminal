@@ -801,6 +801,36 @@ pub fn run() {
                     {
                         let _ = settings.SetAreBrowserAcceleratorKeysEnabled(false);
                     }
+                    // Reading the clipboard makes WebView2 ask permission,
+                    // the way a web page would. In a terminal it is not a
+                    // web page asking: the user pressed Ctrl+V, or chose
+                    // Paste from a menu they opened. A dialog in front of
+                    // that is a bug, and it appears on every copy or paste
+                    // until someone notices the "remember" box.
+                    //
+                    // Clipboard read is granted; everything else is left
+                    // to the default, so a page that somehow asks for the
+                    // camera still has to ask.
+                    if let Ok(core) = webview.controller().CoreWebView2() {
+                        use webview2_com::Microsoft::Web::WebView2::Win32::{
+                            COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ,
+                            COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+                        };
+                        use webview2_com::PermissionRequestedEventHandler;
+                        let mut token = Default::default();
+                        let _ = core.add_PermissionRequested(
+                            &PermissionRequestedEventHandler::create(Box::new(|_, args| {
+                                let Some(args) = args else { return Ok(()) };
+                                let mut kind = Default::default();
+                                args.PermissionKind(&mut kind)?;
+                                if kind == COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ {
+                                    args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW)?;
+                                }
+                                Ok(())
+                            })),
+                            &mut token,
+                        );
+                    }
                 });
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_secs(5));

@@ -874,7 +874,7 @@ if (-not $Only -or $Only -eq "hover") {
 if (-not $Only -or $Only -eq "tui") {
   $ctx8 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`"}"
   $h8 = $ctx8.Hwnd
-  $fixture = Join-Path $repo "testsixtures	ui.ps1"
+  $fixture = Join-Path $repo "tests\fixtures\tui.ps1"
   Record-Scene "tui" 30 $ctx8 {
     Run-Cmd 'echo before-the-tui' 2
     $script:shotShell = Capture-Window $h8
@@ -906,6 +906,19 @@ if (-not $Only -or $Only -eq "tui") {
   if ($d4 -gt 0.30) { Pass "and the shell comes back when it exits" }
   else { Fail "tui" ("the last frame stayed on screen after it exited ({0:p0} changed)" -f $d4) }
   Write-Host ("  changed: start {0:p0}, frame2 {1:p0}, frame3 {2:p0}, exit {3:p0}" -f $d1, $d2, $d3, $d4) -ForegroundColor DarkGray
+  # Keep the frames when they disagree with expectations: "0% changed" is
+  # true of a screen that never redrew and of a program that never ran,
+  # and the pictures are the only thing that tells them apart.
+  if ($d1 -le 0.30 -or $d2 -le 0.30) {
+    $dump = Join-Path $outDir "tui-frames"
+    New-Item -ItemType Directory -Force $dump | Out-Null
+    $shotShell.Save((Join-Path $dump "0-shell.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+    $shotA.Save((Join-Path $dump "1-frame.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+    $shotB.Save((Join-Path $dump "2-frame.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+    $shotC.Save((Join-Path $dump "3-frame.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+    $shotAfter.Save((Join-Path $dump "4-after.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+    Write-Host "  frames saved to $dump" -ForegroundColor DarkGray
+  }
   foreach ($b in $shotShell, $shotA, $shotB, $shotC, $shotAfter) { $b.Dispose() }
   Stop-App $ctx8
 }

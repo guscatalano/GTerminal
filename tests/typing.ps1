@@ -501,7 +501,7 @@ $eof.Client.Close()
 # case that breaks when something reorders or coalesces writes, and they
 # are how Claude Code, Agency, Hermes and vim all draw.
 $tui = Open-Shell "pwsh"
-$fixture = Join-Path $repo "testsixtures	ui.ps1"
+$fixture = Join-Path $repo "tests\fixtures\tui.ps1"
 Type-Text "& '$fixture' -Frames 3 -Ms 500"
 Send-Key "`r"
 Start-Sleep -Seconds 6
