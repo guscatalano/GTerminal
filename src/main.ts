@@ -6468,6 +6468,7 @@ function buildSettingsPage() {
   };
 
   settingsSection("Appearance");
+
   const themeSel = mkThemeSelect(
     themeKey,
     (v) => {
@@ -6723,6 +6724,20 @@ function buildSettingsPage() {
       })
     );
   }
+
+  settingRow(
+    "Decoration gutter",
+    "The narrow strip down the right edge marking failed commands and find matches. Turn it off if a full-screen program (Claude Code, Agency, vim) stops redrawing — it is the extra layer the terminal has to draw. Takes effect for tabs opened afterwards.",
+    mkSelect(
+      [["on", "Show"], ["off", "Hide"]],
+      config.overview_ruler === false ? "off" : "on",
+      (v) => {
+        config.overview_ruler = v === "on";
+        saveConfig();
+      }
+    )
+  );
+  settingsRow_TabHide();
 
   settingsSection("Window");
   settingRow(
@@ -7375,6 +7390,8 @@ function buildSettingsPage() {
     )
   );
 
+
+  settingsSection("Diagnostics");
   settingRow(
     "Log what this window does",
     "Menus opening, what was chosen — or refused — and where each paste came from, in ui.log next to the transcripts. Sizes only: what you copied is never written down. Diagnostics you have to switch on before reproducing are the ones nobody has when a bug first appears.",
@@ -7388,18 +7405,28 @@ function buildSettingsPage() {
     )
   );
   settingRow(
-    "Decoration gutter",
-    "The narrow strip down the right edge marking failed commands and find matches. Turn it off if a full-screen program (Claude Code, Agency, vim) stops redrawing — it is the extra layer the terminal has to draw. Takes effect for tabs opened afterwards.",
-    mkSelect(
-      [["on", "Show"], ["off", "Hide"]],
-      config.overview_ruler === false ? "off" : "on",
-      (v) => {
-        config.overview_ruler = v === "on";
-        saveConfig();
-      }
-    )
+    "Where the logs are",
+    "ui.log is what this window did — menus, pastes, errors. history holds the session transcripts, and sessions holds the checkpoints that survive a restart.",
+    (() => {
+      const wrap = document.createElement("div");
+      wrap.className = "setting-stack";
+      const where = document.createElement("div");
+      where.className = "setting-status";
+      void invoke<string>("logs_path").then((p) => (where.textContent = p)).catch(() => {});
+      const open = document.createElement("button");
+      open.className = "set-control";
+      open.textContent = "Open logs folder";
+      open.addEventListener("click", () => {
+        void (async () => {
+          const dir = await invoke<string>("logs_path").catch(() => "");
+          if (dir) await openPath(dir).catch(() => {});
+        })();
+      });
+      wrap.append(open, where);
+      return wrap;
+    })()
   );
-  settingsRow_TabHide();
+
   settingsSection("About");
   const about = document.createElement("div");
   about.className = "about-block";
