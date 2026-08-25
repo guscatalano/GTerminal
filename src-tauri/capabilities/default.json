@@ -1,9 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Capability for every app window: the first one and any opened after it",
   "windows": [
-    "main"
+    "main",
+    "w*"
   ],
   "permissions": [
     "core:default",
