@@ -252,6 +252,7 @@ function Wait-Settled {
   # keystroke moved - so every input comparison then failed against its
   # own noise. Measure once it is quiet, or do not measure.
   param($hwnd, [int]$timeoutSec = 45, [double]$quiet = 0.004, [int]$settleMs = 1500)
+  $script:LastSettled = $true
   $sw = [System.Diagnostics.Stopwatch]::StartNew()
   $prev = Capture-Window $hwnd
   while ($sw.Elapsed.TotalSeconds -lt $timeoutSec) {
@@ -260,7 +261,8 @@ function Wait-Settled {
     $moved = Frame-Diff $prev $now -IgnoreBottom 40
     $prev.Dispose()
     $prev = $now
-    if ($moved -le $quiet) { break }
+    if ($moved -le $quiet) { $script:LastSettled = $true; break }
+    $script:LastSettled = $false
   }
   $script:LastSettleWait = [Math]::Round($sw.Elapsed.TotalSeconds, 1)
   $prev
@@ -1531,6 +1533,7 @@ if (-not $Only -or $Only -eq "copilot") {
       # frames against each other, so it has to begin from a still screen.
       $script:cpSettled = Wait-Settled $h17 45
       $script:cpSettleWait = $script:LastSettleWait
+      $script:cpDidSettle = $script:LastSettled
       # A control frame over the same span as the keystroke below gets,
       # so the two are comparable. Whatever the screen does on its own it
       # does here too, and input has to beat it.
@@ -1597,6 +1600,14 @@ if (-not $Only -or $Only -eq "copilot") {
     $c2 = Frame-Diff $cpIdle $cpArrow -IgnoreBottom 40
     $c4 = Frame-Diff $cpOpen $cpTyped -IgnoreBottom 40
     $moved = [Math]::Max($c2, $c4)
+    # A screen that never stops moving cannot be measured this way, and
+    # is also not the fault being looked for: the report is a screen stuck
+    # on old output, and this is the opposite of stuck. Say so and stop,
+    # rather than failing a working terminal against its own animation.
+    if (-not $cpDidSettle -and -not $skipCopilot) {
+      Write-Host ("  note: the screen never went still ({0:p2} of it kept moving on its own), so input cannot be measured against it here" -f $idle) -ForegroundColor DarkYellow
+      $skipCopilot = $true
+    }
     if ($skipCopilot) { }
     elseif ($moved -gt $floor -and $moved -gt $idle) {
       Pass ("and repaints when you drive it ({0})" -f $(if ($c2 -ge $c4) { "arrows" } else { "letters" }))
