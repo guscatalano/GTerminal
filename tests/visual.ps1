@@ -95,7 +95,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -1353,6 +1353,87 @@ if (-not $Only -or $Only -eq "lastfocused") {
   if ($secondStillUp) { Pass "and leaves the other one alone" }
   else { Fail "lastfocused" "it took the other window with it" }
   Stop-App $ctx15
+}
+
+# == scene: a real full-screen program =================================
+# The tui scene uses a fixture: sequences this project chose to send. This
+# one runs vim, which chooses its own - a different terminfo path, its own
+# ideas about the alternate screen and about redrawing. It is the closest
+# thing to the report that started this ("it gets stuck on old output")
+# that can be run without installing anything.
+#
+# Skipped rather than failed where vim is absent: a machine without Git
+# for Windows is not a broken terminal.
+if (-not $Only -or $Only -eq "vim") {
+  $vim = "C:\Program Files\Git\usr\bin\vim.exe"
+  if (-not (Test-Path $vim)) {
+    Write-Host "  note: vim not installed, skipping the real-TUI scene" -ForegroundColor DarkYellow
+  } else {
+    $ctx16 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`"}"
+    $h16 = $ctx16.Hwnd
+    Record-Scene "vim" 34 $ctx16 {
+      Run-Cmd 'echo before-vim' 2
+      $script:vimShell = Capture-Window $h16
+      # -u NONE: no config, so this tests the terminal rather than
+      # whatever plugins happen to be installed.
+      Run-Cmd "& '$vim' -u NONE -N" 0
+      Start-Sleep -Seconds 6
+      $script:vimOpen = Capture-Window $h16
+      Send-Text "i"
+      Start-Sleep -Milliseconds 400
+      foreach ($n in 1..12) {
+        Send-Text "VIMLINE-$n is here"
+        Key $VK_RETURN
+        Start-Sleep -Milliseconds 120
+      }
+      Start-Sleep -Seconds 2
+      $script:vimTyped = Capture-Window $h16
+      Key $VK_ESC
+      Start-Sleep -Milliseconds 400
+      Send-Text ":q!"
+      Key $VK_RETURN
+      Start-Sleep -Seconds 4
+      $script:vimGone = Capture-Window $h16
+      $script:vimOut = Transcripts
+    }
+    # Thresholds are much lower here than in the fixture scene, and that
+    # is not a weaker test - it is the same test of a different picture.
+    # The fixture fills every cell, so a redraw moves 80% of the pixels;
+    # vim is thin text on black and moves about 2%. A screen that did not
+    # redraw at all sits near zero, which is what these separate.
+    $floor = 0.01
+    $d1 = Frame-Diff $vimShell $vimOpen
+    if ($d1 -gt $floor) { Pass "vim takes the screen" }
+    else { Fail "vim" ("the screen barely changed when vim started ({0:p1})" -f $d1) }
+    $d2 = Frame-Diff $vimOpen $vimTyped
+    if ($d2 -gt $floor) { Pass "and its redraws land as you type" }
+    else { Fail "vim" ("typing into vim changed nothing on screen ({0:p1}) - the reported symptom" -f $d2) }
+    $d3 = Frame-Diff $vimTyped $vimGone
+    if ($d3 -gt $floor) { Pass "and the shell has its screen back after :q" }
+    else { Fail "vim" ("vim's last frame is still on screen after it exited ({0:p1})" -f $d3) }
+    # And what actually crossed the wire, which no threshold can fudge:
+    # vim drew the last line, and put the screen back on the way out.
+    # Not asserted: that vim's text appears in the transcript. It does
+    # not, and that is not a fault - ConPTY keeps its own screen and emits
+    # its own redraw, so what reaches the transcript is ConPTY's rendering
+    # rather than the characters vim wrote. Twelve lines were plainly on
+    # screen while none of them were in the byte stream. The pixels are
+    # the evidence here; the bytes cannot be.
+    if ($vimOut -match "\?1049l") { Pass "and it left the alternate screen behind it" }
+    else { Fail "vim" "the alternate screen was never left" }
+    Write-Host ("  changed: start {0:p1}, typing {1:p1}, exit {2:p1}" -f $d1, $d2, $d3) -ForegroundColor DarkGray
+    if ($d1 -le $floor -or $d2 -le $floor -or $d3 -le $floor) {
+      $dump = Join-Path $outDir "vim-frames"
+      New-Item -ItemType Directory -Force $dump | Out-Null
+      $vimShell.Save((Join-Path $dump "0-shell.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+      $vimOpen.Save((Join-Path $dump "1-open.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+      $vimTyped.Save((Join-Path $dump "2-typed.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+      $vimGone.Save((Join-Path $dump "3-gone.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+      Write-Host "  frames saved to $dump" -ForegroundColor DarkGray
+    }
+    foreach ($b in $vimShell, $vimOpen, $vimTyped, $vimGone) { $b.Dispose() }
+    Stop-App $ctx16
+  }
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════
