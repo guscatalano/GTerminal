@@ -95,7 +95,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -1457,7 +1457,10 @@ if (-not $Only -or $Only -eq "copilot") {
   if (-not $copilot) {
     Write-Host "  note: copilot CLI not installed, skipping" -ForegroundColor DarkYellow
   } else {
-    $ctx17 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`"}"
+    # History on: what a real agent TUI's bytes look like after ConPTY has
+    # been through them is the evidence for every question this scene was
+    # written to answer, and it costs nothing to keep.
+    $ctx17 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7}"
     $h17 = $ctx17.Hwnd
     Record-Scene "copilot" 60 $ctx17 {
       Run-Cmd 'echo before-copilot' 2
@@ -1523,6 +1526,18 @@ if (-not $Only -or $Only -eq "copilot") {
     } else {
       Write-Host ("  note: no composer to type into ({0:p2}) - signed out, so the dialog and composer checks are skipped" -f $c4) -ForegroundColor DarkYellow
     }
+    # What a real TUI's control sequences look like after ConPTY has been
+    # through them. Printed, never asserted - it is a diagnostic, and the
+    # interesting reading is synchronized output (mode 2026): xterm.js
+    # pauses all drawing on ?2026h and only resumes on ?2026l or after a
+    # one-second timeout, so a stream carrying opens without closes would
+    # look exactly like a screen stuck on old output with laggy typing.
+    $esc = [char]27
+    $t17 = Transcripts
+    $bsu = ([regex]::Matches($t17, [regex]::Escape("$esc[?2026h"))).Count
+    $esu = ([regex]::Matches($t17, [regex]::Escape("$esc[?2026l"))).Count
+    $alt = ([regex]::Matches($t17, [regex]::Escape("$esc[?1049h"))).Count
+    Write-Host ("  sequences: {0} chars, sync-output open x{1} close x{2}, alt-screen enter x{3}" -f $t17.Length, $bsu, $esu, $alt) -ForegroundColor DarkGray
     Write-Host ("  changed: start {0:p1}, idle {1:p2}, arrow {2:p2}, dialog {3:p2}, letters {4:p2}, exit {5:p1}" -f $c1, $idle, $c2, $c3, $c4, (Frame-Diff $cpTyped $cpGone -IgnoreBottom 40)) -ForegroundColor DarkGray
     if ($c1 -le 0.01 -or $c2 -le $idle -or ($signedIn -and $c3 -le $idle)) {
       $dump = Join-Path $outDir "copilot-frames"
@@ -1535,6 +1550,110 @@ if (-not $Only -or $Only -eq "copilot") {
     }
     foreach ($b in $cpShell, $cpStarted, $cpIdle, $cpArrow, $cpOpen, $cpTyped, $cpGone) { $b.Dispose() }
     Stop-App $ctx17
+  }
+}
+
+# == scene: an agent CLI that sets up before it draws ===================
+# The report says agency "gets stuck on old output, like when it redraws
+# the entire screen it doesn't do it", and that it sets things up - MCP
+# servers - before that redraw. That startup is a suspect worth its own
+# scene, because it is the one moment a TUI is not the only thing writing
+# to the terminal: it has a screen up while child processes it does not
+# control are still starting, and those children write to the same pty.
+#
+# tests/fixtures/mcp-slow.mjs plays that part deliberately badly - slow to
+# answer initialize, and chatty on stderr while the host draws. What is
+# under test is the redraw that comes after it: does the screen catch up
+# once setup finishes, and does it still repaint afterwards.
+if (-not $Only -or $Only -eq "copilot-mcp") {
+  $copilot = (Get-Command copilot -ErrorAction SilentlyContinue).Source
+  if (-not $copilot) {
+    Write-Host "  note: copilot CLI not installed, skipping" -ForegroundColor DarkYellow
+  } else {
+    # A launcher rather than a typed command line: the config is nested
+    # JSON, and Send-Text types it one VkKeyScan at a time, which is both
+    # slow and layout-dependent. A file is neither.
+    # Char 92 is a backslash and char 47 a forward slash. Spelling them
+    # out avoids a quoted backslash, which is a regex escape here and has
+    # been mangled by more than one layer on the way into this file.
+    $mcpFixture = (Resolve-Path (Join-Path $PSScriptRoot "fixtures/mcp-slow.mjs")).Path.Replace([char]92, [char]47)
+    $mcpJson = '{"mcpServers":{"slow":{"command":"node","args":["' + $mcpFixture + '"]}}}'
+    $launcher = Join-Path $scratch "run-copilot-mcp.ps1"
+    @(
+      '$env:MCP_SLOW_MS = "6000"'
+      "& '$copilot' --additional-mcp-config '$mcpJson'"
+    ) | Set-Content -Path $launcher -Encoding UTF8
+    $ctx18 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7}"
+    $h18 = $ctx18.Hwnd
+    Record-Scene "copilot-mcp" 70 $ctx18 {
+      Run-Cmd 'echo before-copilot-mcp' 2
+      $script:mcShell = Capture-Window $h18
+      Run-Cmd "& '$launcher'" 0
+      # Nothing starts until the folder-trust dialog is answered - the
+      # first attempt at this scene measured a stretch of time in which
+      # copilot was correctly waiting for a keypress, and read the
+      # stillness as the bug. Answer it, then measure.
+      Start-Sleep -Seconds 10
+      $script:mcTrust = Capture-Window $h18
+      Key $VK_RETURN                  # first option: this session only
+      # Mid-setup: the server has not answered initialize yet.
+      Start-Sleep -Seconds 3
+      $script:mcDuring = Capture-Window $h18
+      # Well past it, with everything the children wrote already on screen.
+      Start-Sleep -Seconds 15
+      $script:mcAfter = Capture-Window $h18
+      Start-Sleep -Seconds 3
+      $script:mcIdle = Capture-Window $h18
+      # Letters, not arrows. The dialog is gone by now and what is up is
+      # the composer, where arrows move a cursor through empty text and
+      # change nothing on screen - inert by design, and it read as a
+      # freeze until the frames were looked at. Never submitted.
+      Send-Text "hello"
+      Start-Sleep -Seconds 3
+      $script:mcTyped = Capture-Window $h18
+      Key 0x43 @([byte]$VK_CTRL)
+      Start-Sleep -Seconds 1
+      Key 0x43 @([byte]$VK_CTRL)
+      Start-Sleep -Seconds 4
+    }
+    $floor = 0.001
+    $idle = Frame-Diff $mcAfter $mcIdle -IgnoreBottom 40
+    $m1 = Frame-Diff $mcShell $mcTrust
+    if ($m1 -gt 0.01) { Pass "an agent CLI with MCP servers takes the screen while they start" }
+    else { Fail "copilot-mcp" ("nothing was drawn during setup ({0:p1})" -f $m1) }
+    # Trust answered to finished screen, with a slow child starting
+    # underneath it the whole time. Not measured from the mid-setup frame:
+    # copilot does not wait for its servers before drawing, so that frame
+    # already matched the finished one and the comparison said nothing.
+    $m2 = Frame-Diff $mcTrust $mcAfter -IgnoreBottom 40
+    if ($m2 -gt $floor -and $m2 -gt $idle) { Pass "and draws its way to a finished screen while they start" }
+    else { Fail "copilot-mcp" ("the screen never moved past setup ({0:p2} against {1:p2} idle) - this is the reported symptom" -f $m2, $idle) }
+    $m3 = Frame-Diff $mcIdle $mcTyped -IgnoreBottom 40
+    if ($m3 -gt $floor -and $m3 -gt $idle) { Pass "and it still repaints on input afterwards" }
+    else { Fail "copilot-mcp" ("input stopped repainting after setup ({0:p2}) - this is the reported symptom" -f $m3) }
+    # Reported, not asserted: whether the server's stderr survived in the
+    # transcript. It is written straight into someone else's alternate
+    # screen, and ConPTY re-renders over it, so its absence says nothing.
+    # Reports the transcript size alongside the match, because "no" on its
+    # own is unreadable: it means the same thing whether the server's
+    # stderr was kept out of the terminal or no transcript was recorded at
+    # all. The first time this printed, it was the second.
+    $t18 = Transcripts
+    $noise = "{0} chars, mcp-slow x{1}" -f $t18.Length, ([regex]::Matches($t18, "mcp-slow")).Count
+    Write-Host ("  changed: setup {0:p1}, draw {1:p2}, idle {2:p2}, input {3:p2}; server noise in transcript: {4}" -f $m1, $m2, $idle, $m3, $noise) -ForegroundColor DarkGray
+    # Mirrors the assertions above exactly. An earlier version did not,
+    # and a failing run saved nothing to look at.
+    if ($m1 -le 0.01 -or -not ($m2 -gt $floor -and $m2 -gt $idle) -or -not ($m3 -gt $floor -and $m3 -gt $idle)) {
+      $dump = Join-Path $outDir "copilot-mcp-frames"
+      New-Item -ItemType Directory -Force $dump | Out-Null
+      $i = 0
+      foreach ($f in $mcShell, $mcTrust, $mcDuring, $mcAfter, $mcIdle, $mcTyped) {
+        $f.Save((Join-Path $dump "$i.png"), [System.Drawing.Imaging.ImageFormat]::Png); $i++
+      }
+      Write-Host "  frames saved to $dump" -ForegroundColor DarkGray
+    }
+    foreach ($b in $mcShell, $mcTrust, $mcDuring, $mcAfter, $mcIdle, $mcTyped) { $b.Dispose() }
+    Stop-App $ctx18
   }
 }
 
