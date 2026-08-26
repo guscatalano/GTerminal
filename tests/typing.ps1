@@ -347,12 +347,25 @@ $ESC = [string][char]27
 #     sends: term.onData hands the byte to write_session, with no special
 #     case for 0x03 anywhere between the keyboard and the pty.
 #
-# Which leaves an unresolved contradiction rather than a diagnosis. The
-# app is reported to interrupt a running command fine on the same machine
-# where every probe here says it cannot. Worth settling before theorising
-# further: what was interrupted there. Ctrl+C against a half-typed line
-# is cancelled by PSReadLine and works here too, and is what most people
-# mean when they say Ctrl+C works.
+# And the contradiction is confirmed rather than explained: the same
+# command, Start-Sleep 30, is interrupted in the app and is not
+# interrupted by this suite, on one machine, minutes apart.
+#
+# Everything structural between the two has now been tried and makes no
+# difference - the shell (pwsh 7.6.5, Windows PowerShell 5.1 and cmd with
+# ping all ignore it here), answering the terminal queries ConPTY sends
+# the way xterm.js answers them, and resizing the pty after attaching the
+# way the window does. The window itself adds nothing: its Ctrl+C is
+# term.onData -> write_session -> Request::Write, the same bytes this
+# suite sends, with no windowsMode or windowsPty set on the terminal and
+# no sideloaded conpty.dll in the package to change hosts.
+#
+# So what is left is something about the app's process that this harness
+# does not reproduce, and the next probe worth writing drives a session in
+# an already-running app daemon rather than one this suite started. That
+# is deliberately not done here: it means creating a session inside
+# someone's live daemon, which is not a thing a test suite should do to a
+# machine it does not own.
 Type-Text "Start-Sleep -Seconds 30"
 Start-Sleep -Seconds 1
 $null = Drain 400
