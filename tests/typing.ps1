@@ -7,6 +7,12 @@ $repo = Split-Path $PSScriptRoot -Parent
 $exe = Join-Path $repo "src-tauri\target\debug\gterminal.exe"
 if (-not (Test-Path $exe)) { Write-Error "build first: cargo build in src-tauri" }
 
+# Ctrl+C has to be able to reach the shells this suite starts: the
+# "ignore Ctrl+C" state is inherited from whoever launched us, and with it
+# set nothing in the tree can be interrupted. See tests/lib/attended.ps1.
+. "$PSScriptRoot/lib/attended.ps1"
+$null = Enable-CtrlCHandling
+
 $env:LOCALAPPDATA = Join-Path $env:TEMP "gterminal-typing-test"
 New-Item -ItemType Directory -Force $env:LOCALAPPDATA | Out-Null
 Remove-Item "$env:LOCALAPPDATA\GTerminal" -Recurse -Force -ErrorAction SilentlyContinue
@@ -308,31 +314,37 @@ foreach ($spec in $specs) {
 $exp = Open-Shell "pwsh"
 $ESC = [string][char]27
 
-# Ctrl+C against a running command is tested in the visual suite, not
-# here, because it cannot be reproduced at this level.
+# Ctrl+C against a *running* command, not a half-typed line. This is the
+# key experts hit most and the one the matrix above does not cover: it
+# has to reach the child process, stop it, and leave the shell usable.
 #
-# It works in the app. Two people-scale checks on the machine where this
-# harness fails - Start-Sleep 30, and ping 1.1.1.1 - are both interrupted
-# by pressing the key in a real window. This suite, writing the same byte
-# down the same socket to the same daemon, never interrupts anything.
-#
-# Everything structural between the two was tried and made no difference:
-# all three shells behave the same here, including cmd with ping, so it is
-# not a shell; 0.6.0 built from its own tag fails exactly like current, so
-# it is not a regression; spawning the daemon detached the way the app
-# does changes nothing; answering ConPTY's queries the way xterm.js does
-# changes nothing; resizing the pty after attach, as the window does,
-# changes nothing. The window adds nothing of its own - its Ctrl+C is
-# term.onData to write_session to Request::Write, and the daemon writes
-# those bytes straight to the pty with nothing in between.
-#
-# So the difference is something about the running app that a socket
-# client does not reproduce, and a test that fails here while the feature
-# works for every user is worse than no test: it reports a fault that does
-# not exist, and it trained three real failures to be read as noise. The
-# scene in tests/visual.ps1 presses the key in a real window and checks a
-# command typed straight afterwards runs immediately rather than thirty
-# seconds later, which is the thing anyone actually cares about.
+# This failed on one machine for weeks and passed on every CI runner, and
+# the cause was not in this project at all: the suite had inherited an
+# "ignore Ctrl+C" console state from whatever launched it, and passed it
+# down to the daemon, the shells, and everything they ran. The app was
+# interrupting fine the whole time, because Explorer never passed it down.
+# Enable-CtrlCHandling at the top of this file is what makes the test mean
+# what it says.
+Type-Text "Start-Sleep -Seconds 30"
+Start-Sleep -Seconds 1
+$null = Drain 400
+Send-Key "`r"
+Start-Sleep -Seconds 2          # let it actually start sleeping
+$null = Drain 400
+Send-Key ([string][char]3)
+Start-Sleep -Seconds 2
+$null = Drain 600
+$back = Run-Line "echo (555+1)"
+if ($back -like "*556*") { "PASS Ctrl+C interrupts a running command and returns the prompt" }
+else {
+  $failures += "ctrl-c-running: shell did not come back. Got: $back"
+  # Start over in a fresh shell rather than carrying this one forward:
+  # a shell that ignored the interrupt is still running a thirty-second
+  # sleep, and every test below shares it. One broken thing used to
+  # report itself three times that way.
+  Close-Shell $exp
+  $exp = Open-Shell "pwsh"
+}
 
 # Up-arrow history recall. Experts navigate history far more than they
 # retype, and it is a different input path — an escape sequence, not a

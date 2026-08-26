@@ -38,3 +38,31 @@ function Assert-Unattended {
     exit 2
   }
 }
+
+
+# Ctrl+C must reach the shells these suites start.
+#
+# SetConsoleCtrlHandler(NULL, TRUE) makes a process ignore Ctrl+C, and
+# that state is INHERITED by every process it starts. A terminal launched
+# by a shell which had it set passes it to its daemon, which passes it to
+# the shells, which pass it to whatever those run - so Ctrl+C interrupts
+# nothing anywhere in the tree, no matter how correctly the byte is
+# delivered.
+#
+# That is a property of whoever started the suite, not of the terminal
+# being tested, and it cost a long investigation to find: three tests
+# failing for one reason, ping and Start-Sleep both unkillable, the
+# console input mode measured and cleared, the daemon spawned every way
+# the app spawns it, 0.6.0 built from its tag to compare against, and the
+# app all the while interrupting perfectly well because Explorer never
+# passed it down. Re-enabling it here costs one call and removes the whole
+# class of confusion.
+function Enable-CtrlCHandling {
+  if (-not ("GTermGate.CtrlC" -as [type])) {
+    Add-Type -Namespace GTermGate -Name CtrlC -MemberDefinition @'
+[DllImport("kernel32.dll", SetLastError = true)]
+public static extern bool SetConsoleCtrlHandler(IntPtr handler, bool add);
+'@ | Out-Null
+  }
+  [GTermGate.CtrlC]::SetConsoleCtrlHandler([IntPtr]::Zero, $false)
+}

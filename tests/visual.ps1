@@ -68,6 +68,10 @@ function Fail { param($n, $d) $script:failures += "${n}: $d"; Write-Host "FAIL $
 # it rather than each quietly going without.
 . "$PSScriptRoot\lib\attended.ps1"
 Assert-Unattended -Force:$Force -What "The visual suite"
+# The app this suite starts inherits our console state, including whether
+# Ctrl+C is ignored - and with it ignored, nothing any scene starts can be
+# interrupted. See tests/lib/attended.ps1.
+$null = Enable-CtrlCHandling
 
 # A locked workstation cannot be driven, and fails in a way that reads as
 # a broken app. Synthetic keystrokes go to the secure desktop while
