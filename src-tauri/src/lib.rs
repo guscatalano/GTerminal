@@ -153,6 +153,72 @@ fn attach_session(
     send_to(&state, id, Request::Resize { cols, rows })
 }
 
+/// Open the logs folder without going through the opener plugin.
+///
+/// The plugin is the first choice and usually works. This is the fallback
+/// for when it does not, because "the button does nothing" has now been
+/// reported twice and the cost of being wrong again is that someone
+/// cannot find the file they were asked to send. Spawning the file
+/// manager needs no permission of its own and no path scope.
+#[tauri::command]
+fn open_logs_folder() -> Result<String, String> {
+    use std::os::windows::process::CommandExt;
+    let dir = logs_path();
+    std::process::Command::new("explorer.exe")
+        .arg(&dir)
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .spawn()
+        .map_err(|e| format!("{e}"))?;
+    Ok(dir)
+}
+
+/// Where the logs live, so the window can offer to open the folder.
+#[tauri::command]
+fn package_family_name() -> Option<String> {
+    use windows_sys::Win32::Storage::Packaging::Appx::GetCurrentPackageFamilyName;
+    let mut len: u32 = 0;
+    unsafe {
+        // The first call only sizes the buffer. Unpackaged it fails with
+        // APPMODEL_ERROR_NO_PACKAGE and leaves the length at zero, which
+        // is the case that matters here.
+        GetCurrentPackageFamilyName(&mut len, std::ptr::null_mut());
+        if len == 0 {
+            return None;
+        }
+        let mut buf = vec![0u16; len as usize];
+        if GetCurrentPackageFamilyName(&mut len, buf.as_mut_ptr()) != 0 {
+            return None;
+        }
+        // len counts the terminating nul on success.
+        let text = String::from_utf16_lossy(&buf[..len.saturating_sub(1) as usize]);
+        (!text.is_empty()).then_some(text)
+    }
+}
+
+/// Where a path under %LOCALAPPDATA% really lives for a packaged app.
+///
+/// Packaged, those writes are redirected into the package's LocalCache,
+/// so the path the environment variable gives is not where the files are.
+/// Showing it sends someone to a folder that is empty or absent, and
+/// handing it to a file manager - which is not in the package, and so is
+/// not redirected - opens nothing at all. That is both halves of the
+/// report this fixes: the path is wrong and the button does nothing.
+///
+/// Pure, and separate from the API call, because the composition is the
+/// part that can be wrong in a way nobody notices until they are looking
+/// for a log file that is not there.
+fn redirected_local(dir: &std::path::Path, local_appdata: &std::path::Path, family: &str) -> Option<std::path::PathBuf> {
+    let rest = dir.strip_prefix(local_appdata).ok()?;
+    Some(
+        local_appdata
+            .join("Packages")
+            .join(family)
+            .join("LocalCache")
+            .join("Local")
+            .join(rest),
+    )
+}
+
 /// Where the logs live, so the window can offer to open the folder.
 #[tauri::command]
 fn logs_path() -> String {
@@ -160,16 +226,25 @@ fn logs_path() -> String {
     // Create it first: a path that does not exist cannot be resolved, and
     // on a fresh install nothing has written here yet.
     let _ = std::fs::create_dir_all(&dir);
-    // Packaged, writes under %LOCALAPPDATA% are redirected into the
-    // package's LocalCache. The unredirected path is what the environment
-    // variable says and is not where the files are - showing it sends
-    // someone to an empty folder, or to no folder at all. Canonicalising
-    // resolves the redirection.
+
+    // Compose the redirected path rather than hope canonicalize resolves
+    // it. Where those files go is documented, the composition is
+    // testable, and canonicalize handing back the virtual path is
+    // precisely the failure being fixed - it cannot also be the fix.
+    if let (Some(family), Ok(local)) = (package_family_name(), std::env::var("LOCALAPPDATA")) {
+        if let Some(mapped) = redirected_local(&dir, std::path::Path::new(&local), &family) {
+            let _ = std::fs::create_dir_all(&mapped);
+            if mapped.is_dir() {
+                return mapped.to_string_lossy().into_owned();
+            }
+        }
+    }
+
     let real = std::fs::canonicalize(&dir).unwrap_or(dir);
     let shown = real.to_string_lossy().into_owned();
     // Canonicalising yields a \\?\ prefix, which is correct and which
     // no file manager should be asked to display.
-    shown.strip_prefix(r"\\?\").unwrap_or(&shown).to_string()
+    shown.strip_prefix(r"\\\\?\\").unwrap_or(&shown).to_string()
 }
 
 /// Append one line to the UI event log.
@@ -998,6 +1073,7 @@ pub fn run() {
             daemon_info,
             restart_daemon,
             logs_path,
+            open_logs_folder,
             log_ui,
             summon_toggle,
             window_labels,
@@ -1077,6 +1153,53 @@ mod tests {
         assert!(tip.contains("9.9.9"), "tooltip must name the version: {tip}");
         assert_eq!(item, "Show GTerminal");
         assert!(!item.contains('\t'), "no key means no accelerator column: {item:?}");
+    }
+
+    /// Packaged, %LOCALAPPDATA% writes land in the package's LocalCache,
+    /// and the path the environment variable gives is not where the files
+    /// are. Getting this wrong is not visible as a crash: the settings
+    /// page shows a plausible path and the button opens nothing, which is
+    /// exactly how it was reported.
+    #[test]
+    fn a_packaged_path_points_into_the_package_cache() {
+        let local = std::path::Path::new("C:/Users/sam/AppData/Local");
+        let mapped = super::redirected_local(&local.join("GTerminal"), local, "Gus.GTerminal_hbnb")
+            .expect("a path under LOCALAPPDATA maps");
+        assert_eq!(
+            mapped,
+            local
+                .join("Packages")
+                .join("Gus.GTerminal_hbnb")
+                .join("LocalCache")
+                .join("Local")
+                .join("GTerminal")
+        );
+    }
+
+    /// Anything not under %LOCALAPPDATA% is not redirected, and must not
+    /// be rewritten as though it were - that would invent a path for a
+    /// folder which is exactly where it says it is.
+    #[test]
+    fn a_path_outside_localappdata_is_left_alone() {
+        let local = std::path::Path::new("C:/Users/sam/AppData/Local");
+        assert!(
+            super::redirected_local(std::path::Path::new("D:/elsewhere/GTerminal"), local, "fam")
+                .is_none()
+        );
+    }
+
+    /// Deeper paths redirect the same way, keeping their tail: the logs
+    /// folder is one level below the state directory.
+    #[test]
+    fn nested_paths_keep_their_tail() {
+        let local = std::path::Path::new("C:/Users/sam/AppData/Local");
+        let mapped = super::redirected_local(&local.join("GTerminal").join("logs"), local, "fam")
+            .expect("maps");
+        assert!(
+            mapped.ends_with(std::path::Path::new("GTerminal").join("logs")),
+            "{mapped:?}"
+        );
+        assert!(mapped.to_string_lossy().contains("LocalCache"), "{mapped:?}");
     }
 
     /// The version the code reports has to be the version that ships.

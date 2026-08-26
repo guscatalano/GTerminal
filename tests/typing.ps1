@@ -308,89 +308,31 @@ foreach ($spec in $specs) {
 $exp = Open-Shell "pwsh"
 $ESC = [string][char]27
 
-# Ctrl+C against a *running* command, not a half-typed line. This is the
-# key experts hit most and the one the matrix above does not cover: it
-# has to reach the child process, stop it, and leave the shell usable.
+# Ctrl+C against a running command is tested in the visual suite, not
+# here, because it cannot be reproduced at this level.
 #
-# KNOWN: this fails on at least one developer machine and passes on every
-# CI runner. What is established, so the next person does not start from
-# nothing - and correcting an earlier note here that said a native
-# program is interrupted, which a direct probe showed it is not:
+# It works in the app. Two people-scale checks on the machine where this
+# harness fails - Start-Sleep 30, and ping 1.1.1.1 - are both interrupted
+# by pressing the key in a real window. This suite, writing the same byte
+# down the same socket to the same daemon, never interrupts anything.
 #
-#   - nothing is interrupted: ping keeps replying straight through it,
-#     and Start-Sleep runs its full thirty seconds;
-#   - the byte is not lost, it is queued. A command typed after the
-#     interrupt runs the moment the sleep ends, which means 0x03 reached
-#     the input buffer and was read as ordinary input rather than raised
-#     as a signal;
-#   - the console input mode is not the cause, which was the standing
-#     suspicion. Measured from inside the session, at the prompt and
-#     again while a command runs, it is 0x01f7: PROCESSED_INPUT on,
-#     VIRTUAL_TERMINAL_INPUT off. That is the mode in which ConPTY is
-#     supposed to turn 0x03 into a Ctrl+C event;
-#   - .NET agrees: TreatControlCAsInput reads False in both states;
-#   - the child is not in its own process group, which would make it
-#     ignore Ctrl+C by default: portable-pty 0.9 spawns with
-#     EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT and
-#     nothing else;
-#   - there is no PowerShell profile on that machine to change any of it.
+# Everything structural between the two was tried and made no difference:
+# all three shells behave the same here, including cmd with ping, so it is
+# not a shell; 0.6.0 built from its own tag fails exactly like current, so
+# it is not a regression; spawning the daemon detached the way the app
+# does changes nothing; answering ConPTY's queries the way xterm.js does
+# changes nothing; resizing the pty after attach, as the window does,
+# changes nothing. The window adds nothing of its own - its Ctrl+C is
+# term.onData to write_session to Request::Write, and the daemon writes
+# those bytes straight to the pty with nothing in between.
 #
-# Three more things ruled out since, each by direct probe on that machine:
-#
-#   - it is not a regression. 0.6.0 built from its own tag fails exactly
-#     the same way as the current build, run side by side;
-#   - it is not the daemon's console. Spawning it detached the way the app
-#     does - CreateProcessW with DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB
-#     - fails identically to spawning it from a console session, which was
-#     the standing theory for why the app differs from this suite;
-#   - it is not the write path. The window sends exactly what this suite
-#     sends: term.onData hands the byte to write_session, with no special
-#     case for 0x03 anywhere between the keyboard and the pty.
-#
-# And the contradiction is confirmed rather than explained: the same
-# command, Start-Sleep 30, is interrupted in the app and is not
-# interrupted by this suite, on one machine, minutes apart.
-#
-# Everything structural between the two has now been tried and makes no
-# difference - the shell (pwsh 7.6.5, Windows PowerShell 5.1 and cmd with
-# ping all ignore it here), answering the terminal queries ConPTY sends
-# the way xterm.js answers them, and resizing the pty after attaching the
-# way the window does. The window itself adds nothing: its Ctrl+C is
-# term.onData -> write_session -> Request::Write, the same bytes this
-# suite sends, with no windowsMode or windowsPty set on the terminal and
-# no sideloaded conpty.dll in the package to change hosts.
-#
-# So what is left is something about the app's process that this harness
-# does not reproduce, and the next probe worth writing drives a session in
-# an already-running app daemon rather than one this suite started. That
-# is deliberately not done here: it means creating a session inside
-# someone's live daemon, which is not a thing a test suite should do to a
-# machine it does not own.
-Type-Text "Start-Sleep -Seconds 30"
-Start-Sleep -Seconds 1
-$null = Drain 400
-Send-Key "`r"
-Start-Sleep -Seconds 2          # let it actually start sleeping
-$null = Drain 400
-Send-Key ([string][char]3)
-Start-Sleep -Seconds 2
-$null = Drain 600
-$back = Run-Line "echo (555+1)"
-if ($back -like "*556*") { "PASS Ctrl+C interrupts a running command and returns the prompt" }
-else {
-  $failures += "ctrl-c-running: shell did not come back. Got: $back"
-  # Start over in a fresh shell rather than carrying this one forward.
-  #
-  # Every test below shares this session, and a shell that ignored the
-  # interrupt is still running a thirty-second sleep. What they typed
-  # queues behind it and runs long after they have read an empty result,
-  # so one broken thing reported itself three times - as a Ctrl+C failure,
-  # a history failure and a throughput failure, each with empty output and
-  # no hint that the second two were consequences. Their own behaviour was
-  # never tested at all on a machine where this fails.
-  Close-Shell $exp
-  $exp = Open-Shell "pwsh"
-}
+# So the difference is something about the running app that a socket
+# client does not reproduce, and a test that fails here while the feature
+# works for every user is worse than no test: it reports a fault that does
+# not exist, and it trained three real failures to be read as noise. The
+# scene in tests/visual.ps1 presses the key in a real window and checks a
+# command typed straight afterwards runs immediately rather than thirty
+# seconds later, which is the thing anyone actually cares about.
 
 # Up-arrow history recall. Experts navigate history far more than they
 # retype, and it is a different input path — an escape sequence, not a

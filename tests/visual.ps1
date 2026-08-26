@@ -109,7 +109,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -1809,6 +1809,80 @@ if (-not $Only -or $Only -eq "copilot-mcp") {
     foreach ($b in $mcShell, $mcTrust, $mcDuring, $mcAfter, $mcIdle, $mcTyped) { $b.Dispose() }
     Stop-App $ctx18
   }
+}
+
+# == scene: Ctrl+C against a running command ============================
+# The key experts hit most, and the one thing this project could not test
+# until now. The daemon-level suite writes the same byte down the same
+# socket and never interrupts anything, on any shell, on any version -
+# while pressing the key in a real window interrupts both a cmdlet and a
+# native program on the same machine, minutes apart. Nothing in between
+# explains it: the window's Ctrl+C is term.onData to write_session to
+# Request::Write, and the daemon writes it straight to the pty.
+#
+# So it is tested here, where it works, by pressing the actual key.
+#
+# The timing is the assertion. A thirty-second sleep is started, the key
+# is pressed three seconds in, and an arithmetic command is typed straight
+# after. If the interrupt landed, its answer is in the transcript within
+# seconds. If it did not, the shell is still sleeping and the typed line
+# sits in the buffer until long after this scene has finished looking -
+# so the answer being there means the command really was interrupted.
+if (-not $Only -or $Only -eq "ctrlc") {
+  $ctx19 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7}"
+  $h19 = $ctx19.Hwnd
+  Record-Scene "ctrlc" 45 $ctx19 {
+    Run-Cmd 'echo ctrlc-scene-ready' 3
+    # First: does the key reach the terminal at all? At an idle prompt
+    # PSReadLine cancels the half-typed line and draws a fresh one, which
+    # is visible in the transcript. Without this, a failure below cannot
+    # tell "the interrupt did nothing" from "the keystroke never arrived",
+    # and a synthetic Ctrl+C is not obviously the same as a real one.
+    Send-Text "ctrlc-abandoned-line"
+    Start-Sleep -Seconds 1
+    Key 0x43 @([byte]$VK_CTRL)
+    Start-Sleep -Seconds 2
+    Run-Cmd 'echo (86420+1)' 3
+    Start-Sleep -Seconds 1
+    $script:afterPrompt = Transcripts
+    # A cmdlet: interrupted by the shell's own handler.
+    Run-Cmd 'Start-Sleep -Seconds 30' 0
+    Start-Sleep -Seconds 3
+    Key 0x43 @([byte]$VK_CTRL)
+    Start-Sleep -Seconds 2
+    Run-Cmd 'echo (24680+1)' 3
+    Start-Sleep -Seconds 1
+    $script:afterCmdlet = Transcripts
+    # A native program, which is interrupted by a different path: the
+    # console sends it the event rather than the shell handling it.
+    Run-Cmd 'ping -n 30 127.0.0.1' 0
+    Start-Sleep -Seconds 3
+    Key 0x43 @([byte]$VK_CTRL)
+    Start-Sleep -Seconds 2
+    Run-Cmd 'echo (13570+1)' 3
+    Start-Sleep -Seconds 1
+    $script:afterNative = Transcripts
+  }
+  # 24681 rather than a word: its digits appear nowhere in what was typed,
+  # so finding it proves a command ran rather than that keystrokes echoed.
+  # What the shell actually did with the key, so a failure says whether it
+  # never arrived or arrived and did nothing.
+  $tailC = ($afterCmdlet -replace "[`r`n]", " ")
+  Write-Host ("  after the interrupt: ...{0}" -f $tailC.Substring([Math]::Max(0, $tailC.Length - 220))) -ForegroundColor DarkGray
+  # 86421 can only appear if the abandoned line was cancelled and the
+  # shell took a new one - proof the keystroke arrived.
+  if ($afterPrompt -match "86421") { Pass "the key reaches the terminal: Ctrl+C abandons a half-typed line" }
+  else { Fail "ctrlc" "a synthetic Ctrl+C never reached the terminal - everything below is untested" }
+  if ($afterCmdlet -match "24681") { Pass "Ctrl+C interrupts a running cmdlet and the prompt comes back" }
+  else { Fail "ctrlc" "the shell was still sleeping - nothing typed after the interrupt ran" }
+  if ($afterNative -match "13571") { Pass "and interrupts a native program too" }
+  else { Fail "ctrlc" "ping was still running - nothing typed after the interrupt ran" }
+  # Guards against the scene passing for the wrong reason: the setup line
+  # has to be there, or the shell never ran anything and the two checks
+  # above were looking at an empty transcript.
+  if ($afterCmdlet -match "ctrlc-scene-ready") { Pass "and the session was live throughout" }
+  else { Fail "ctrlc" "no transcript for this scene - it did not run as expected" }
+  Stop-App $ctx19
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════

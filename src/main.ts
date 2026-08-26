@@ -4786,7 +4786,16 @@ async function showLogsFolder(button: HTMLButtonElement) {
   try {
     const dir = await invoke<string>("logs_path");
     if (!dir) throw new Error("no path");
-    await openPath(dir);
+    try {
+      await openPath(dir);
+    } catch (pluginErr) {
+      // Second attempt, through the file manager directly. The plugin
+      // needs its own permission and its own path scope, and packaged
+      // builds are where that has gone wrong before - so a failure here
+      // is worth one more try rather than a shrug.
+      logUi("error", { message: `open logs folder via plugin: ${String(pluginErr)}` });
+      await invoke<string>("open_logs_folder");
+    }
   } catch (err) {
     logUi("error", { message: `open logs folder: ${String(err)}` });
     button.textContent = "Could not open it";
