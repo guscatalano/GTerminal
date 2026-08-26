@@ -113,7 +113,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -1887,6 +1887,104 @@ if (-not $Only -or $Only -eq "ctrlc") {
   if ($afterCmdlet -match "ctrlc-scene-ready") { Pass "and the session was live throughout" }
   else { Fail "ctrlc" "no transcript for this scene - it did not run as expected" }
   Stop-App $ctx19
+}
+
+# == scene: the three ways to ask for the alternate screen ==============
+# Suggested as a cause for a program that runs but whose redraws never
+# land, and worth testing rather than arguing about: every full-screen
+# thing this suite covers - vim, copilot, the fixture - asks with ?1049h,
+# so the older spellings have never been exercised here at all. A terminal
+# that honours one and ignores another looks exactly like the report: the
+# program is running, the screen never becomes the program's.
+if (-not $Only -or $Only -eq "altscreen") {
+  $ctx20 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7}"
+  $h20 = $ctx20.Hwnd
+  $fixture = (Resolve-Path (Join-Path $PSScriptRoot "fixtures/altscreen.ps1")).Path
+  Record-Scene "altscreen" 40 $ctx20 {
+    Run-Cmd 'echo altscreen-scene-ready' 2
+    $script:asShell = Capture-Window $h20
+    Run-Cmd "& '$fixture'" 0
+    Start-Sleep -Seconds 2
+    $script:as47 = Capture-Window $h20        # inside ?47h
+    Start-Sleep -Seconds 4
+    $script:as1047 = Capture-Window $h20      # inside ?1047h
+    Start-Sleep -Seconds 4
+    $script:as1049 = Capture-Window $h20      # inside ?1049h
+    Start-Sleep -Seconds 5
+    $script:asAfter = Capture-Window $h20     # back to the shell
+    $script:asOut = Transcripts
+  }
+  # A screen filled with colour moves most of the pixels, so these are the
+  # fixture's own thresholds rather than the ones a text program needs.
+  foreach ($v in @(@("47", $as47), @("1047", $as1047), @("1049", $as1049))) {
+    $moved = Frame-Diff $asShell $v[1] -IgnoreBottom 40
+    if ($moved -gt 0.2) { Pass ("the screen becomes the program's with ?$($v[0])h ({0:p0})" -f $moved) }
+    else { Fail "altscreen" ("?$($v[0])h did not take the screen ({0:p1} changed) - a program using this spelling would look stuck" -f $moved) }
+  }
+  $backAgain = Frame-Diff $as1049 $asAfter -IgnoreBottom 40
+  if ($backAgain -gt 0.2) { Pass "and the shell has its screen back at the end" }
+  else { Fail "altscreen" ("the last alternate screen was never left ({0:p1})" -f $backAgain) }
+  if ($asOut -match "ALTSCREEN-FIXTURE-DONE") { Pass "and the fixture ran to completion" }
+  else { Fail "altscreen" "the fixture did not finish - the frames above prove nothing" }
+  Write-Host ("  changed: ?47h {0:p0}, ?1047h {1:p0}, ?1049h {2:p0}, back {3:p0}" -f (Frame-Diff $asShell $as47 -IgnoreBottom 40), (Frame-Diff $asShell $as1047 -IgnoreBottom 40), (Frame-Diff $asShell $as1049 -IgnoreBottom 40), $backAgain) -ForegroundColor DarkGray
+  foreach ($b in $asShell, $as47, $as1047, $as1049, $asAfter) { $b.Dispose() }
+  Stop-App $ctx20
+}
+
+# == scene: the same full-screen program, on the other renderer =========
+# Everything above runs the WebGL renderer, because the default theme has
+# no background image. A theme with one - which is what the reported
+# machine runs - makes the app dispose WebGL and fall back to the DOM
+# renderer, and that path has never drawn a full-screen program in any
+# test here.
+#
+# It is the difference that fits the report best: a program that takes the
+# screen with ?1049h and then repaints, where the repaints never land. The
+# sequence is not the suspect - it is covered three ways already - but the
+# renderer underneath it was never looked at.
+if (-not $Only -or $Only -eq "tui-bg") {
+  $ctx21 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"theme`":`"bladerunner`"}"
+  $h21 = $ctx21.Hwnd
+  $fixture = Join-Path $repo "tests\fixtures\tui.ps1"
+  Record-Scene "tui-bg" 32 $ctx21 {
+    Run-Cmd 'echo before-the-tui-bg' 2
+    $script:bgShell = Capture-Window $h21
+    Run-Cmd "& '$fixture' -Frames 3 -Ms 2600" 0
+    Start-Sleep -Milliseconds 1400
+    $script:bgA = Capture-Window $h21
+    Start-Sleep -Milliseconds 2600
+    $script:bgB = Capture-Window $h21
+    Start-Sleep -Milliseconds 2600
+    $script:bgC = Capture-Window $h21
+    Start-Sleep -Seconds 4
+    $script:bgAfter = Capture-Window $h21
+  }
+  # Lower thresholds than the WebGL scene: a background image shows
+  # through the terminal, so a screen of colour fills moves less of it.
+  $e1 = Frame-Diff $bgShell $bgA
+  if ($e1 -gt 0.20) { Pass "a full-screen program takes the screen on the DOM renderer too" }
+  else { Fail "tui-bg" ("the screen barely changed when the program started ({0:p0})" -f $e1) }
+  $e2 = Frame-Diff $bgA $bgB
+  if ($e2 -gt 0.20) { Pass "and each redraw reaches it" }
+  else { Fail "tui-bg" ("frame 2 looks like frame 1 ({0:p0} changed) - this is the reported symptom, on the renderer the report came from" -f $e2) }
+  $e3 = Frame-Diff $bgB $bgC
+  if ($e3 -gt 0.20) { Pass "and keeps reaching it, frame after frame" }
+  else { Fail "tui-bg" ("frame 3 looks like frame 2 ({0:p0} changed)" -f $e3) }
+  $e4 = Frame-Diff $bgC $bgAfter
+  if ($e4 -gt 0.20) { Pass "and the shell comes back when it exits" }
+  else { Fail "tui-bg" ("the last frame stayed on screen after it exited ({0:p0})" -f $e4) }
+  Write-Host ("  changed: start {0:p0}, frame2 {1:p0}, frame3 {2:p0}, exit {3:p0}" -f $e1, $e2, $e3, $e4) -ForegroundColor DarkGray
+  if ($e1 -le 0.20 -or $e2 -le 0.20 -or $e3 -le 0.20) {
+    $dump = Join-Path $outDir "tui-bg-frames"
+    New-Item -ItemType Directory -Force $dump | Out-Null
+    $i = 0
+    foreach ($f in $bgShell, $bgA, $bgB, $bgC, $bgAfter) {
+      $f.Save((Join-Path $dump "$i.png"), [System.Drawing.Imaging.ImageFormat]::Png); $i++
+    }
+    Write-Host "  frames saved to $dump" -ForegroundColor DarkGray
+  }
+  foreach ($b in $bgShell, $bgA, $bgB, $bgC, $bgAfter) { $b.Dispose() }
+  Stop-App $ctx21
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════
