@@ -227,15 +227,22 @@ fn logs_path() -> String {
     // on a fresh install nothing has written here yet.
     let _ = std::fs::create_dir_all(&dir);
 
-    // Compose the redirected path rather than hope canonicalize resolves
-    // it. Where those files go is documented, the composition is
-    // testable, and canonicalize handing back the virtual path is
-    // precisely the failure being fixed - it cannot also be the fix.
-    if let (Some(family), Ok(local)) = (package_family_name(), std::env::var("LOCALAPPDATA")) {
-        if let Some(mapped) = redirected_local(&dir, std::path::Path::new(&local), &family) {
-            let _ = std::fs::create_dir_all(&mapped);
-            if mapped.is_dir() {
-                return mapped.to_string_lossy().into_owned();
+    // Packaged builds *may* have their %LOCALAPPDATA% writes redirected
+    // into the package's LocalCache. Measured on a real install, this one
+    // does not: its daemon writes daemon.port, sessions and history to the
+    // ordinary path, and the LocalCache folder does not exist at all.
+    //
+    // So the redirected location is only ever believed when it already
+    // holds state and the ordinary path does not. It is never created to
+    // find out, because creating it is what turns "probably over there"
+    // into "here is an empty folder, this must be it" - which is a worse
+    // answer than the wrong path that was reported in the first place.
+    if !has_state(&dir) {
+        if let (Some(family), Ok(local)) = (package_family_name(), std::env::var("LOCALAPPDATA")) {
+            if let Some(mapped) = redirected_local(&dir, std::path::Path::new(&local), &family) {
+                if has_state(&mapped) {
+                    return mapped.to_string_lossy().into_owned();
+                }
             }
         }
     }
@@ -245,6 +252,14 @@ fn logs_path() -> String {
     // Canonicalising yields a \\?\ prefix, which is correct and which
     // no file manager should be asked to display.
     shown.strip_prefix(r"\\\\?\\").unwrap_or(&shown).to_string()
+}
+
+/// Whether a directory holds anything at all. "The logs are over there"
+/// is only worth saying about a folder with something in it.
+fn has_state(dir: &std::path::Path) -> bool {
+    std::fs::read_dir(dir)
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(false)
 }
 
 /// Append one line to the UI event log.
@@ -1200,6 +1215,28 @@ mod tests {
             "{mapped:?}"
         );
         assert!(mapped.to_string_lossy().contains("LocalCache"), "{mapped:?}");
+    }
+
+    /// An empty directory is not where the logs are. The first version of
+    /// this created the redirected folder and then returned it because it
+    /// now existed - which points the button at an empty folder on every
+    /// packaged install, and is how a fix became worse than the bug.
+    #[test]
+    fn an_empty_directory_does_not_count_as_state() {
+        let tmp = std::env::temp_dir().join("gterm-logs-empty-test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("make it");
+        assert!(!super::has_state(&tmp), "an empty folder holds no state");
+        std::fs::write(tmp.join("daemon.port"), "1234").expect("write");
+        assert!(super::has_state(&tmp), "a folder with a file in it does");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn a_missing_directory_holds_no_state() {
+        assert!(!super::has_state(std::path::Path::new(
+            "C:/nowhere/in/particular/gterminal"
+        )));
     }
 
     /// The version the code reports has to be the version that ships.
