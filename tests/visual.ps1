@@ -113,7 +113,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -2088,6 +2088,57 @@ if (-not $Only -or $Only -eq "decrqm") {
     Pass "and says nothing about synchronized output, which promises nothing"
   }
   Stop-App $ctx22
+}
+
+# == scene: closing every tab ===========================================
+# Reported: close the tabs one at a time and the last one takes the window
+# with it. It did - the window was closed whenever the daemon had nothing
+# else parked - and closing a tab is not a request to quit. There are two
+# deliberate ways to make this app go away, the close button and the tray,
+# and neither of them is the last x on a tab strip.
+#
+# The window staying is only half of it: what is left has to be usable, so
+# the scene runs a command in whatever tab took the old one's place.
+if (-not $Only -or $Only -eq "closeall") {
+  $ctx23 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7}"
+  $h23 = $ctx23.Hwnd
+  Record-Scene "closeall" 40 $ctx23 {
+    Run-Cmd 'echo closeall-scene-ready' 3
+    # One tab, closed. Not two: closing the first of two leaves it in the
+    # daemon's grace window, the old code saw a session still there and
+    # kept the window for that reason - so a two-tab version of this scene
+    # passed against the very behaviour it was written to catch. The last
+    # tab with nothing behind it is the case that was broken.
+    $script:beforeClose = @(Daemon-Sessions)
+    # Twice, within two seconds: the first press only arms the x. One
+    # press closes nothing, which is how the first version of this scene
+    # passed against the behaviour it was written to catch - the tab was
+    # still there and the window had no reason to go anywhere.
+    Key 0x57 @([byte]$VK_CTRL, [byte]$VK_SHIFT)
+    Start-Sleep -Milliseconds 400
+    Key 0x57 @([byte]$VK_CTRL, [byte]$VK_SHIFT)
+    Start-Sleep -Seconds 6
+    $script:afterClose = @(Daemon-Sessions)
+    # Arithmetic, so its answer proves a live shell rather than an echo.
+    Run-Cmd 'echo (24680+1)' 3
+    Start-Sleep -Seconds 2
+    $script:closeAllOut = Transcripts
+  }
+  Write-Host ("  sessions before close: {0}" -f (($beforeClose | ForEach-Object { "$($_.id)(alive=$($_.alive),att=$($_.attached))" }) -join " ")) -ForegroundColor DarkGray
+  Write-Host ("  sessions after close:  {0}" -f (($afterClose | ForEach-Object { "$($_.id)(alive=$($_.alive),att=$($_.attached))" }) -join " ")) -ForegroundColor DarkGray
+  if ($U::IsWindowVisible($h23)) { Pass "closing every tab leaves the window on screen" }
+  else { Fail "closeall" "the window went away when the last tab was closed" }
+  if ($closeAllOut -match "24681") { Pass "and what is left is a live shell, not an empty frame" }
+  else { Fail "closeall" "nothing ran after the last tab closed - the window is there but has no working tab" }
+  # Guard: the close has to have happened. Without this the scene passes
+  # on a window whose tab was never closed - which it did, twice, before
+  # the session list was checked instead of assumed.
+  $closedIt = ($beforeClose | Where-Object { $_.attached }).Count -gt
+              ($afterClose | Where-Object { $_.attached }).Count -or
+              $afterClose.Count -gt $beforeClose.Count
+  if ($closedIt) { Pass "and the tab really was closed" }
+  else { Fail "closeall" "the tab was never closed - the checks above are about a window nobody touched" }
+  Stop-App $ctx23
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════

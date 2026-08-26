@@ -4943,24 +4943,20 @@ async function closeTab(id: number) {
     return;
   }
   invoke("kill_session", { id }).catch(() => {});
-  // Closing the last tab closes the window, and close means hide — which
-  // is right when there is nothing left, but not when sessions are still
-  // parked or counting down in the daemon. Hiding then strands them
-  // behind a window that appears to have vanished: you close one tab of
-  // six and the app disappears with the other five still running. Hiding
-  // a tab already avoids this by opening a fresh one; closing one now
-  // does the same, and only really closes the window when the daemon has
-  // nothing else to come back to.
+  // Closing the last tab opens a fresh one. It does not close the window.
+  //
+  // It used to, whenever the daemon had nothing else parked, on the
+  // reasoning that an empty window has nothing to show. In use that is
+  // just the app disappearing: you close tabs one at a time, and the last
+  // one takes the window with it. Nobody closing a tab is asking to quit,
+  // and the ways to actually go away - the close button, the tray - are
+  // still there and unchanged.
+  //
+  // Hiding a tab has always behaved this way. Closing one now matches it.
   const key = paneTab.get(id) ?? id;
   const wasLastTab = tabCount() === 1 && leavesOf(treeOf(key)).length === 1;
   removeTab(id, false);
-  if (wasLastTab) {
-    const others = (await invoke<SessionInfo[]>("list_sessions").catch(() => [])).filter(
-      (s) => s.id !== id
-    );
-    if (others.length) await createTab();
-    else await getCurrentWindow().close();
-  }
+  if (wasLastTab) await createTab();
   window.setTimeout(() => refreshChrome(), 500);
 }
 
