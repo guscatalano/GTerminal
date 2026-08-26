@@ -245,6 +245,26 @@ function Wait-Drawn {
   $frame
 }
 
+function Press-OnDialog {
+  # Waits for the restore question to be up and still, then presses a key
+  # and checks the screen answered.
+  #
+  # These scenes used to wait four seconds and press regardless. On a slow
+  # runner the dialog is not up yet, the key goes nowhere, and the scene
+  # reports what it measured afterwards: no sessions restored, no sessions
+  # closing - which reads as the app ignoring the answer rather than as
+  # the answer never being given. Returns whether the press landed.
+  param($hwnd, [byte]$vk, [int]$timeoutSec = 45, [double]$floor = 0.001)
+  $null = Wait-Settled $hwnd $timeoutSec
+  $before = Capture-Window $hwnd
+  Key $vk
+  Start-Sleep -Seconds 2
+  $after = Capture-Window $hwnd
+  $moved = Frame-Diff $before $after -IgnoreBottom 40
+  $before.Dispose(); $after.Dispose()
+  $moved -gt $floor
+}
+
 function Click-Effective {
   # Clicks, then checks the screen changed, and clicks again if it did
   # not. Returns whether it ever took.
@@ -863,10 +883,11 @@ if (-not $Only -or $Only -eq "restore") {
   $ctx2 = Start-AppSeeded $seed
   $hw = $ctx2.Hwnd
   Record-Scene "restore" 30 $ctx2 {
-    Start-Sleep -Seconds 4          # dwell on the question: it is the point
-    Key $VK_RETURN                  # Enter restores everything ticked
+    # Wait for the question to be up rather than for four seconds.
+    $script:restorePressed = Press-OnDialog $hw $VK_RETURN
     Start-Sleep -Seconds 12         # the spinner, then six tabs
   }
+  if (-not $restorePressed) { Fail "restore" "the restore question never took a keypress - nothing below was tested" }
   $now = Daemon-Sessions
   $attached = @($now | Where-Object { $seed.Ids -contains $_.id -and $_.attached })
   if ($attached.Count -eq 6) { Pass "Enter restores all six, and all six actually attach" }
@@ -905,8 +926,7 @@ if (-not $Only -or $Only -eq "restore-none") {
   $ctx3 = Start-AppSeeded $seed
   $hw3 = $ctx3.Hwnd
   Record-Scene "restore-none" 26 $ctx3 {
-    Start-Sleep -Seconds 4
-    Key $VK_ESC                     # Escape opens none
+    $script:nonePressed = Press-OnDialog $hw3 $VK_ESC   # Escape opens none
     Start-Sleep -Seconds 6
     # One fresh tab is what you are left with. Closing it used to take the
     # whole window with it — close means hide — stranding five sessions
@@ -917,6 +937,9 @@ if (-not $Only -or $Only -eq "restore-none") {
     Start-Sleep -Seconds 5
   }
   $now3 = Daemon-Sessions
+  # Declining is the one assertion that passes when nothing happened at
+  # all, so the keypress landing has to be established separately.
+  if (-not $nonePressed) { Fail "restore-none" "the restore question never took a keypress - 'nothing was restored' proves nothing here" }
   $wrongly = @($now3 | Where-Object { $seed.Ids -contains $_.id -and $_.attached })
   if ($wrongly.Count -eq 0) { Pass "Escape restores none of them" }
   else { Fail "restore-none" "$($wrongly.Count) session(s) were restored anyway" }
@@ -974,8 +997,8 @@ if (-not $Only -or $Only -eq "restore-again") {
   $seed = Seed-Daemon 5 $cfg
   # First run: take them all, which is what writes the order and layouts.
   $first = Start-AppSeeded $seed
-  Start-Sleep -Seconds 4
-  Key $VK_RETURN
+  $againPressed = Press-OnDialog $first.Hwnd $VK_RETURN
+  if (-not $againPressed) { Fail "restore-again" "the restore question never took a keypress on the first run" }
   Start-Sleep -Seconds 14
   $tookAll = @(Daemon-Sessions | Where-Object { $seed.Ids -contains $_.id -and $_.attached })
   if ($tookAll.Count -eq 5) { Pass "first run restores all five" }
