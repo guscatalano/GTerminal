@@ -113,7 +113,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -1985,6 +1985,52 @@ if (-not $Only -or $Only -eq "tui-bg") {
   }
   foreach ($b in $bgShell, $bgA, $bgB, $bgC, $bgAfter) { $b.Dispose() }
   Stop-App $ctx21
+}
+
+# == scene: what this terminal answers when asked about a mode ==========
+# DECRQM is how a program decides whether to use a feature, and a wrong
+# answer is worse than no answer: told yes, it commits to something the
+# terminal will not honour and its frames can stop appearing while
+# everything else looks fine. Raised as a candidate for exactly that
+# report, and nothing here had ever looked at a single reply.
+#
+# The replies travel from the terminal towards the program, which is the
+# one direction transcripts do not record, so the fixture reads them and
+# prints them back into its own output.
+if (-not $Only -or $Only -eq "decrqm") {
+  $ctx22 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7}"
+  $h22 = $ctx22.Hwnd
+  $fixture = Join-Path $repo "tests\fixtures\decrqm.ps1"
+  Record-Scene "decrqm" 30 $ctx22 {
+    Run-Cmd 'echo decrqm-scene-ready' 2
+    Run-Cmd "& '$fixture'" 0
+    Start-Sleep -Seconds 8
+    $script:rqmOut = Transcripts
+  }
+  foreach ($line in ($rqmOut -split "`n" | Where-Object { $_ -match "DECRQM " })) {
+    Write-Host ("  " + ($line.Trim() -replace "`r", "")) -ForegroundColor DarkGray
+  }
+  if ($rqmOut -match "DECRQM-FIXTURE-DONE") { Pass "the fixture asked every question and survived the answers" }
+  else { Fail "decrqm" "the fixture did not finish - a reply may have hung it" }
+  # A reply at all, for a mode the terminal implements. Silence here is
+  # its own failure: a program waiting on an answer that never comes is
+  # one of the ways a screen ends up stuck.
+  if ($rqmOut -match "alternate-screen \(1049\) -> <ESC>") { Pass "and answers about the alternate screen" }
+  else { Fail "decrqm" "no reply to a DECRQM for 1049 - a program waiting on one would hang" }
+  # The one that matters for redraws. xterm.js pauses all drawing between
+  # ?2026h and ?2026l, so claiming support for a mode whose sequences do
+  # not survive the pty is how frames stop landing.
+  $sync = ($rqmOut -split "`n" | Where-Object { $_ -match "synchronized-output" }) -join " "
+  Write-Host ("  synchronized output: {0}" -f ($sync.Trim() -replace "`r", "")) -ForegroundColor DarkGray
+  if ($sync -match "-> <ESC>") {
+    # 2 means "reset", 1 "set", 3/4 permanently so; 0 means "not
+    # recognised". Anything but 0 is a promise the pty has to keep.
+    if ($sync -match "2026;0") { Pass "and does not claim synchronized output it cannot deliver" }
+    else { Fail "decrqm" "this terminal claims synchronized output ($($sync.Trim())), but ?2026h and ?2026l do not survive ConPTY - a program taking that promise would pause a second per frame" }
+  } else {
+    Pass "and says nothing about synchronized output, which promises nothing"
+  }
+  Stop-App $ctx22
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════
