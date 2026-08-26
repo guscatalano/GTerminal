@@ -113,7 +113,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "newwindow", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -2139,6 +2139,62 @@ if (-not $Only -or $Only -eq "closeall") {
   if ($closedIt) { Pass "and the tab really was closed" }
   else { Fail "closeall" "the tab was never closed - the checks above are about a window nobody touched" }
   Stop-App $ctx23
+}
+
+# == scene: what a brand new window has on it ===========================
+# Reported: stray characters sitting in every new window. The usual cause
+# is a reply the terminal owes the console host - a cursor-position report,
+# a device attribute - arriving before the shell is reading, so it lands
+# on the prompt as though it had been typed.
+#
+# Nothing is typed here on purpose. The window is opened, left alone, and
+# photographed, and the transcript is searched for the tails those replies
+# leave behind.
+if (-not $Only -or $Only -eq "newwindow") {
+  $ctx24 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7}"
+  $h24 = $ctx24.Hwnd
+  Record-Scene "newwindow" 40 $ctx24 {
+    Start-Sleep -Seconds 10
+    $script:freshFrame = Capture-Window $h24
+    # And a second window, which is a different path: the report was about
+    # every new window, not the first one.
+    Key 0x4E @([byte]$VK_CTRL, [byte]$VK_SHIFT)   # Ctrl+Shift+N
+    Start-Sleep -Seconds 10
+    # App-Windows hands back an ArrayList, which arrives here as one
+    # object rather than as several - so it is unrolled before anything
+    # tries to compare or index it. Two earlier attempts passed the whole
+    # list where a single window was wanted, and failed deep inside a
+    # Win32 call rather than where the mistake was.
+    $wins24 = @()
+    foreach ($w in (App-Windows $ctx24.App.Id)) { $wins24 += $w }
+    $second24 = @($wins24 | Where-Object { $_ -ne $h24 })
+    $script:secondHwnd = if ($second24.Count) { $second24[0] } else { $null }
+    if ($script:secondHwnd) { $script:secondFrame = Capture-Window $script:secondHwnd }
+    Start-Sleep -Seconds 2
+    $script:freshOut = Transcripts
+  }
+  $dump = Join-Path $outDir "newwindow-frames"
+  New-Item -ItemType Directory -Force $dump | Out-Null
+  $freshFrame.Save((Join-Path $dump "fresh.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+  if ($secondFrame) { $secondFrame.Save((Join-Path $dump "second.png"), [System.Drawing.Imaging.ImageFormat]::Png) }
+  Write-Host "  frames saved to $dump" -ForegroundColor DarkGray
+  if ($secondHwnd) { Pass "a second window opens" }
+  else { Fail "newwindow" "no second window appeared - the checks below only cover the first" }
+  # The tails of the replies a terminal sends: a cursor report ends in R,
+  # a device attribute in c, a mode report in $y. None of them belong in
+  # what the shell echoes back.
+  $esc = [char]27
+  $strays = @()
+  foreach ($pat in @('\$y', '\d+;\d+R', '\?\d+;\d+c')) {
+    $m = [regex]::Matches($freshOut, $pat)
+    if ($m.Count) { $strays += "$pat x$($m.Count)" }
+  }
+  if ($strays.Count -eq 0) { Pass "a new window has no terminal replies echoed into it" }
+  else { Fail "newwindow" "replies landed in the session: $($strays -join ', ')" }
+  Write-Host ("  transcript: {0} chars" -f $freshOut.Length) -ForegroundColor DarkGray
+  $freshFrame.Dispose()
+  if ($secondFrame) { $secondFrame.Dispose() }
+  Stop-App $ctx24
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════
