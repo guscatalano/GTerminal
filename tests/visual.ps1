@@ -113,7 +113,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "newwindow", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "newwindow", "replayquery", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -2195,6 +2195,64 @@ if (-not $Only -or $Only -eq "newwindow") {
   $freshFrame.Dispose()
   if ($secondFrame) { $secondFrame.Dispose() }
   Stop-App $ctx24
+}
+
+# == scene: a replayed question must not be answered =====================
+# Reported as random characters in every new window, and the characters
+# named the cause: "?1;2c?1;2c" is a terminal answering "what are you"
+# twice. The questions were in the scrollback, replayed on attach, and
+# answered into a shell that was sitting at its prompt - so the answers
+# appeared as though someone had typed them.
+#
+# The fixture asks twice, the window is closed and reopened so the session
+# is attached again and its scrollback replayed, and the transcript must
+# not contain a single answer.
+if (-not $Only -or $Only -eq "replayquery") {
+  $cfg = "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7}"
+  $ctx25 = Start-App $cfg
+  $fixture = Join-Path $repo "tests/fixtures/asks.ps1"
+  Record-Scene "replayquery" 45 $ctx25 {
+    Run-Cmd 'echo replayquery-ready' 3
+    Run-Cmd "& '$fixture'" 6
+    $script:beforeDetach = Transcripts
+  }
+  # Away and back: this is what replays the scrollback.
+  Stop-App $ctx25
+  Start-Sleep -Seconds 3
+  $ctx25b = Start-App $cfg
+  Start-Sleep -Seconds 12
+  Focus-Pane $ctx25b.Hwnd
+  Run-Cmd 'echo replayquery-after-reattach' 4
+  Start-Sleep -Seconds 2
+  $after = Transcripts
+
+  # What the recording actually holds. The answers only happen if a
+  # question was recorded, so this says whether the scene reproduces the
+  # conditions at all rather than merely passing.
+  $esc = [char]27
+  foreach ($q in @(@("DA1 ESC[c", "$esc[c"), @("DA2 ESC[>c", "$esc[>c"), @("DSR ESC[6n", "$esc[6n"))) {
+    $n = [regex]::Matches($beforeDetach, [regex]::Escape($q[1])).Count
+    $m = [regex]::Matches($after, [regex]::Escape($q[1])).Count
+    Write-Host ("  recorded {0}: before {1}, after {2}" -f $q[0], $n, $m) -ForegroundColor DarkGray
+  }
+  if ($beforeDetach -match "ASKS-FIXTURE-DONE") { Pass "the session was asked what the terminal is" }
+  else { Fail "replayquery" "the fixture never ran - nothing below was tested" }
+  if ($after -match "replayquery-after-reattach") { Pass "and the session came back after a detach" }
+  else { Fail "replayquery" "the session did not come back - the check below has nothing to look at" }
+  # The answer, if it happened, is typed at the prompt and echoed, so it
+  # lands in the transcript exactly as the user saw it on screen.
+  # Any answer, not just the one that was reported. A cursor report comes
+  # back as "<row>;<col>R" and a device attribute as "?1;2c"; both arrive
+  # as typed text, so both are echoed into the transcript.
+  $answers = @()
+  foreach ($shape in @(@("device attributes", '\?\d+;\d+c'), @("cursor report", '\d+;\d+R'), @("mode report", '\?\d+;\d+\$y'))) {
+    $n = [regex]::Matches($after, $shape[1]).Count
+    if ($n) { $answers += "$($shape[0]) x$n" }
+  }
+  Write-Host ("  answers echoed after reattach: {0}" -f $(if ($answers.Count) { $answers -join ", " } else { "none" })) -ForegroundColor DarkGray
+  if ($answers.Count -eq 0) { Pass "and no answer was typed into it by the replay" }
+  else { Fail "replayquery" "the replay answered into the live shell: $($answers -join ', ') - this is the reported symptom" }
+  Stop-App $ctx25b
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════

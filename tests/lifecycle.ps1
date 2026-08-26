@@ -137,6 +137,31 @@ $null = Read-Line2 $b
 $replay = Read-Line2 $b
 if ($replay -notlike "*lifecycle-marker-999*") { Fail "replay" "marker missing from replay" } else { Pass "reattach replays scrollback" }
 
+# A replay must carry no questions.
+#
+# Reported as random characters in every new window - "?1;2c?1;2c", which
+# is a terminal answering "what are you" twice. A terminal answers by
+# writing back up the pipe, as though the answer had been typed. That is
+# right when a running program asks and wrong when the question is a
+# recording of one asked minutes ago, because the answer then arrives at a
+# shell sitting at its prompt.
+#
+# Checked on the wire rather than on screen: the console host puts its own
+# cursor-position question into every session's output, so there is always
+# one to find, while whether the shell echoes the answer or quietly eats it
+# varies by machine - which is why the screen is a poor place to look.
+$esc = [char]27
+$replayData = try { ($replay | ConvertFrom-Json).data } catch { "" }
+if ($replayData.Length -eq 0) {
+  Fail "replay-queries" "the replay payload could not be read - the checks below would pass on nothing"
+} else {
+  foreach ($q in @(@("cursor-position questions", "$esc[6n"), @("device-attributes questions", "$esc[c"))) {
+    $n = [regex]::Matches($replayData, [regex]::Escape($q[1])).Count
+    if ($n -eq 0) { Pass "and carries no $($q[0]) for the terminal to answer" }
+    else { Fail "replay-queries" "the replay still carries $($q[0]) x$n - answering it types into a live shell" }
+  }
+}
+
 # ── soft kill: grace window, process survives ──
 $null = Request2 $port "{""cmd"":""kill"",""id"":$id}"
 Start-Sleep -Milliseconds 400

@@ -36,6 +36,89 @@ const HISTORY_MAX: u64 = 10 * 1024 * 1024;
 /// garbage" bug), bracketed paste, application cursor keys, alt screen, and
 /// hidden cursor. Only for resurrection — on live reattach the replayed
 /// modes match what the still-running app expects.
+/// Remove the questions from recorded output before replaying it.
+///
+/// A terminal answers questions. Ask it what it is and it writes an
+/// answer back up the pipe, as though someone had typed it. That is
+/// correct when a running program asks - the answer is for that program -
+/// and wrong when the question is a recording of one asked minutes ago,
+/// because the answer arrives at a shell sitting at its prompt, which
+/// shows it as typed text.
+///
+/// Reported as "random characters in every new window", and the
+/// characters name the cause exactly: ?1;2c is a terminal's reply to
+/// "what are you", twice, because the scrollback being replayed had been
+/// asked twice.
+///
+/// Only replays are filtered. Live output keeps its questions, because a
+/// program that asks one is waiting for the answer.
+fn strip_queries(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] != 0x1b || i + 1 >= b.len() {
+            out.push(b[i] as char);
+            i += 1;
+            continue;
+        }
+        match b[i + 1] {
+            // CSI: parameters, then a final byte that says what it was.
+            b'[' => {
+                let mut j = i + 2;
+                while j < b.len() && !(0x40..=0x7e).contains(&b[j]) {
+                    j += 1;
+                }
+                if j >= b.len() {
+                    out.push_str(&s[i..]);
+                    break;
+                }
+                let params = &b[i + 2..j];
+                let final_byte = b[j];
+                let private = params.first() == Some(&b'>');
+                let intermediate_dollar = params.last() == Some(&b'$');
+                let drop = match final_byte {
+                    // Device attributes, primary and secondary. There is
+                    // no CSI ... c that is output rather than a question.
+                    b'c' => true,
+                    // Device status and cursor position reports.
+                    b'n' => true,
+                    // DECRQM, which is CSI ... $ p. Plain CSI ... p is not
+                    // a question and is left alone.
+                    b'p' => intermediate_dollar,
+                    // XTVERSION is CSI > q. CSI <n> q is the cursor shape,
+                    // which is ordinary output and must survive.
+                    b'q' => private,
+                    _ => false,
+                };
+                if !drop {
+                    out.push_str(&s[i..=j]);
+                }
+                i = j + 1;
+            }
+            // OSC: a colour query is OSC <n> ; ? and gets an answer.
+            b']' => {
+                let mut j = i + 2;
+                while j < b.len() && b[j] != 0x07 && !(b[j] == 0x1b && j + 1 < b.len() && b[j + 1] == 0x5c) {
+                    j += 1;
+                }
+                let end = if j < b.len() && b[j] == 0x07 { j } else { (j + 1).min(b.len().saturating_sub(1)) };
+                let body = &s[i + 2..j.min(s.len())];
+                let asks = body.ends_with('?');
+                if !asks {
+                    out.push_str(&s[i..=end.min(b.len() - 1)]);
+                }
+                i = end + 1;
+            }
+            _ => {
+                out.push(b[i] as char);
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
 const MODE_RESET: &str =
     "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?2004l\x1b[?1l\x1b[?1049l\x1b[?47l\x1b[?1004l\x1b[?9001l\x1b[?25h\x1b[0m\r\n";
 
@@ -246,6 +329,79 @@ struct Meta {
 
 fn yes() -> bool {
     true
+}
+
+#[cfg(test)]
+mod replay_query_tests {
+    use super::strip_queries;
+
+    // Written as numbers rather than escapes: this file has been rewritten
+    // through enough layers today that a backslash is not a safe thing to
+    // rely on.
+    const ESC: char = 27 as char;
+    const BEL: char = 7 as char;
+
+    /// The report: "?1;2c?1;2c" in every new window. That is a terminal
+    /// answering "what are you" twice, because the scrollback being
+    /// replayed carried the question twice, and the answer arrived at a
+    /// shell sitting at its prompt, which showed it as typed text.
+    #[test]
+    fn a_device_attributes_question_is_not_replayed() {
+        assert_eq!(strip_queries(&format!("hello{ESC}[cworld")), "helloworld");
+        assert_eq!(strip_queries(&format!("{ESC}[0c")), "");
+        assert_eq!(strip_queries(&format!("{ESC}[>c")), "");
+        assert_eq!(strip_queries(&format!("{ESC}[>0c")), "");
+    }
+
+    /// Same class: ask where the cursor is and the answer is typed at
+    /// whatever is reading.
+    #[test]
+    fn status_questions_are_not_replayed() {
+        assert_eq!(strip_queries(&format!("a{ESC}[6nb")), "ab");
+        assert_eq!(strip_queries(&format!("a{ESC}[5nb")), "ab");
+        assert_eq!(strip_queries(&format!("a{ESC}[?6nb")), "ab");
+    }
+
+    #[test]
+    fn mode_questions_are_not_replayed() {
+        assert_eq!(strip_queries(&format!("x{ESC}[?2026$py")), "xy");
+        assert_eq!(strip_queries(&format!("x{ESC}[4$py")), "xy");
+    }
+
+    /// Most of a transcript is not a question, and has to come through
+    /// exactly as recorded.
+    #[test]
+    fn ordinary_output_is_untouched() {
+        let drawing = format!("{ESC}[31mred{ESC}[0m {ESC}[2J{ESC}[H{ESC}[10;20Hhere");
+        assert_eq!(strip_queries(&drawing), drawing);
+        assert_eq!(strip_queries("plain text"), "plain text");
+        assert_eq!(strip_queries(""), "");
+    }
+
+    /// CSI <n> q sets the cursor shape and is ordinary output. Only the
+    /// private form, CSI > q, asks anything. Dropping the first would
+    /// change how every replayed session looks.
+    #[test]
+    fn the_cursor_shape_is_not_a_question() {
+        assert_eq!(strip_queries(&format!("{ESC}[1 q")), format!("{ESC}[1 q"));
+        assert_eq!(strip_queries(&format!("{ESC}[5q")), format!("{ESC}[5q"));
+        assert_eq!(strip_queries(&format!("{ESC}[>q")), "");
+    }
+
+    /// A title is not a question; a colour query is.
+    #[test]
+    fn titles_survive_and_colour_questions_do_not() {
+        let title = format!("{ESC}]0;a title{BEL}");
+        assert_eq!(strip_queries(&title), title);
+        assert_eq!(strip_queries(&format!("{ESC}]11;?{BEL}")), "");
+    }
+
+    /// A ring buffer is a window onto a stream and can begin or end
+    /// mid-sequence. Half a question is not worth losing the rest over.
+    #[test]
+    fn a_truncated_sequence_does_not_eat_the_transcript() {
+        assert_eq!(strip_queries(&format!("done{ESC}[")), format!("done{ESC}["));
+    }
 }
 
 #[cfg(test)]
@@ -1248,7 +1404,7 @@ fn conn_loop(
                         // interleave live output mid-replay; only then does
                         // this connection start receiving live data.
                         write_line(&mut out, &json!({"ok": true}))?;
-                        let replay = String::from_utf8_lossy(&s.ring).into_owned();
+                        let replay = strip_queries(&String::from_utf8_lossy(&s.ring));
                         write_line(&mut out, &json!({"ev": "data", "data": replay}))?;
                         // One attacher at a time, and the newest wins - a
                         // session moves between windows rather than being
@@ -1284,7 +1440,12 @@ fn conn_loop(
                         .map(|b| String::from_utf8_lossy(&b).into_owned()),
                 };
                 match data {
-                    Some(text) => write_line(&mut out, &json!({"ok": true, "data": text}))?,
+                    // Peeked scrollback goes into a terminal too, so the
+                    // questions in it would be answered on the way past -
+                    // into whichever session happens to be listening.
+                    Some(text) => {
+                        write_line(&mut out, &json!({"ok": true, "data": strip_queries(&text)}))?
+                    }
                     None => write_line(
                         &mut out,
                         &json!({"ok": false, "error": "no scrollback for that session"}),
