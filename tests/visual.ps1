@@ -1998,7 +1998,7 @@ if (-not $Only -or $Only -eq "tui-bg") {
 # one direction transcripts do not record, so the fixture reads them and
 # prints them back into its own output.
 if (-not $Only -or $Only -eq "decrqm") {
-  $ctx22 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7}"
+  $ctx22 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7,`"log_level`":`"debug`"}"
   $h22 = $ctx22.Hwnd
   $fixture = Join-Path $repo "tests\fixtures\decrqm.ps1"
   Record-Scene "decrqm" 30 $ctx22 {
@@ -2010,6 +2010,40 @@ if (-not $Only -or $Only -eq "decrqm") {
   foreach ($line in ($rqmOut -split "`n" | Where-Object { $_ -match "DECRQM " })) {
     Write-Host ("  " + ($line.Trim() -replace "`r", "")) -ForegroundColor DarkGray
   }
+  # The ANSI form, with no "?" - the half the console host may pass
+  # through to the terminal's own handler, which is where a crash was
+  # reported. The question is not what it answers but whether drawing
+  # survives being asked: a handler that throws takes the rest of the
+  # parser's chunk with it, so a paint issued in the same write is lost
+  # while the program believes it drew.
+  $ansiFixture = Join-Path $repo "tests/fixtures/decrqm-ansi.ps1"
+  $script:beforeAnsi = Capture-Window $h22
+  Run-Cmd "& '$ansiFixture'" 0
+  # Four queries at 600ms each, then the query-plus-paint write. Five
+  # seconds lands inside the paint rather than after it.
+  Start-Sleep -Seconds 5
+  $script:duringAnsi = Capture-Window $h22
+  Start-Sleep -Seconds 10
+  $rqmOut = Transcripts
+  foreach ($line in ($rqmOut -split "`n" | Where-Object { $_ -match "ANSI-DECRQM " })) {
+    Write-Host ("  " + ($line.Trim() -replace "`r", "")) -ForegroundColor DarkGray
+  }
+  $painted = Frame-Diff $beforeAnsi $duringAnsi -IgnoreBottom 40
+  if ($painted -gt 0.2) { Pass ("a paint issued in the same write as a mode query still reaches the screen ({0:p0})" -f $painted) }
+  else { Fail "decrqm" ("nothing was drawn after the query ({0:p1}) - a handler that throws takes the rest of the write with it, which is what a crash in this code looks like" -f $painted) }
+  # And the window's own log, which is where such a crash surfaces.
+  $uiLog = Join-Path $scratch "GTerminal/ui.log"
+  if (Test-Path $uiLog) {
+    $errs = @(Get-Content $uiLog | Where-Object { $_ -match "is not defined|TypeError|ReferenceError" })
+    if ($errs.Count -eq 0) { Pass "and the window logged no scripting error while being asked" }
+    else {
+      Fail "decrqm" "the window logged an error: $($errs[0])"
+      $errs | Select-Object -First 3 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+    }
+  } else {
+    Write-Host "  note: no ui.log written, so nothing could be checked in it" -ForegroundColor DarkYellow
+  }
+  foreach ($b in $beforeAnsi, $duringAnsi) { $b.Dispose() }
   if ($rqmOut -match "DECRQM-FIXTURE-DONE") { Pass "the fixture asked every question and survived the answers" }
   else { Fail "decrqm" "the fixture did not finish - a reply may have hung it" }
   # A reply at all, for a mode the terminal implements. Silence here is
