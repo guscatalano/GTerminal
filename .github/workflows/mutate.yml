@@ -1,0 +1,68 @@
+name: Mutation
+
+# Do the tests catch the bugs they are named after?
+#
+# A green suite proves nothing on its own. Several tests here have passed
+# against the very behaviour they were written to catch: a scene clicking
+# a button that was never there, a replay check running against an empty
+# replay, a paste test that could not tell one paste from two. Each was
+# found by breaking the app on purpose and watching the test stay green.
+#
+# tests/mutate.ps1 does that on a schedule instead of by hand. It breaks
+# one thing at a time, names the checks that must fail because of it, and
+# reports anything nobody caught.
+#
+# Not on the release path: it rebuilds the app once per mutation, so it
+# takes far longer than the suites it is checking. A guard that has
+# rotted is worth knowing about the next morning, not the next minute.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 5 * * 0"
+
+permissions:
+  contents: read
+
+jobs:
+  mutate:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # The visual mutations drive a real window, so the runner needs a
+      # screen the window fits on - the same reason the visual workflow
+      # sets one.
+      - name: Give the runner a screen the window fits on
+        shell: pwsh
+        run: |
+          Set-DisplayResolution -Width 1920 -Height 1080 -Force
+          Start-Sleep -Seconds 2
+
+      # -Force because the idle gate is for someone's desktop, and there
+      # is nobody here to interrupt.
+      - name: Break things on purpose
+        shell: pwsh
+        run: npm run test:mutate -- -Force
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: mutation-frames
+          path: docs/visual/*-frames/
+          if-no-files-found: ignore

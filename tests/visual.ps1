@@ -2372,6 +2372,36 @@ if (-not $Only -or $Only -eq "pasteonce") {
     Start-Sleep -Seconds 2
     Key $VK_RETURN
     Start-Sleep -Seconds 3
+    # The reported route: the menu, with something long enough to stop
+    # for the warning first. The menu and the warning were each covered
+    # on their own, and going through both is a third path neither of
+    # them exercised.
+    $menuMulti = '$env:MC = "$env:MC" + "x"' + "`n" + '"MCOUNT=$($env:MC.Length)"'
+    Set-Clip $menuMulti $h28
+    Start-Sleep -Seconds 1
+    Right-Click ($h28) 600 300
+    Start-Sleep -Seconds 1
+    Click ($h28) 640 312          # Paste
+    Start-Sleep -Seconds 2
+    Key $VK_RETURN                # confirm the warning
+    Start-Sleep -Seconds 3
+    Key $VK_RETURN                # run whatever is on the line
+    Start-Sleep -Seconds 4
+    # The other way the warning fires: one long line rather than several
+    # short ones. "Long" and "multi-line" are separate thresholds and
+    # separate reasons to stop, and a single line is what most long
+    # pastes are.
+    $longOne = '$env:LC = "$env:LC" + "x"; "LCOUNT=$($env:LC.Length)" # ' + ("y" * 400)
+    Set-Clip $longOne $h28
+    Start-Sleep -Seconds 1
+    Right-Click ($h28) 600 300
+    Start-Sleep -Seconds 1
+    Click ($h28) 640 312          # Paste
+    Start-Sleep -Seconds 2
+    Key $VK_RETURN                # confirm the warning
+    Start-Sleep -Seconds 3
+    Key $VK_RETURN                # run it
+    Start-Sleep -Seconds 4
     # And the multi-line paste, which stops for a warning first. Counting
     # occurrences in the transcript cannot answer this one - the line is
     # redrawn as it is edited - so the shell counts instead: the first
@@ -2396,6 +2426,15 @@ if (-not $Only -or $Only -eq "pasteonce") {
     elseif ($doubled) { Fail "pasteonce" "$name pasted twice - the line came out as '${mark}echo ...'" }
     else { Pass "$name pastes once" }
   }
+  # One long line through the menu, which trips the character threshold
+  # rather than the line one.
+  if ($pasteOut -match "LCOUNT=1") { Pass "a single long line from the menu, confirmed, runs once" }
+  elseif ($pasteOut -match "LCOUNT=[2-9]") { Fail "pasteonce" "a long single-line paste ran $([regex]::Match($pasteOut, 'LCOUNT=(\d+)').Groups[1].Value) times" }
+  else { Fail "pasteonce" "the long single-line paste never ran - nothing was counted" }
+  # The reported route, counted by the shell rather than by looking.
+  if ($pasteOut -match "MCOUNT=1") { Pass "a long paste from the menu, confirmed, runs once" }
+  elseif ($pasteOut -match "MCOUNT=[2-9]") { Fail "pasteonce" "a long paste from the menu ran $([regex]::Match($pasteOut, 'MCOUNT=(\d+)').Groups[1].Value) times - this is the reported route" }
+  else { Fail "pasteonce" "the long paste from the menu never ran - nothing was counted" }
   # The multi-line case, counted by the shell rather than by looking.
   if ($pasteOut -match "PCOUNT=1") { Pass "a confirmed multi-line paste runs once" }
   elseif ($pasteOut -match "PCOUNT=[2-9]") { Fail "pasteonce" "a confirmed multi-line paste ran $([regex]::Match($pasteOut, 'PCOUNT=(\d+)').Groups[1].Value) times" }
