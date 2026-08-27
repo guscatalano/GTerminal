@@ -113,7 +113,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "newwindow", "replayquery", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -2222,6 +2222,16 @@ if (-not $Only -or $Only -eq "replayquery") {
   $ctx25b = Start-App $cfg
   Start-Sleep -Seconds 12
   Focus-Pane $ctx25b.Hwnd
+  # What the screen looks like once the scrollback has been replayed into
+  # it. A crash mid-parse abandons the rest of the write, so the buffer
+  # and the picture diverge - stale rows left standing with new ones
+  # painted over them, which is what the ghosting report looked like.
+  $script:afterReplayFrame = Capture-Window $ctx25b.Hwnd
+  $dumpR = Join-Path $outDir "replay-frames"
+  New-Item -ItemType Directory -Force $dumpR | Out-Null
+  $afterReplayFrame.Save((Join-Path $dumpR "after-replay.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+  $afterReplayFrame.Dispose()
+  Write-Host "  frame saved to $dumpR" -ForegroundColor DarkGray
   Run-Cmd 'echo replayquery-after-reattach' 4
   Start-Sleep -Seconds 2
   $after = Transcripts
@@ -2253,6 +2263,67 @@ if (-not $Only -or $Only -eq "replayquery") {
   if ($answers.Count -eq 0) { Pass "and no answer was typed into it by the replay" }
   else { Fail "replayquery" "the replay answered into the live shell: $($answers -join ', ') - this is the reported symptom" }
   Stop-App $ctx25b
+}
+
+# == scene: does a split leave anything behind =========================
+# Reported: split a tab, the panes overlap, and long text from one shows
+# up in the other - then in every shell. Tabs are shown by putting an
+# "active" class on their root, so anything parented outside those roots
+# is drawn over all of them, which is what "in every shell" sounds like.
+#
+# The sequence is the reported one: split, fill a pane with long lines,
+# then look at a brand new tab that should have nothing in it but a
+# prompt.
+if (-not $Only -or $Only -eq "ghost") {
+  # The reporter's renderer, not the default one. A theme with a
+  # background image makes the app dispose WebGL and fall back to the DOM
+  # renderer, and the first version of this scene ran the default theme -
+  # so it exercised the renderer the report did not come from.
+  $ctx26 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7,`"theme`":`"bladerunner`"}"
+  $h26 = $ctx26.Hwnd
+  Record-Scene "ghost" 50 $ctx26 {
+    Run-Cmd 'echo ghost-scene-ready' 3
+    # What a fresh tab looks like before any of this, for comparison.
+    $script:cleanTab = Capture-Window $h26
+    # Text first, split second. That is the reported order and it is the
+    # one that matters: splitting halves the width, so everything already
+    # on screen has to be reflowed and repainted. Splitting an empty pane
+    # and printing afterwards - which is what this scene did first - never
+    # asks the renderer to redraw anything that was already there.
+    Run-Cmd '1..40 | ForEach-Object { "GHOSTLINE-$_-" + ("x" * 150) }' 6
+    $script:afterText = Capture-Window $h26
+    Key 0x44 @([byte]$VK_CTRL, [byte]$VK_SHIFT)   # Ctrl+Shift+D: split
+    Start-Sleep -Seconds 5
+    $script:afterSplit = Capture-Window $h26
+    # A new tab, which should show a prompt and nothing else.
+    Key 0x54 @([byte]$VK_CTRL, [byte]$VK_SHIFT)   # Ctrl+Shift+T
+    Start-Sleep -Seconds 5
+    $script:newTab = Capture-Window $h26
+    Run-Cmd 'echo ghost-new-tab' 3
+    $script:newTabAfter = Capture-Window $h26
+    $script:ghostOut = Transcripts
+  }
+  $dump = Join-Path $outDir "ghost-frames"
+  New-Item -ItemType Directory -Force $dump | Out-Null
+  $i = 0
+  foreach ($f in $cleanTab, $afterSplit, $afterText, $newTab, $newTabAfter) {
+    $f.Save((Join-Path $dump "$i.png"), [System.Drawing.Imaging.ImageFormat]::Png); $i++
+  }
+  Write-Host "  frames saved to $dump" -ForegroundColor DarkGray
+  if ($ghostOut -match "GHOSTLINE-40") { Pass "the pane filled with long lines before splitting" }
+  else { Fail "ghost" "the long lines never ran - nothing below was tested" }
+  $splitMoved = Frame-Diff $cleanTab $afterSplit -IgnoreBottom 40
+  if ($splitMoved -gt 0.005) { Pass "and the split changed the screen" }
+  else { Fail "ghost" ("the split did nothing ({0:p1}) - the checks below are about an unsplit window" -f $splitMoved) }
+  # A brand new tab should look like the first one did: a prompt on an
+  # empty screen. Anything else on it came from somewhere it should not
+  # have.
+  $ghosting = Frame-Diff $cleanTab $newTab -IgnoreBottom 40
+  Write-Host ("  changed: split {0:p1}, new tab against a clean one {1:p1}" -f $splitMoved, $ghosting) -ForegroundColor DarkGray
+  if ($ghosting -lt 0.02) { Pass "and a new tab afterwards is as empty as the first one was" }
+  else { Fail "ghost" ("a new tab differs from a clean one by {0:p1} - something from the split is still on screen" -f $ghosting) }
+  foreach ($b in $cleanTab, $afterSplit, $afterText, $newTab, $newTabAfter) { $b.Dispose() }
+  Stop-App $ctx26
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════
