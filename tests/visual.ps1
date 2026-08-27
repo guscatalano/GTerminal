@@ -113,7 +113,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -2391,6 +2391,27 @@ if (-not $Only -or $Only -eq "pasteonce") {
     Key $VK_RETURN                  # submit
     Run-Cmd '"COPIES-WARN=" + ([regex]::Matches((Get-History -Count 1).CommandLine, "MARK-WARN")).Count' 3
 
+    # Hover the item and walk away without clicking. Suggested by the
+    # person who found this: reaching for Paste and changing your mind
+    # must leave the clipboard where it is.
+    #
+    # The highlight is checked rather than assumed. Hovering by
+    # coordinate can miss the row entirely, and a scene that hovers
+    # nothing proves nothing - it would report "hovering pastes nothing"
+    # about a pointer sitting on a menu border.
+    Set-Clip "#MARK-NOCLICK" $h28
+    Start-Sleep -Seconds 1
+    Right-Click ($h28) 600 300
+    Start-Sleep -Seconds 1
+    $script:menuShut = Capture-Window $h28
+    Move-Pointer ($h28) 640 312
+    Start-Sleep -Seconds 2
+    $script:menuHot = Capture-Window $h28
+    Key $VK_ESC                    # away without choosing
+    Start-Sleep -Seconds 1
+    Key $VK_RETURN                 # submit whatever is on the line
+    Run-Cmd '"COPIES-NOCLICK=" + ([regex]::Matches((Get-History -Count 1).CommandLine, "MARK-NOCLICK")).Count' 3
+
     # Hover the item first, then click it. That is the reported gesture,
     # and it is not what the hover scene covers: that one hovers and
     # escapes, so a menu which pastes on hover *and* on click looks
@@ -2432,6 +2453,15 @@ if (-not $Only -or $Only -eq "pasteonce") {
 
     $script:pasteOut = Transcripts
   }
+  # Hovering alone: the row has to light up, and nothing may arrive.
+  $lit = Frame-Diff $menuShut $menuHot -IgnoreBottom 40
+  if ($lit -gt 0.0005) { Pass ("the pointer really was on the row ({0:p2} of the screen changed)" -f $lit) }
+  else { Fail "pasteonce" ("the row never highlighted ({0:p2}) - the hover check below is about a pointer resting on nothing" -f $lit) }
+  $nc = [regex]::Match($pasteOut, "COPIES-NOCLICK=(\d+)")
+  if (-not $nc.Success) { Fail "pasteonce" "hovering: no count came back" }
+  elseif ($nc.Groups[1].Value -eq "0") { Pass "hovering Paste and walking away pastes nothing" }
+  else { Fail "pasteonce" "hovering Paste without clicking put $($nc.Groups[1].Value) copies on the line - this is the reported cause" }
+  foreach ($b in $menuShut, $menuHot) { $b.Dispose() }
   foreach ($route in @(
     @("Ctrl+V", "CTRLV"),
     @("Ctrl+Shift+V", "SHIFTV"),
@@ -2499,6 +2529,55 @@ if (-not $Only -or $Only -eq "pastecontent") {
     else { Fail "pastecontent" "$($shape.Name) put $($m.Groups[1].Value) copies on the line" }
   }
   Stop-App $ctx29
+}
+
+# == scene: a selection has to survive long enough to copy ==============
+# Reported: text can be selected, and the selection disappears before it
+# can be copied. That is a different fault from a selection that cannot
+# be made at all, and it points at something clearing it rather than at
+# the mouse.
+#
+# The status bar is the suspect this scene is built around: it refreshes
+# on a timer, and the reporter's runs a command every ten seconds on top
+# of that. Anything that refits the terminal drops the selection, so the
+# scene selects, waits out several refreshes, and only then copies.
+if (-not $Only -or $Only -eq "selectionlives") {
+  # The reporter's status bar: the same items, the same interval, and a
+  # custom command on a timer.
+  $custom = "[{`"id`":`"cmd-test`",`"label`":`"branch`",`"command`":`"git branch --show-current`",`"interval_s`":3,`"cwd_from_tab`":true}]"
+  $cfg = "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7,`"status_bar`":true,`"status_interval_ms`":500,`"status_items`":[`"clock`",`"cpu`",`"mem`",`"net`",`"cmd-test`"],`"status_custom`":$custom}"
+  $ctx30 = Start-App $cfg
+  $h30 = $ctx30.Hwnd
+  Set-Clipboard -Value "clipboard-before-selection-test"
+  Record-Scene "selectionlives" 45 $ctx30 {
+    Run-Cmd 'echo SELECTME-97531' 3
+    # Drag across the line the shell just printed.
+    Drag ($h30) 20 62 320 62
+    Start-Sleep -Seconds 1
+    $script:justSelected = Capture-Window $h30
+    # Long enough for the status bar to refresh many times and for its
+    # custom command to run more than once.
+    Start-Sleep -Seconds 12
+    $script:stillSelected = Capture-Window $h30
+    Key 0x43 @([byte]$VK_CTRL, [byte]$VK_SHIFT)   # Ctrl+Shift+C
+    Start-Sleep -Seconds 2
+  }
+  $got = Get-Clipboard -Raw
+  # The highlight is visible, so the frames can say whether it survived
+  # even when the copy does not.
+  $faded = Frame-Diff $justSelected $stillSelected -IgnoreBottom 40
+  Write-Host ("  the screen changed {0:p2} while the selection sat there" -f $faded) -ForegroundColor DarkGray
+  if ($got -match "SELECTME-97531") { Pass "a selection is still there to copy after twelve seconds" }
+  else {
+    Fail "selectionlives" "the selection was gone by the time it was copied - got '$(($got -replace "`r|`n", " ").Trim())'"
+    $dump = Join-Path $outDir "selection-frames"
+    New-Item -ItemType Directory -Force $dump | Out-Null
+    $justSelected.Save((Join-Path $dump "just-selected.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+    $stillSelected.Save((Join-Path $dump "twelve-seconds-later.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+    Write-Host "  frames saved to $dump" -ForegroundColor DarkGray
+  }
+  foreach ($b in $justSelected, $stillSelected) { $b.Dispose() }
+  Stop-App $ctx30
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════
