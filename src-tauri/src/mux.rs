@@ -57,13 +57,24 @@ fn strip_queries(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut i = 0;
     while i < b.len() {
-        if b[i] != 0x1b || i + 1 >= b.len() {
-            out.push(b[i] as char);
-            i += 1;
+        if b[i] != 0x1b {
+            // Copy up to the next escape as a slice rather than byte by
+            // byte. A byte is not a character: pushing them individually
+            // turns every accent, box-drawing line and emoji in the
+            // scrollback into mojibake, and box-drawing is what
+            // full-screen programs are made of. Escape is ASCII, so this
+            // always lands on a character boundary.
+            let next = b[i..].iter().position(|&c| c == 0x1b).map_or(b.len(), |n| i + n);
+            out.push_str(&s[i..next]);
+            i = next;
             continue;
         }
+        if i + 1 >= b.len() {
+            out.push_str(&s[i..]);
+            break;
+        }
         match b[i + 1] {
-            // CSI: parameters, then a final byte that says what it was.
+            // CSI: parameters, then a final byte saying what it was.
             b'[' => {
                 let mut j = i + 2;
                 while j < b.len() && !(0x40..=0x7e).contains(&b[j]) {
@@ -74,20 +85,19 @@ fn strip_queries(s: &str) -> String {
                     break;
                 }
                 let params = &b[i + 2..j];
-                let final_byte = b[j];
                 let private = params.first() == Some(&b'>');
-                let intermediate_dollar = params.last() == Some(&b'$');
-                let drop = match final_byte {
-                    // Device attributes, primary and secondary. There is
-                    // no CSI ... c that is output rather than a question.
+                let dollar = params.last() == Some(&b'$');
+                let drop = match b[j] {
+                    // Device attributes. There is no CSI ... c that is
+                    // output rather than a question.
                     b'c' => true,
                     // Device status and cursor position reports.
                     b'n' => true,
-                    // DECRQM, which is CSI ... $ p. Plain CSI ... p is not
-                    // a question and is left alone.
-                    b'p' => intermediate_dollar,
-                    // XTVERSION is CSI > q. CSI <n> q is the cursor shape,
-                    // which is ordinary output and must survive.
+                    // DECRQM is CSI ... $ p; plain CSI ... p is not a
+                    // question and is left alone.
+                    b'p' => dollar,
+                    // XTVERSION is CSI > q. CSI <n> q is the cursor
+                    // shape, which is ordinary output and must survive.
                     b'q' => private,
                     _ => false,
                 };
@@ -102,17 +112,16 @@ fn strip_queries(s: &str) -> String {
                 while j < b.len() && b[j] != 0x07 && !(b[j] == 0x1b && j + 1 < b.len() && b[j + 1] == 0x5c) {
                     j += 1;
                 }
-                let end = if j < b.len() && b[j] == 0x07 { j } else { (j + 1).min(b.len().saturating_sub(1)) };
-                let body = &s[i + 2..j.min(s.len())];
-                let asks = body.ends_with('?');
+                let end = if j < b.len() && b[j] == 0x07 { j } else { j.min(b.len().saturating_sub(1)) };
+                let asks = s.get(i + 2..j).map(|body| body.ends_with('?')).unwrap_or(false);
                 if !asks {
-                    out.push_str(&s[i..=end.min(b.len() - 1)]);
+                    out.push_str(&s[i..=end]);
                 }
                 i = end + 1;
             }
             _ => {
-                out.push(b[i] as char);
-                i += 1;
+                out.push_str(&s[i..i + 2]);
+                i += 2;
             }
         }
     }
@@ -394,6 +403,22 @@ mod replay_query_tests {
         let title = format!("{ESC}]0;a title{BEL}");
         assert_eq!(strip_queries(&title), title);
         assert_eq!(strip_queries(&format!("{ESC}]11;?{BEL}")), "");
+    }
+
+    /// Text is not bytes. An earlier version rebuilt the output byte by
+    /// byte, which turns every accent, box-drawing line and emoji into
+    /// mojibake - and box-drawing is what full-screen programs are made
+    /// of, so it would have corrupted exactly the replays people care
+    /// most about seeing intact.
+    #[test]
+    fn characters_outside_ascii_survive() {
+        let drawn = format!("{ESC}[32m┌──────┐ café 🎉 ✓{ESC}[0m");
+        assert_eq!(strip_queries(&drawn), drawn);
+        // And still strips, with the text either side kept whole.
+        assert_eq!(
+            strip_queries(&format!("┌─┐{ESC}[6n└─┘")),
+            "┌─┐└─┘"
+        );
     }
 
     /// A ring buffer is a window onto a stream and can begin or end
