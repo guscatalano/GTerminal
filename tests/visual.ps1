@@ -2327,118 +2327,96 @@ if (-not $Only -or $Only -eq "ghost") {
 }
 
 # == scene: a paste arrives once ========================================
-# Reported: the terminal can still double-paste. Every paste test here
-# checked that the text arrived, which is equally true of one copy and of
-# two - so none of them could have caught it.
+# Reported: the terminal can double-paste, the text landing twice on the
+# line. Every paste test here checked that the pasted text arrived, which
+# is equally true of one copy and of two - so none of them could have
+# caught it.
 #
-# Counting occurrences does not work either: PSReadLine redraws the line
-# it is editing, so the text appears in the transcript as many times as
-# the line was redrawn, whatever was pasted.
+# Two ways of asking were tried and both are indirect. Searching the
+# transcript is unreliable because PSReadLine redraws and colours the
+# line as it is edited, so the text appears as often as it was redrawn
+# and the two copies are separated by escapes. Inferring from what ran is
+# indirect too: a doubled line usually fails to parse, which looks the
+# same as never running.
 #
-# So the shell decides. The pasted text is a command, and it is submitted:
-# pasted once it runs and prints its marker, pasted twice the line reads
-# "echo ONE-1echo ONE-1" and what comes back contains "-1echo" - a string
-# that cannot occur any other way.
+# So the shell is asked what it was given. PSReadLine keeps the submitted
+# line in its history, and counting the marker in that is exact: one copy
+# or two, whatever the screen did on the way there.
 if (-not $Only -or $Only -eq "pasteonce") {
-  # The warning is on, at two lines, so the single-line cases below go
-  # straight in and the multi-line one has to be confirmed - which is a
-  # different route into the same paste, and the one most likely to fire
-  # twice.
+  # The warning is on at two lines, so the single-line pastes go straight
+  # in and the long ones stop to be confirmed.
   $cfg = "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7,`"paste_warn`":true,`"paste_warn_lines`":2}"
   $ctx28 = Start-App $cfg
   $h28 = $ctx28.Hwnd
-  Record-Scene "pasteonce" 45 $ctx28 {
+  # Each marker is pasted as a comment, so a doubled line still submits
+  # cleanly and history holds exactly what arrived.
+  Record-Scene "pasteonce" 60 $ctx28 {
     Run-Cmd 'echo pasteonce-ready' 3
-    # Ctrl+V.
-    Set-Clip "echo ONE-11111" $h28
+
+    Set-Clip "#MARK-CTRLV" $h28
     Start-Sleep -Seconds 1
     Key 0x56 @([byte]$VK_CTRL)
     Start-Sleep -Seconds 2
     Key $VK_RETURN
-    Start-Sleep -Seconds 3
-    # Ctrl+Shift+V, which is a different route through the same code.
-    Set-Clip "echo TWO-22222" $h28
+    Run-Cmd '"COPIES-CTRLV=" + ([regex]::Matches((Get-History -Count 1).CommandLine, "MARK-CTRLV")).Count' 3
+
+    Set-Clip "#MARK-SHIFTV" $h28
     Start-Sleep -Seconds 1
     Key 0x56 @([byte]$VK_CTRL, [byte]$VK_SHIFT)
     Start-Sleep -Seconds 2
     Key $VK_RETURN
-    Start-Sleep -Seconds 3
-    # The right-click menu. With no selection its first item is Paste.
-    Set-Clip "echo THREE-33333" $h28
+    Run-Cmd '"COPIES-SHIFTV=" + ([regex]::Matches((Get-History -Count 1).CommandLine, "MARK-SHIFTV")).Count' 3
+
+    # The right-click menu, whose first item is Paste with no selection.
+    Set-Clip "#MARK-MENU" $h28
     Start-Sleep -Seconds 1
     Right-Click ($h28) 600 300
     Start-Sleep -Seconds 1
     Click ($h28) 640 312
     Start-Sleep -Seconds 2
     Key $VK_RETURN
-    Start-Sleep -Seconds 3
-    # The reported route: the menu, with something long enough to stop
-    # for the warning first. The menu and the warning were each covered
-    # on their own, and going through both is a third path neither of
-    # them exercised.
-    $menuMulti = '$env:MC = "$env:MC" + "x"' + "`n" + '"MCOUNT=$($env:MC.Length)"'
-    Set-Clip $menuMulti $h28
+    Run-Cmd '"COPIES-MENU=" + ([regex]::Matches((Get-History -Count 1).CommandLine, "MARK-MENU")).Count' 3
+
+    # The reported route: the menu into the long-paste warning. Long by
+    # characters rather than lines, so it stays one line and history can
+    # be counted the same way.
+    Set-Clip ("#MARK-WARN " + ("y" * 400)) $h28
     Start-Sleep -Seconds 1
     Right-Click ($h28) 600 300
     Start-Sleep -Seconds 1
-    Click ($h28) 640 312          # Paste
+    Click ($h28) 640 312
     Start-Sleep -Seconds 2
-    Key $VK_RETURN                # confirm the warning
-    Start-Sleep -Seconds 3
-    Key $VK_RETURN                # run whatever is on the line
-    Start-Sleep -Seconds 4
-    # The other way the warning fires: one long line rather than several
-    # short ones. "Long" and "multi-line" are separate thresholds and
-    # separate reasons to stop, and a single line is what most long
-    # pastes are.
-    $longOne = '$env:LC = "$env:LC" + "x"; "LCOUNT=$($env:LC.Length)" # ' + ("y" * 400)
-    Set-Clip $longOne $h28
-    Start-Sleep -Seconds 1
-    Right-Click ($h28) 600 300
-    Start-Sleep -Seconds 1
-    Click ($h28) 640 312          # Paste
+    Key $VK_RETURN                  # confirm
     Start-Sleep -Seconds 2
-    Key $VK_RETURN                # confirm the warning
-    Start-Sleep -Seconds 3
-    Key $VK_RETURN                # run it
-    Start-Sleep -Seconds 4
-    # And the multi-line paste, which stops for a warning first. Counting
-    # occurrences in the transcript cannot answer this one - the line is
-    # redrawn as it is edited - so the shell counts instead: the first
-    # line appends a character, the second prints how many there are.
-    $multi = '$env:PC = "$env:PC" + "x"' + "`n" + '"PCOUNT=$($env:PC.Length)"'
-    Set-Clip $multi $h28
+    Key $VK_RETURN                  # submit
+    Run-Cmd '"COPIES-WARN=" + ([regex]::Matches((Get-History -Count 1).CommandLine, "MARK-WARN")).Count' 3
+
+    # And confirming with the button rather than the key, which is a
+    # different handler on the same dialog.
+    Set-Clip ("#MARK-CLICK " + ("z" * 400)) $h28
     Start-Sleep -Seconds 1
     Key 0x56 @([byte]$VK_CTRL)
     Start-Sleep -Seconds 2
-    Key $VK_RETURN                  # confirm the warning
-    Start-Sleep -Seconds 3
-    Key $VK_RETURN                  # run whatever is on the line
-    Start-Sleep -Seconds 4
+    Click ($h28) 937 455            # the Paste button
+    Start-Sleep -Seconds 2
+    Key $VK_RETURN                  # submit
+    Run-Cmd '"COPIES-CLICK=" + ([regex]::Matches((Get-History -Count 1).CommandLine, "MARK-CLICK")).Count' 3
+
     $script:pasteOut = Transcripts
   }
-  foreach ($case in @(@("Ctrl+V", "ONE-11111"), @("Ctrl+Shift+V", "TWO-22222"), @("the menu", "THREE-33333"))) {
-    $name = $case[0]; $mark = $case[1]
-    $ran = $pasteOut -match [regex]::Escape($mark)
-    # "-11111echo" can only exist if the line was pasted into twice.
-    $doubled = $pasteOut -match [regex]::Escape($mark + "echo")
-    if (-not $ran) { Fail "pasteonce" "$name pasted nothing - $mark never reached the shell" }
-    elseif ($doubled) { Fail "pasteonce" "$name pasted twice - the line came out as '${mark}echo ...'" }
-    else { Pass "$name pastes once" }
+  foreach ($route in @(
+    @("Ctrl+V", "CTRLV"),
+    @("Ctrl+Shift+V", "SHIFTV"),
+    @("the menu", "MENU"),
+    @("the menu into the long-paste warning", "WARN"),
+    @("the warning's Paste button", "CLICK")
+  )) {
+    $name = $route[0]; $key = $route[1]
+    $m = [regex]::Match($pasteOut, "COPIES-$key=(\d+)")
+    if (-not $m.Success) { Fail "pasteonce" "$name never reported a count - the paste or the count command did not run" }
+    elseif ($m.Groups[1].Value -eq "1") { Pass "$name pastes once" }
+    else { Fail "pasteonce" "$name put $($m.Groups[1].Value) copies on the line" }
   }
-  # One long line through the menu, which trips the character threshold
-  # rather than the line one.
-  if ($pasteOut -match "LCOUNT=1") { Pass "a single long line from the menu, confirmed, runs once" }
-  elseif ($pasteOut -match "LCOUNT=[2-9]") { Fail "pasteonce" "a long single-line paste ran $([regex]::Match($pasteOut, 'LCOUNT=(\d+)').Groups[1].Value) times" }
-  else { Fail "pasteonce" "the long single-line paste never ran - nothing was counted" }
-  # The reported route, counted by the shell rather than by looking.
-  if ($pasteOut -match "MCOUNT=1") { Pass "a long paste from the menu, confirmed, runs once" }
-  elseif ($pasteOut -match "MCOUNT=[2-9]") { Fail "pasteonce" "a long paste from the menu ran $([regex]::Match($pasteOut, 'MCOUNT=(\d+)').Groups[1].Value) times - this is the reported route" }
-  else { Fail "pasteonce" "the long paste from the menu never ran - nothing was counted" }
-  # The multi-line case, counted by the shell rather than by looking.
-  if ($pasteOut -match "PCOUNT=1") { Pass "a confirmed multi-line paste runs once" }
-  elseif ($pasteOut -match "PCOUNT=[2-9]") { Fail "pasteonce" "a confirmed multi-line paste ran $([regex]::Match($pasteOut, 'PCOUNT=(\d+)').Groups[1].Value) times" }
-  else { Fail "pasteonce" "the multi-line paste never ran - nothing was counted" }
   Stop-App $ctx28
 }
 
