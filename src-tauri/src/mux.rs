@@ -236,6 +236,19 @@ impl RingFilter {
     }
 }
 
+/// The same reset without the newline, for replays that are handed to a
+/// terminal someone is about to use rather than to a viewer.
+///
+/// Every replay needs it, not just the resurrected ones. A program that
+/// turned mouse reporting on leaves that in the scrollback, and a window
+/// attaching afterwards replays it and turns mouse reporting on in a
+/// terminal nobody asked to. Dragging then sends mouse events to the
+/// shell instead of selecting, so text cannot be selected or copied -
+/// in a brand new window, which is the confusing part, because the
+/// window is new and the mode it inherited is not.
+const MODE_RESET_INLINE: &str =
+    "[?1000l[?1002l[?1003l[?1005l[?1006l[?2004l[?1l[?1049l[?47l[?1004l[?9001l[?25h[0m";
+
 const MODE_RESET: &str =
     "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?2004l\x1b[?1l\x1b[?1049l\x1b[?47l\x1b[?1004l\x1b[?9001l\x1b[?25h\x1b[0m\r\n";
 
@@ -1632,7 +1645,10 @@ fn conn_loop(
                         // interleave live output mid-replay; only then does
                         // this connection start receiving live data.
                         write_line(&mut out, &json!({"ok": true}))?;
-                        let replay = strip_queries(&String::from_utf8_lossy(&s.ring));
+                        let mut replay = strip_queries(&String::from_utf8_lossy(&s.ring));
+                        // Whatever the last program left switched on, the
+                        // window attaching now did not ask for.
+                        replay.push_str(MODE_RESET_INLINE);
                         write_line(&mut out, &json!({"ev": "data", "data": replay}))?;
                         // One attacher at a time, and the newest wins - a
                         // session moves between windows rather than being

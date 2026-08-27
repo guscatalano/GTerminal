@@ -113,7 +113,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -2418,6 +2418,57 @@ if (-not $Only -or $Only -eq "pasteonce") {
     else { Fail "pasteonce" "$name put $($m.Groups[1].Value) copies on the line" }
   }
   Stop-App $ctx28
+}
+
+# == scene: does the content decide? ====================================
+# The double paste is not reliably reproducible, and the suspicion is
+# that it depends on what is being pasted. Plausible: line endings decide
+# whether the paste submits itself, length decides whether it stops for a
+# warning, and both change which path the text takes.
+#
+# So the same route - plain Ctrl+V - is run over a set of shapes, and the
+# shell is asked how many copies it was given each time. A route that
+# doubles for one shape and not another says exactly where to look.
+if (-not $Only -or $Only -eq "pastecontent") {
+  $cfg = "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7,`"paste_warn`":true,`"paste_warn_lines`":2}"
+  $ctx29 = Start-App $cfg
+  $h29 = $ctx29.Hwnd
+  $cr = [char]13
+  $lf = [char]10
+  $tab = [char]9
+  # Each is a comment, so whatever arrives submits cleanly and history
+  # holds it verbatim. Confirm says whether the warning is expected;
+  # Submits says the content ends in a newline and runs itself.
+  $shapes = @(
+    @{ Name = "plain";            Mark = "MARK-PLAIN";  Text = "#MARK-PLAIN one"; Confirm = $false; Submits = $false }
+    @{ Name = "trailing LF";      Mark = "MARK-LF";     Text = "#MARK-LF one$lf"; Confirm = $false; Submits = $true }
+    @{ Name = "trailing CRLF";    Mark = "MARK-CRLF";   Text = "#MARK-CRLF one$cr$lf"; Confirm = $false; Submits = $true }
+    @{ Name = "a tab inside";     Mark = "MARK-TAB";    Text = "#MARK-TAB${tab}after"; Confirm = $false; Submits = $false }
+    @{ Name = "quotes and ticks"; Mark = "MARK-QUOTE";  Text = "#MARK-QUOTE ""double"" 'single' ``tick``"; Confirm = $false; Submits = $false }
+    @{ Name = "wide characters";  Mark = "MARK-WIDE";   Text = "#MARK-WIDE cafe 🎉 ┌──┐ 日本語"; Confirm = $false; Submits = $false }
+    @{ Name = "long enough to warn"; Mark = "MARK-LONG"; Text = ("#MARK-LONG " + ("y" * 2100)); Confirm = $true; Submits = $false }
+  )
+  Record-Scene "pastecontent" 90 $ctx29 {
+    Run-Cmd 'echo pastecontent-ready' 3
+    foreach ($shape in $shapes) {
+      Set-Clip $shape.Text $h29
+      Start-Sleep -Seconds 1
+      Key 0x56 @([byte]$VK_CTRL)
+      Start-Sleep -Seconds 2
+      if ($shape.Confirm) { Key $VK_RETURN; Start-Sleep -Seconds 2 }
+      if (-not $shape.Submits) { Key $VK_RETURN; Start-Sleep -Seconds 1 }
+      Start-Sleep -Seconds 1
+      Run-Cmd ('"COPIES-' + $shape.Mark + '=" + ([regex]::Matches((Get-History -Count 1).CommandLine, "' + $shape.Mark + '")).Count') 3
+    }
+    $script:contentOut = Transcripts
+  }
+  foreach ($shape in $shapes) {
+    $m = [regex]::Match($contentOut, ("COPIES-" + $shape.Mark + "=(\d+)"))
+    if (-not $m.Success) { Fail "pastecontent" "$($shape.Name): no count came back - the paste or the count did not run" }
+    elseif ($m.Groups[1].Value -eq "1") { Pass "$($shape.Name) pastes once" }
+    else { Fail "pastecontent" "$($shape.Name) put $($m.Groups[1].Value) copies on the line" }
+  }
+  Stop-App $ctx29
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════

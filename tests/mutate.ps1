@@ -68,6 +68,17 @@ $mutations = @(
     Check = "lifecycle"
   },
   @{
+    Name = "replay-keeps-mouse-mode"
+    What = "hand over a replay without putting the modes back"
+    File = "src-tauri/src/mux.rs"
+    Find = 'replay.push_str(MODE_RESET_INLINE);'
+    # Slices the reset down to nothing rather than deleting the line: the
+    # constant and the variable both stay used, so the build still
+    # compiles and the mutation is about behaviour rather than syntax.
+    With = 'replay.push_str(&MODE_RESET_INLINE[..0]);'
+    Check = "lifecycle"
+  },
+  @{
     Name = "minify-with-esbuild"
     What = "minify with the bundler that breaks xterm's enums"
     File = "vite.config.ts"
@@ -102,12 +113,26 @@ function Build-For {
     # silently into a stale binary. Only ever this repo's own build.
     $repoExe = Join-Path $repo "src-tauri	arget\debug\gterminal.exe"
     Get-CimInstance Win32_Process | Where-Object { $_.Name -like "gterminal*" } | ForEach-Object {
-      if ($_.ExecutablePath -eq $repoExe) { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+      # This repo's own build, and the copies the suites run from their
+      # scratch directories. Never anything under WindowsApps, which is
+      # somebody's installed app holding their live shells.
+      $mine = ($_.ExecutablePath -eq $repoExe) -or
+              ($_.ExecutablePath -like "*gterminal-*-test*") -or
+              ($_.ExecutablePath -like "$([regex]::Escape($target))*")
+      if ($mine -and $_.ExecutablePath -notlike "*WindowsApps*") {
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+      }
     }
-    Start-Sleep -Milliseconds 600
+    Start-Sleep -Seconds 1
     & npm run build 2>&1 | Out-Null
-    & cargo build --manifest-path src-tauri/Cargo.toml 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
+    $buildLog = & cargo build --manifest-path src-tauri/Cargo.toml 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+      # Printed rather than swallowed: the first failure here was a
+      # daemon holding the exe open, and "cargo build failed" on its own
+      # sent the search in the wrong direction.
+      Write-Host $buildLog -ForegroundColor DarkGray
+      throw "cargo build failed"
+    }
     return $null
   } finally { Pop-Location }
 }

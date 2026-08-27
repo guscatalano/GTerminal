@@ -3817,6 +3817,11 @@ function makeShortcutHandler(getId: () => number) {
     }
     if (e.ctrlKey && e.shiftKey && !e.altKey) {
       const key = e.key.toUpperCase();
+      // Held keys repeat, and most of these happen once or not at all:
+      // holding Ctrl+Shift+T opens tabs until you let go, Ctrl+Shift+W
+      // closes more than you meant to. The pane-size and font chords are
+      // deliberately absent - those are meant to be held.
+      if (e.repeat && "TWHNDBSCV".includes(key)) return false;
       if (key === "T") {
         createTab();
         return false;
@@ -3889,6 +3894,7 @@ function makeShortcutHandler(getId: () => number) {
         ctrlVPaste: effCtrlVPaste(),
         ctrlFFind: effCtrlFFind(),
       });
+      if (action === "swallow") return false;
       if (action === "find") {
         openFind();
         return false;

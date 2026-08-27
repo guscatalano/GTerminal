@@ -48,6 +48,38 @@ check("Ctrl+V at a prompt pastes", routeCtrlKey(key("v", { ctrlKey: true }), ctx
 check("Ctrl+F at a prompt finds", routeCtrlKey(key("f", { ctrlKey: true }), ctx()), "find");
 
 // Browsers report the letter's case; both spellings must route the same.
+// ── held keys ──────────────────────────────────────────────────────────
+// A held key repeats: Windows sends a fresh keydown every few tens of
+// milliseconds until it is let go. Pasting is one-shot, so the repeats
+// have to go nowhere - and they must not fall through to the terminal
+// either, which would send a Ctrl+V this app has claimed.
+//
+// This is the shape of a double paste nobody can reproduce on demand: it
+// depends on how long the key was held, not on what was copied.
+check(
+  "a repeated Ctrl+V pastes nothing more",
+  routeCtrlKey(key("v", { ctrlKey: true, repeat: true }), ctx()),
+  "swallow"
+);
+check(
+  "a repeated Ctrl+F does not reopen the find bar",
+  routeCtrlKey(key("f", { ctrlKey: true, repeat: true }), ctx()),
+  "swallow"
+);
+// The first press still acts - only the repeats after it are dropped.
+check(
+  "the first press is unaffected",
+  routeCtrlKey(key("v", { ctrlKey: true, repeat: false }), ctx()),
+  "paste"
+);
+// A repeat of a key this app does not claim still belongs to the shell,
+// which is how held arrow keys and held letters keep working.
+check(
+  "a repeated key the app does not claim is still the shell's",
+  routeCtrlKey(key("d", { ctrlKey: true, repeat: true }), ctx()),
+  "pass"
+);
+
 check("uppercase V routes too", routeCtrlKey(key("V", { ctrlKey: true }), ctx()), "paste");
 check("uppercase F routes too", routeCtrlKey(key("F", { ctrlKey: true }), ctx()), "find");
 

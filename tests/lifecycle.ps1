@@ -209,6 +209,35 @@ if ($replayData.Length -eq 0) {
     if ($n -eq 0) { Pass "and carries no $($q[0]) for the terminal to answer" }
     else { Fail "replay-queries" "the replay still carries $($q[0]) x$n - answering it types into a live shell" }
   }
+
+
+# A replay must leave the terminal able to select text.
+#
+# Reported as "I cannot select text and copy in the new terminal". A
+# program that turns mouse reporting on leaves that in the scrollback,
+# and a window attaching afterwards replays it - switching mouse
+# reporting on in a terminal nobody asked to. Dragging then sends mouse
+# events to the shell rather than selecting, so there is nothing to copy.
+#
+# The window is new and the mode it inherited is not, which is what makes
+# it baffling from the outside. Every replay now ends with the modes put
+# back, and this is that check: the reset has to be there, and it has to
+# be last, because anything after it could turn them on again.
+$esc = [char]27
+$mouseOff = "$esc[?1000l"
+$sgrOff = "$esc[?1006l"
+if ($replayData -match [regex]::Escape($mouseOff) -and $replayData -match [regex]::Escape($sgrOff)) {
+  Pass "a replay puts mouse reporting back before handing over"
+} else {
+  Fail "replay-modes" "a replay does not reset mouse reporting - a window attaching after a program that turned it on cannot select text"
+}
+$lastOff = $replayData.LastIndexOf($mouseOff)
+$tail = $replayData.Substring($lastOff)
+if ($tail -notmatch [regex]::Escape("$esc[?1000h") -and $tail -notmatch [regex]::Escape("$esc[?1002h")) {
+  Pass "and nothing after it turns them back on"
+} else {
+  Fail "replay-modes" "something in the replay turns mouse reporting on after the reset"
+}
 }
 
 # ── soft kill: grace window, process survives ──

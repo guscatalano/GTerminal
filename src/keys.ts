@@ -13,6 +13,9 @@ export interface KeyEventLike {
   shiftKey: boolean;
   altKey: boolean;
   key: string;
+  /// True when the operating system is repeating a held key. Nothing
+  /// here checked it, so holding Ctrl+V a fraction too long pasted twice.
+  repeat?: boolean;
 }
 
 export interface KeyContext {
@@ -24,7 +27,10 @@ export interface KeyContext {
   ctrlFFind: boolean;
 }
 
-export type KeyAction = "paste" | "find" | "pass";
+/// "swallow" means the app claims the key and does nothing with it: the
+/// terminal must not see it either. It exists for held keys, where the
+/// first press has already acted and the repeats must go nowhere.
+export type KeyAction = "paste" | "find" | "pass" | "swallow";
 
 /// Unshifted Ctrl chords the app answers for. "pass" means the terminal
 /// gets the key untouched.
@@ -36,6 +42,17 @@ export type KeyAction = "paste" | "find" | "pass";
 export function routeCtrlKey(e: KeyEventLike, ctx: KeyContext): KeyAction {
   if (!e.ctrlKey || e.shiftKey || e.altKey) return "pass";
   const k = e.key.toUpperCase();
+  const claimed =
+    (k === "V" && ctx.ctrlVPaste && !ctx.alternate) || (k === "F" && ctx.ctrlFFind && !ctx.alternate);
+  // A held key repeats. Windows sends a fresh keydown every few tens of
+  // milliseconds while it is down, and both of these are one-shot: a
+  // repeat would paste the clipboard again, or reopen a find bar that is
+  // already open. The repeats are swallowed rather than passed on,
+  // because the terminal has no business seeing a Ctrl+V this app claims.
+  //
+  // This is the shape of a double paste nobody can reproduce on demand:
+  // it depends on how long a key was held, not on what was copied.
+  if (claimed && e.repeat) return "swallow";
   if (k === "V" && ctx.ctrlVPaste && !ctx.alternate) return "paste";
   if (k === "F" && ctx.ctrlFFind && !ctx.alternate) return "find";
   return "pass";
