@@ -113,7 +113,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "selectright", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -365,13 +365,17 @@ function Frame-Diff {
   # constant change that has nothing to do with what was being tested -
   # enough to pass an assertion about a few letters appearing on screen
   # whether or not they appeared.
-  param($a, $b, $step = 8, $tolerance = 24, [int]$IgnoreBottom = 0)
+  # FromY/ToY narrow the comparison to a band of rows. A selection
+  # highlight is a few lines of a screen, and whether it survived is
+  # invisible in a whole-window percentage.
+  param($a, $b, $step = 8, $tolerance = 24, [int]$IgnoreBottom = 0, [int]$FromY = 0, [int]$ToY = 0)
   $w = [Math]::Min($a.Width, $b.Width)
   $h = [Math]::Min($a.Height, $b.Height) - $IgnoreBottom
+  if ($ToY -gt 0) { $h = [Math]::Min($h, $ToY) }
   if ($h -lt 1) { return 0.0 }
   $diff = 0
   $total = 0
-  for ($y = 0; $y -lt $h; $y += $step) {
+  for ($y = $FromY; $y -lt $h; $y += $step) {
     for ($x = 0; $x -lt $w; $x += $step) {
       $pa = $a.GetPixel($x, $y)
       $pb = $b.GetPixel($x, $y)
@@ -2578,6 +2582,71 @@ if (-not $Only -or $Only -eq "selectionlives") {
   }
   foreach ($b in $justSelected, $stillSelected) { $b.Dispose() }
   Stop-App $ctx30
+}
+
+# == scene: a selection has to survive being right-clicked ==============
+# Reported: select text, right-click to reach Copy, and the selection is
+# gone before the menu is up - so there is nothing left to copy.
+#
+# There is code meant to prevent exactly this: a capture-phase handler
+# reads the selection when the right button goes down and stops the press
+# reaching xterm, which would otherwise clear it. The copy scene checks
+# that Copy still works, which it can even with the highlight gone,
+# because the text was saved before the clearing. Nobody checked whether
+# the highlight is still on screen, which is what a person reaches for.
+#
+# Both places are tried: away from the selection, and on top of it.
+if (-not $Only -or $Only -eq "selectright") {
+  # The reporter's renderer. A theme with a background image makes the
+  # app dispose WebGL and fall back to the DOM renderer, and selection is
+  # drawn by the renderer - so this is not a cosmetic difference.
+  $ctx31 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7,`"theme`":`"bladerunner`"}"
+  $h31 = $ctx31.Hwnd
+  Set-Clipboard -Value "clipboard-before-selectright"
+  Record-Scene "selectright" 40 $ctx31 {
+    Run-Cmd 'echo KEEPME-24680' 3
+    Drag ($h31) 20 62 320 62
+    Start-Sleep -Seconds 1
+    $script:selShown = Capture-Window $h31
+    # Away from it first, which is what the copy scene does.
+    Right-Click ($h31) 600 300
+    Start-Sleep -Seconds 2
+    $script:selAfterAway = Capture-Window $h31
+    Key $VK_ESC
+    Start-Sleep -Seconds 1
+    # And on top of it, which is where a hand goes when the thing it
+    # wants to copy is right there.
+    Drag ($h31) 20 62 320 62
+    Start-Sleep -Seconds 1
+    $script:selShown2 = Capture-Window $h31
+    Right-Click ($h31) 150 62
+    Start-Sleep -Seconds 2
+    $script:selAfterOn = Capture-Window $h31
+    # First item with a selection is Copy.
+    Click ($h31) 190 74
+    Start-Sleep -Seconds 2
+  }
+  # The line sits around y=62, so the band either side of it is where a
+  # highlight would be lost.
+  $awayGone = Frame-Diff $selShown $selAfterAway -FromY 50 -ToY 80
+  $onGone = Frame-Diff $selShown2 $selAfterOn -FromY 50 -ToY 80
+  Write-Host ("  the selected line changed: {0:p1} on a right-click away from it, {1:p1} on one over it" -f $awayGone, $onGone) -ForegroundColor DarkGray
+  if ($awayGone -lt 0.15) { Pass "the highlight survives a right-click away from it" }
+  else { Fail "selectright" ("the highlight vanished when the menu opened elsewhere ({0:p0} of the line changed)" -f $awayGone) }
+  if ($onGone -lt 0.15) { Pass "and a right-click on top of it" }
+  else { Fail "selectright" ("the highlight vanished when right-clicked on ({0:p0} of the line changed) - this is the reported bug" -f $onGone) }
+  $got = try { Get-Clipboard -Raw } catch { "" }
+  if ($got -match "KEEPME-24680") { Pass "and Copy copies what was highlighted" }
+  else { Fail "selectright" "Copy did not put the selection on the clipboard - got '$(($got -replace "`r|`n", " ").Trim())'" }
+  $dump = Join-Path $outDir "selectright-frames"
+  New-Item -ItemType Directory -Force $dump | Out-Null
+  $i = 0
+  foreach ($f in $selShown, $selAfterAway, $selShown2, $selAfterOn) {
+    $f.Save((Join-Path $dump "$i.png"), [System.Drawing.Imaging.ImageFormat]::Png); $i++
+    $f.Dispose()
+  }
+  Write-Host "  frames saved to $dump" -ForegroundColor DarkGray
+  Stop-App $ctx31
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════
