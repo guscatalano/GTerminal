@@ -128,6 +128,114 @@ fn strip_queries(s: &str) -> String {
     out
 }
 
+/// Keeps full-screen output out of the scrollback.
+///
+/// A terminal never puts alternate-screen output into scrollback. That is
+/// what the alternate screen is for: vim switches to a scratch buffer,
+/// draws there, and on exit switches back, leaving what was on screen
+/// before it untouched.
+///
+/// Recording it anyway means a restored session replays a stream that is
+/// mostly absolute cursor moves and screen clears - go to row 12 column
+/// 40, draw, clear to end of screen, home - into a terminal that is not
+/// on an alternate screen, at a different size, at a different scroll
+/// position. Every one of those lands in the normal buffer over whatever
+/// was there, which is why a restored vim session looks like shredded
+/// pieces of itself.
+///
+/// So the ring gets what a terminal's scrollback would have: everything
+/// outside the alternate screen, and nothing from inside it. The
+/// transcript on disk still gets every byte - it is a record of what
+/// happened, not a picture of a screen.
+#[derive(Default)]
+struct RingFilter {
+    in_alt: bool,
+    /// An escape sequence split across two reads. Held until it can be
+    /// judged, because deciding on half of one is how a filter starts
+    /// eating output it meant to keep.
+    pending: Vec<u8>,
+}
+
+/// Longest sequence worth waiting for. Past this, whatever is being held
+/// was not a mode change, and holding more of it would be a slow leak.
+const PENDING_MAX: usize = 64;
+
+impl RingFilter {
+    /// The part of this chunk that belongs in the scrollback.
+    fn keep(&mut self, chunk: &[u8]) -> Vec<u8> {
+        let mut input = std::mem::take(&mut self.pending);
+        input.extend_from_slice(chunk);
+        let mut out = Vec::with_capacity(input.len());
+        let mut i = 0;
+        while i < input.len() {
+            if input[i] != 0x1b {
+                let next = input[i..]
+                    .iter()
+                    .position(|&c| c == 0x1b)
+                    .map_or(input.len(), |n| i + n);
+                if !self.in_alt {
+                    out.extend_from_slice(&input[i..next]);
+                }
+                i = next;
+                continue;
+            }
+            // An escape with nothing after it yet.
+            if i + 1 >= input.len() {
+                if input.len() - i <= PENDING_MAX {
+                    self.pending = input[i..].to_vec();
+                    return out;
+                }
+                if !self.in_alt {
+                    out.extend_from_slice(&input[i..]);
+                }
+                return out;
+            }
+            if input[i + 1] != b'[' {
+                // Two-byte escapes: not a mode change, and short enough
+                // that waiting for more is never needed.
+                if !self.in_alt {
+                    out.extend_from_slice(&input[i..i + 2]);
+                }
+                i += 2;
+                continue;
+            }
+            // CSI: parameters, then a final byte.
+            let mut j = i + 2;
+            while j < input.len() && !(0x40..=0x7e).contains(&input[j]) {
+                j += 1;
+            }
+            if j >= input.len() {
+                if input.len() - i <= PENDING_MAX {
+                    self.pending = input[i..].to_vec();
+                    return out;
+                }
+                if !self.in_alt {
+                    out.extend_from_slice(&input[i..]);
+                }
+                return out;
+            }
+            let params = &input[i + 2..j];
+            let toggles_alt = (input[j] == b'h' || input[j] == b'l')
+                && params.first() == Some(&b'?')
+                && params[1..]
+                    .split(|&c| c == b';')
+                    .filter_map(|p| std::str::from_utf8(p).ok())
+                    .filter_map(|p| p.parse::<u32>().ok())
+                    .any(|n| n == 47 || n == 1047 || n == 1049);
+            if toggles_alt {
+                // The switch itself is dropped as well: a replay that
+                // carries it would put the terminal on an alternate
+                // screen it never left.
+                self.in_alt = input[j] == b'h';
+            } else if !self.in_alt {
+                out.extend_from_slice(&input[i..=j]);
+            }
+            i = j + 1;
+        }
+        out
+    }
+}
+
 const MODE_RESET: &str =
     "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?2004l\x1b[?1l\x1b[?1049l\x1b[?47l\x1b[?1004l\x1b[?9001l\x1b[?25h\x1b[0m\r\n";
 
@@ -338,6 +446,99 @@ struct Meta {
 
 fn yes() -> bool {
     true
+}
+
+#[cfg(test)]
+mod ring_filter_tests {
+    use super::RingFilter;
+
+    const ESC: u8 = 27;
+
+    fn keep_all(chunks: &[&str]) -> String {
+        let mut f = RingFilter::default();
+        let mut out = Vec::new();
+        for c in chunks {
+            out.extend_from_slice(&f.keep(c.as_bytes()));
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    }
+
+    fn esc(rest: &str) -> String {
+        format!("{}{}", ESC as char, rest)
+    }
+
+    /// The point of the whole thing: what vim drew is not scrollback, and
+    /// replaying it into a normal buffer is what makes a restored session
+    /// look like shredded pieces of itself.
+    #[test]
+    fn what_a_full_screen_program_drew_is_not_kept() {
+        let session = format!(
+            "{}{}{}{}",
+            "before vim",
+            esc("[?1049h"),
+            esc("[2J") + &esc("[H") + "~ ~ ~ a whole editor",
+            esc("[?1049l") + "after vim"
+        );
+        assert_eq!(keep_all(&[&session]), "before vimafter vim");
+    }
+
+    /// The older spellings do the same thing and have to be recognised,
+    /// or a program using one fills the scrollback with its own drawing.
+    #[test]
+    fn the_older_spellings_count_too() {
+        for (on, off) in [("[?47h", "[?47l"), ("[?1047h", "[?1047l")] {
+            let s = format!("a{}drawn{}b", esc(on), esc(off));
+            assert_eq!(keep_all(&[&s]), "ab", "for {on}");
+        }
+    }
+
+    /// Reads land where the operating system decides, not on sequence
+    /// boundaries. Judging half a sequence is how a filter starts eating
+    /// output it meant to keep.
+    #[test]
+    fn a_switch_split_across_reads_is_still_seen() {
+        assert_eq!(keep_all(&["keep", &esc("[?10"), "49h", "hidden", &esc("[?1049l"), "kept"]), "keepkept");
+        // And byte at a time, which is the worst case.
+        let whole = format!("A{}X{}B", esc("[?1049h"), esc("[?1049l"));
+        let mut f = RingFilter::default();
+        let mut out = Vec::new();
+        for b in whole.as_bytes() {
+            out.extend_from_slice(&f.keep(&[*b]));
+        }
+        assert_eq!(String::from_utf8_lossy(&out), "AB");
+    }
+
+    /// Ordinary output has to survive untouched - colours, cursor moves,
+    /// text - because that is what scrollback is made of.
+    #[test]
+    fn ordinary_output_is_kept() {
+        let normal = format!("{}red{} plain {}", esc("[31m"), esc("[0m"), esc("[2K"));
+        assert_eq!(keep_all(&[&normal]), normal);
+        assert_eq!(keep_all(&["no escapes at all"]), "no escapes at all");
+    }
+
+    /// A session detached while still inside a full-screen program keeps
+    /// everything before it and nothing after, rather than everything.
+    #[test]
+    fn output_after_an_unclosed_switch_is_dropped() {
+        assert_eq!(keep_all(&["shell output", &esc("[?1049h"), "editor drawing"]), "shell output");
+    }
+
+    /// Not every escape is a mode change, and a long run after one must
+    /// not be held forever waiting to find out.
+    #[test]
+    fn a_long_unterminated_sequence_is_released() {
+        let long = format!("{}[{}", ESC as char, "0".repeat(200));
+        let kept = keep_all(&[&long]);
+        assert!(kept.len() > 100, "held on to {} bytes", kept.len());
+    }
+
+    /// Two-byte escapes are ordinary output and are not mode changes.
+    #[test]
+    fn two_byte_escapes_pass_through() {
+        assert_eq!(keep_all(&[&esc("=")]), esc("="));
+        assert_eq!(keep_all(&[&esc(">")]), esc(">"));
+    }
 }
 
 #[cfg(test)]
@@ -652,6 +853,8 @@ struct Session {
     /// Soft-killed: the process is still running but will be killed for
     /// real at this time unless an attach cancels the doom.
     doomed_until: Option<u64>,
+    /// Decides what of this session's output belongs in the ring.
+    ring_filter: RingFilter,
     /// Durable history transcript; None when disabled or size-capped.
     transcript: Option<std::fs::File>,
     transcript_len: u64,
@@ -1685,6 +1888,7 @@ fn start_session(
             // so it keeps that standing rather than having to earn it
             // again with a keystroke it may never receive.
             saw_input: !ring_seed_was_empty,
+            ring_filter: RingFilter::default(),
             transcript,
             transcript_len,
         },
@@ -1703,7 +1907,8 @@ fn start_session(
             let Some(s) = state.live.get_mut(&id) else {
                 break;
             };
-            s.ring.extend_from_slice(&buf[..n]);
+            let keep = s.ring_filter.keep(&buf[..n]);
+            s.ring.extend_from_slice(&keep);
             if s.ring.len() > RING_MAX {
                 let excess = s.ring.len() - RING_MAX;
                 s.ring.drain(..excess);

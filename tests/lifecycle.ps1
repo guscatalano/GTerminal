@@ -137,6 +137,55 @@ $null = Read-Line2 $b
 $replay = Read-Line2 $b
 if ($replay -notlike "*lifecycle-marker-999*") { Fail "replay" "marker missing from replay" } else { Pass "reattach replays scrollback" }
 
+# What a full-screen program drew is not scrollback.
+#
+# Reported: restore a session that had vim in it and the output comes back
+# looking wrong. It did. A terminal never puts alternate-screen output
+# into scrollback - that is what the alternate screen is for - and we were
+# recording all of it, so a replay was mostly absolute cursor moves and
+# screen clears painted into a normal buffer at a different size.
+#
+# The fixture writes markers inside the alternate screen and either side
+# of it, so the replay can be checked for both.
+$altFixture = Join-Path (Split-Path $PSScriptRoot -Parent) "tests/fixtures/altscreen.ps1"
+$b.Writer.WriteLine("{""cmd"":""write"",""data"":""echo before-the-fullscreen-program\r""}")
+Start-Sleep -Seconds 3
+$fsCmd = "& '" + $altFixture.Replace([char]92, [char]47) + "'"
+$b.Writer.WriteLine("{""cmd"":""write"",""data"":""$fsCmd\r""}")
+Start-Sleep -Seconds 20
+$b.Writer.WriteLine("{""cmd"":""write"",""data"":""echo after-the-fullscreen-program\r""}")
+Start-Sleep -Seconds 4
+$null = Drain2 $b
+$b.Writer.WriteLine('{"cmd":"detach"}')
+Start-Sleep -Milliseconds 600
+$b.Client.Close()
+
+$c2 = New-Conn $port
+$c2.Writer.WriteLine("{""cmd"":""attach"",""id"":$id}")
+$null = Read-Line2 $c2
+$fsReplayLine = Read-Line2 $c2
+$fsReplay = try { ($fsReplayLine | ConvertFrom-Json).data } catch { "" }
+$c2.Client.Close()
+
+Write-Host ("  replay after a full-screen program: {0} chars" -f $fsReplay.Length) -ForegroundColor DarkGray
+if ($fsReplay -match "before-the-fullscreen-program" -and $fsReplay -match "after-the-fullscreen-program") {
+  Pass "a replay keeps what the shell printed either side of a full-screen program"
+} else {
+  Fail "fullscreen-replay" "the shell's own output is missing from the replay - nothing below was tested"
+}
+if ($fsReplay -match "ALTSCREEN-FIXTURE-READY") {
+  Pass "and keeps what it printed before taking the screen"
+} else {
+  Fail "fullscreen-replay" "output from before the alternate screen was dropped too - the filter is eating too much"
+}
+foreach ($v in @("47", "1047", "1049")) {
+  $c = ([regex]::Matches($fsReplay, "ALT-$v-ROW-")).Count
+  Write-Host ("  drawn on the {0} alternate screen, still in the replay: {1}" -f $v, $c) -ForegroundColor DarkGray
+}
+$drawn = ([regex]::Matches($fsReplay, "ALT-1049-ROW-")).Count
+if ($drawn -eq 0) { Pass "and none of what it drew on the alternate screen" }
+else { Fail "fullscreen-replay" "the replay carries $drawn line(s) the program drew on its own screen - restoring paints them into the shell's buffer" }
+
 # A replay must carry no questions.
 #
 # Reported as random characters in every new window - "?1;2c?1;2c", which
