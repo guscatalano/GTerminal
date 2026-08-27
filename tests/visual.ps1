@@ -113,7 +113,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -2324,6 +2324,83 @@ if (-not $Only -or $Only -eq "ghost") {
   else { Fail "ghost" ("a new tab differs from a clean one by {0:p1} - something from the split is still on screen" -f $ghosting) }
   foreach ($b in $cleanTab, $afterSplit, $afterText, $newTab, $newTabAfter) { $b.Dispose() }
   Stop-App $ctx26
+}
+
+# == scene: a paste arrives once ========================================
+# Reported: the terminal can still double-paste. Every paste test here
+# checked that the text arrived, which is equally true of one copy and of
+# two - so none of them could have caught it.
+#
+# Counting occurrences does not work either: PSReadLine redraws the line
+# it is editing, so the text appears in the transcript as many times as
+# the line was redrawn, whatever was pasted.
+#
+# So the shell decides. The pasted text is a command, and it is submitted:
+# pasted once it runs and prints its marker, pasted twice the line reads
+# "echo ONE-1echo ONE-1" and what comes back contains "-1echo" - a string
+# that cannot occur any other way.
+if (-not $Only -or $Only -eq "pasteonce") {
+  # The warning is on, at two lines, so the single-line cases below go
+  # straight in and the multi-line one has to be confirmed - which is a
+  # different route into the same paste, and the one most likely to fire
+  # twice.
+  $cfg = "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7,`"paste_warn`":true,`"paste_warn_lines`":2}"
+  $ctx28 = Start-App $cfg
+  $h28 = $ctx28.Hwnd
+  Record-Scene "pasteonce" 45 $ctx28 {
+    Run-Cmd 'echo pasteonce-ready' 3
+    # Ctrl+V.
+    Set-Clip "echo ONE-11111" $h28
+    Start-Sleep -Seconds 1
+    Key 0x56 @([byte]$VK_CTRL)
+    Start-Sleep -Seconds 2
+    Key $VK_RETURN
+    Start-Sleep -Seconds 3
+    # Ctrl+Shift+V, which is a different route through the same code.
+    Set-Clip "echo TWO-22222" $h28
+    Start-Sleep -Seconds 1
+    Key 0x56 @([byte]$VK_CTRL, [byte]$VK_SHIFT)
+    Start-Sleep -Seconds 2
+    Key $VK_RETURN
+    Start-Sleep -Seconds 3
+    # The right-click menu. With no selection its first item is Paste.
+    Set-Clip "echo THREE-33333" $h28
+    Start-Sleep -Seconds 1
+    Right-Click ($h28) 600 300
+    Start-Sleep -Seconds 1
+    Click ($h28) 640 312
+    Start-Sleep -Seconds 2
+    Key $VK_RETURN
+    Start-Sleep -Seconds 3
+    # And the multi-line paste, which stops for a warning first. Counting
+    # occurrences in the transcript cannot answer this one - the line is
+    # redrawn as it is edited - so the shell counts instead: the first
+    # line appends a character, the second prints how many there are.
+    $multi = '$env:PC = "$env:PC" + "x"' + "`n" + '"PCOUNT=$($env:PC.Length)"'
+    Set-Clip $multi $h28
+    Start-Sleep -Seconds 1
+    Key 0x56 @([byte]$VK_CTRL)
+    Start-Sleep -Seconds 2
+    Key $VK_RETURN                  # confirm the warning
+    Start-Sleep -Seconds 3
+    Key $VK_RETURN                  # run whatever is on the line
+    Start-Sleep -Seconds 4
+    $script:pasteOut = Transcripts
+  }
+  foreach ($case in @(@("Ctrl+V", "ONE-11111"), @("Ctrl+Shift+V", "TWO-22222"), @("the menu", "THREE-33333"))) {
+    $name = $case[0]; $mark = $case[1]
+    $ran = $pasteOut -match [regex]::Escape($mark)
+    # "-11111echo" can only exist if the line was pasted into twice.
+    $doubled = $pasteOut -match [regex]::Escape($mark + "echo")
+    if (-not $ran) { Fail "pasteonce" "$name pasted nothing - $mark never reached the shell" }
+    elseif ($doubled) { Fail "pasteonce" "$name pasted twice - the line came out as '${mark}echo ...'" }
+    else { Pass "$name pastes once" }
+  }
+  # The multi-line case, counted by the shell rather than by looking.
+  if ($pasteOut -match "PCOUNT=1") { Pass "a confirmed multi-line paste runs once" }
+  elseif ($pasteOut -match "PCOUNT=[2-9]") { Fail "pasteonce" "a confirmed multi-line paste ran $([regex]::Match($pasteOut, 'PCOUNT=(\d+)').Groups[1].Value) times" }
+  else { Fail "pasteonce" "the multi-line paste never ran - nothing was counted" }
+  Stop-App $ctx28
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════
