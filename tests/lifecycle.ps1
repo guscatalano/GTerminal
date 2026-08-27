@@ -232,11 +232,18 @@ if ($replayData -match [regex]::Escape($mouseOff) -and $replayData -match [regex
   Fail "replay-modes" "a replay does not reset mouse reporting - a window attaching after a program that turned it on cannot select text"
 }
 $lastOff = $replayData.LastIndexOf($mouseOff)
-$tail = $replayData.Substring($lastOff)
-if ($tail -notmatch [regex]::Escape("$esc[?1000h") -and $tail -notmatch [regex]::Escape("$esc[?1002h")) {
-  Pass "and nothing after it turns them back on"
+if ($lastOff -lt 0) {
+  # Already reported by the check above. Saying it twice is better than
+  # throwing here, which is what this did first - and a suite that dies
+  # mid-file takes every check after it down with no explanation.
+  Fail "replay-modes" "no reset to look after - nothing else can be said about ordering"
 } else {
-  Fail "replay-modes" "something in the replay turns mouse reporting on after the reset"
+  $tail = $replayData.Substring($lastOff)
+  if ($tail -notmatch [regex]::Escape("$esc[?1000h") -and $tail -notmatch [regex]::Escape("$esc[?1002h")) {
+    Pass "and nothing after it turns them back on"
+  } else {
+    Fail "replay-modes" "something in the replay turns mouse reporting on after the reset"
+  }
 }
 }
 

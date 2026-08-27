@@ -2391,6 +2391,34 @@ if (-not $Only -or $Only -eq "pasteonce") {
     Key $VK_RETURN                  # submit
     Run-Cmd '"COPIES-WARN=" + ([regex]::Matches((Get-History -Count 1).CommandLine, "MARK-WARN")).Count' 3
 
+    # Hover the item first, then click it. That is the reported gesture,
+    # and it is not what the hover scene covers: that one hovers and
+    # escapes, so a menu which pastes on hover *and* on click looks
+    # innocent there and doubles here.
+    Set-Clip "#MARK-HOVER" $h28
+    Start-Sleep -Seconds 1
+    Right-Click ($h28) 600 300
+    Start-Sleep -Seconds 1
+    Move-Pointer ($h28) 640 312
+    Start-Sleep -Milliseconds 900          # rest on it, as a hand does
+    Click ($h28) 640 312
+    Start-Sleep -Seconds 2
+    Key $VK_RETURN
+    Run-Cmd '"COPIES-HOVER=" + ([regex]::Matches((Get-History -Count 1).CommandLine, "MARK-HOVER")).Count' 3
+
+    # The same, dwelling long enough that any hover timer would have
+    # fired before the click.
+    Set-Clip "#MARK-DWELL" $h28
+    Start-Sleep -Seconds 1
+    Right-Click ($h28) 600 300
+    Start-Sleep -Seconds 1
+    Move-Pointer ($h28) 640 312
+    Start-Sleep -Seconds 3
+    Click ($h28) 640 312
+    Start-Sleep -Seconds 2
+    Key $VK_RETURN
+    Run-Cmd '"COPIES-DWELL=" + ([regex]::Matches((Get-History -Count 1).CommandLine, "MARK-DWELL")).Count' 3
+
     # And confirming with the button rather than the key, which is a
     # different handler on the same dialog.
     Set-Clip ("#MARK-CLICK " + ("z" * 400)) $h28
@@ -2409,7 +2437,9 @@ if (-not $Only -or $Only -eq "pasteonce") {
     @("Ctrl+Shift+V", "SHIFTV"),
     @("the menu", "MENU"),
     @("the menu into the long-paste warning", "WARN"),
-    @("the warning's Paste button", "CLICK")
+    @("the warning's Paste button", "CLICK"),
+    @("hovering the item then clicking it", "HOVER"),
+    @("resting on the item before clicking", "DWELL")
   )) {
     $name = $route[0]; $key = $route[1]
     $m = [regex]::Match($pasteOut, "COPIES-$key=(\d+)")
