@@ -400,6 +400,34 @@ function Transcripts {
   ($logs | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
 }
 
+# A new tab is not a shell you can type into yet.
+#
+# Three scenes reported the app as broken for this and nothing else: the
+# tab appears at once, the scene sleeps a fixed six or eight seconds, and
+# on a loaded runner the shell behind it is still starting - so everything
+# typed is swallowed and the scene blames whatever it was testing. The
+# switch scene's second tab had an entirely EMPTY transcript on two runs
+# in a row; maxtop photographed a tab with no prompt in it at all.
+#
+# The daemon's transcript settles it. A shell emits an OSC 133;A mark when
+# it draws a prompt, so "ready" is a fact to poll rather than a duration to
+# guess: measured locally, a session is created at 107ms, its transcript
+# appears at 373ms and the prompt mark lands at 1460ms - and a CI runner is
+# far slower than that, which is the whole problem.
+function Wait-Prompt {
+  param([int]$count = 1, [int]$timeoutSec = 90)
+  $deadline = (Get-Date).AddSeconds($timeoutSec)
+  $seen = 0
+  while ((Get-Date) -lt $deadline) {
+    $seen = @(Get-ChildItem "$scratch\GTerminal\history" -Filter *.log -ErrorAction SilentlyContinue |
+      Where-Object { (Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue) -match "`e\]133;A" }).Count
+    if ($seen -ge $count) { return $true }
+    Start-Sleep -Milliseconds 400
+  }
+  Write-Host "  note: waited ${timeoutSec}s for $count prompt(s), $seen shell(s) ever drew one" -ForegroundColor DarkYellow
+  return $false
+}
+
 function Move-Pointer {
   param($hwnd, $x, $y)
   $r = New-Object 'GTerm.Vis+RECT'
@@ -715,7 +743,10 @@ if (-not $Only -or $Only -eq "pwsh") {
     Run-Cmd '1..3 | ForEach-Object { "line $_" }' 3
     # Split, use the new pane, arrange, leave.
     Key 0x44 @([byte]$VK_CTRL, [byte]$VK_SHIFT)   # Ctrl+Shift+D
-    Start-Sleep -Seconds 3
+    # A split is a new session, and three seconds is not enough for one to
+    # start on a runner - "the second pane never ran anything" was this,
+    # not the split.
+    $null = Wait-Prompt 2
     Run-Cmd 'echo "second pane"' 2
     Key 0x41 @([byte]$VK_CTRL, [byte]$VK_SHIFT)   # Ctrl+Shift+A: arrange
     Start-Sleep -Seconds 3
@@ -842,7 +873,11 @@ if (-not $Only -or $Only -eq "switch") {
   Record-Scene "switch" 42 $ctx {
     Run-Cmd 'echo "first tab"' 2
     Key 0x54 @([byte]$VK_CTRL, [byte]$VK_SHIFT)    # Ctrl+Shift+T
-    Start-Sleep -Seconds 5
+    # Not five seconds. On the runner this shell took longer than that, and
+    # everything below went into a tab with nothing behind it: two runs in a
+    # row left the second transcript completely empty and reported it as
+    # Ctrl+Tab losing the keystroke.
+    $null = Wait-Prompt 2
     Run-Cmd 'echo "second tab"' 2
     # Back to the first tab by clicking it, then type at once. The strip
     # runs along the top with the sidebar off, so the first tab sits just
@@ -2155,6 +2190,12 @@ if (-not $Only -or $Only -eq "closeall") {
     Key 0x57 @([byte]$VK_CTRL, [byte]$VK_SHIFT)
     Start-Sleep -Seconds 6
     $script:afterClose = @(Daemon-Sessions)
+    # The replacement tab appears long before its shell does. Six seconds
+    # was not enough on the runner, and the arithmetic below then went into
+    # a tab with nothing behind it - reported as the window being left with
+    # no working tab, which is this scene's whole assertion. Two prompts:
+    # the closed session's transcript keeps the one it drew.
+    $null = Wait-Prompt 2
     # Arithmetic, so its answer proves a live shell rather than an echo.
     Run-Cmd 'echo (24680+1)' 3
     Start-Sleep -Seconds 2
@@ -2637,7 +2678,7 @@ if (-not $Only -or $Only -eq "selectright") {
   Set-Clipboard -Value "clipboard-before-selectright"
   Record-Scene "selectright" 40 $ctx31 {
     Run-Cmd 'echo KEEPME-24680' 3
-    Drag ($h31) 20 62 320 62
+    Drag ($h31) 20 62 560 62
     Start-Sleep -Seconds 1
     $script:selShown = Capture-Window $h31
     # Away from it first, which is what the copy scene does.
@@ -2648,7 +2689,7 @@ if (-not $Only -or $Only -eq "selectright") {
     Start-Sleep -Seconds 1
     # And on top of it, which is where a hand goes when the thing it
     # wants to copy is right there.
-    Drag ($h31) 20 62 320 62
+    Drag ($h31) 20 62 560 62
     Start-Sleep -Seconds 1
     $script:selShown2 = Capture-Window $h31
     Right-Click ($h31) 150 62
@@ -2658,6 +2699,11 @@ if (-not $Only -or $Only -eq "selectright") {
     Click ($h31) 190 74
     Start-Sleep -Seconds 2
   }
+  # The drags run to x=560 rather than stopping at 320: on the runner the
+  # narrower one ended mid-marker and the clipboard came back holding
+  # "...echo KEEPME-24", which read as Copy having failed when what had
+  # actually happened is that the selection never covered the whole word.
+  #
   # The line sits around y=62, so the band either side of it is where a
   # highlight would be lost.
   $awayGone = Frame-Diff $selShown $selAfterAway -FromY 50 -ToY 80
@@ -2729,10 +2775,9 @@ if (-not $Only -or $Only -eq "maxtop") {
     # contrast the frame comparison needs - but it does have to exist, so
     # ask the daemon rather than sleeping and hoping.
     Key 0x54 @([byte]$VK_CTRL, [byte]$VK_SHIFT)   # Ctrl+Shift+T
-    foreach ($i in 1..40) {
-      Start-Sleep -Milliseconds 500
-      if (@(Daemon-Sessions).Count -ge 2) { break }
-    }
+    # Its prompt, not just its session: a tab still drawing settles under
+    # the frame comparisons below and moves them.
+    $null = Wait-Prompt 2
     Write-Host "  the daemon is holding $(@(Daemon-Sessions).Count) session(s)" -ForegroundColor DarkGray
     Wait-Settled $hM 30 | Out-Null
     # Tab one is a screen of directory listing, tab two a bare prompt.
