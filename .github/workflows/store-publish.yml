@@ -21,6 +21,14 @@ on:
 permissions:
   contents: read
 
+# The Store holds one pending submission per product, so two tags minutes
+# apart are not two releases - they are two runs fighting over one slot,
+# and the loser fails an hour in with nothing to show for it. Newest wins:
+# a later tag cancels whatever is still queued behind it.
+concurrency:
+  group: store-publish
+  cancel-in-progress: true
+
 jobs:
   # Nothing was stopping a broken build reaching the Store. The GitHub
   # release is gated on the test job in ci.yml, but this pipeline had no

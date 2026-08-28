@@ -1,0 +1,61 @@
+name: Store status
+
+# What does the Store think is pending right now?
+#
+# The Store takes exactly one pending submission per product. While one is
+# in certification the next one cannot even be created - which is why a tag
+# can go green through tests and scenes and still publish nothing. There
+# was no way to ask that question without tagging something, so releases
+# were being fired blind at a slot that was already full.
+#
+# Read-only: gets the app and its pending submission and prints the status.
+# It creates nothing, commits nothing and deletes nothing.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  status:
+    runs-on: windows-latest
+    steps:
+      - uses: microsoft/setup-msstore-cli@v1.4
+        with:
+          # Pinned to match the publish pipeline.
+          version: v0.3.9
+
+      - name: Configure Store credentials
+        run: msstore reconfigure --tenantId ${{ secrets.STORE_TENANT_ID }} --clientId ${{ secrets.STORE_CLIENT_ID }} --clientSecret ${{ secrets.STORE_CLIENT_SECRET }} --sellerId ${{ secrets.STORE_SELLER_ID }}
+
+      - name: What is the Store holding
+        shell: pwsh
+        run: |
+          $productId = '9PBXQ1K155G7'
+          msstore apps get $productId | Out-File -Encoding utf8 app.txt
+          $appText = Get-Content -Raw app.txt
+          $app = ($appText.Substring($appText.IndexOf('{')) -replace "\r?\n[ \t]*", '') | ConvertFrom-Json -Depth 20
+          Write-Host "last published submission : $($app.LastPublishedApplicationSubmission.Id)"
+          Write-Host "pending submission        : $($app.PendingApplicationSubmission.Id)"
+
+          # A nonzero exit here is the answer, not an error: it means there is
+          # no pending submission at all, which is the free slot we want.
+          msstore submission get $productId | Out-File -Encoding utf8 probe.txt
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host ""
+            Write-Host "No pending submission - the slot is free, a tag can publish." -ForegroundColor Green
+            exit 0
+          }
+
+          $pt = Get-Content -Raw probe.txt
+          $sub = ($pt.Substring($pt.IndexOf('{')) -replace "\r?\n[ \t]*", '') | ConvertFrom-Json -Depth 50
+          Write-Host ""
+          Write-Host "status  : $($sub.Status)"
+          Write-Host "version : $(($sub.ApplicationPackages | ForEach-Object { $_.Version }) -join ', ')"
+          # The exact strings are what the classification in the publish
+          # pipeline has to key off, so print the detail verbatim rather
+          # than summarising it away.
+          if ($sub.StatusDetails) {
+            Write-Host "detail  : $($sub.StatusDetails | ConvertTo-Json -Depth 10 -Compress)"
+          }
