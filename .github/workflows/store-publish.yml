@@ -117,4 +117,11 @@ jobs:
     with:
       product-id: 9PBXQ1K155G7
       package-artifact: store-package
+      # Newest tag wins. Releases here come in bursts - fix, tag, fix, tag -
+      # and the Store's one submission slot means a version tagged while the
+      # last one is still certifying could not be submitted at all: 0.12.4
+      # published nothing, and 0.12.9 went on top of a still-certifying
+      # 0.12.8. The newest build is always the one that should go out, so a
+      # later tag now clears the slot rather than failing against it.
+      supersede-pending: true
     secrets: inherit
