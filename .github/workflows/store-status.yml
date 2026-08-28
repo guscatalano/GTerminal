@@ -36,17 +36,23 @@ jobs:
           msstore apps get $productId | Out-File -Encoding utf8 app.txt
           $appText = Get-Content -Raw app.txt
           $app = ($appText.Substring($appText.IndexOf('{')) -replace "\r?\n[ \t]*", '') | ConvertFrom-Json -Depth 20
+          $pendingId = $app.PendingApplicationSubmission.Id
           Write-Host "last published submission : $($app.LastPublishedApplicationSubmission.Id)"
-          Write-Host "pending submission        : $($app.PendingApplicationSubmission.Id)"
+          Write-Host "pending submission        : $pendingId"
 
-          # A nonzero exit here is the answer, not an error: it means there is
-          # no pending submission at all, which is the free slot we want.
-          msstore submission get $productId | Out-File -Encoding utf8 probe.txt
-          if ($LASTEXITCODE -ne 0) {
+          # This, and not the exit code of `submission get`. Asked with no
+          # pending submission, the CLI says "Could not find a Pending
+          # Submission, but found the Last Published Submission" and hands
+          # back the published one - with exit code 0. Anything keyed on
+          # that exit code reads a finished release as a draft in progress.
+          if (-not $pendingId) {
             Write-Host ""
             Write-Host "No pending submission - the slot is free, a tag can publish." -ForegroundColor Green
             exit 0
           }
+
+          msstore submission get $productId | Out-File -Encoding utf8 probe.txt
+          if ($LASTEXITCODE -ne 0) { throw "there is a pending submission ($pendingId) but it could not be read" }
 
           $pt = Get-Content -Raw probe.txt
           $sub = ($pt.Substring($pt.IndexOf('{')) -replace "\r?\n[ \t]*", '') | ConvertFrom-Json -Depth 50
