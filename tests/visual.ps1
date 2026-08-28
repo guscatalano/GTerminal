@@ -2700,12 +2700,9 @@ if (-not $Only -or $Only -eq "maxtop") {
   $ctxM = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7}"
   $hM = $ctxM.Hwnd
   Record-Scene "maxtop" 70 $ctxM {
-    # Two tabs that look nothing alike, so which one is on screen can be
-    # read off a frame instead of inferred.
+    # A screenful in tab one, so which tab is on screen can be read off a
+    # frame instead of inferred.
     Run-Cmd 'Get-ChildItem C:\Windows' 5
-    Key 0x54 @([byte]$VK_CTRL, [byte]$VK_SHIFT)   # Ctrl+Shift+T
-    Start-Sleep -Seconds 8
-    Run-Cmd 'cls' 3
     # Maximize the way a hand does it: the button in the corner. Second
     # from the right, 40px wide; y=17 is inside it maximized or not.
     $sz = Client-Size $hM
@@ -2716,10 +2713,28 @@ if (-not $Only -or $Only -eq "maxtop") {
     # the Enter presses it again - which is the report, and is why both
     # halves are checked: focus landing on nothing would pass an "it is
     # still maximized" test on its own.
+    #
+    # Into THIS tab, before there is a second one. Typed into a freshly
+    # opened tab instead, the first run of this scene sent it to a shell
+    # that had not started yet on the runner - the frame showed a blank
+    # terminal with no prompt - and reported the app as having failed to
+    # give the keyboard back.
     Send-Text 'echo MAXFOCUS-31337'
     Key $VK_RETURN
     Start-Sleep -Seconds 3
     $script:zoomedAfterEnter = $U::IsZoomed($hM)
+    $script:typedInto = Transcripts
+
+    # A second tab for the other half. It stays empty, which is all the
+    # contrast the frame comparison needs - but it does have to exist, so
+    # ask the daemon rather than sleeping and hoping.
+    Key 0x54 @([byte]$VK_CTRL, [byte]$VK_SHIFT)   # Ctrl+Shift+T
+    foreach ($i in 1..40) {
+      Start-Sleep -Milliseconds 500
+      if (@(Daemon-Sessions).Count -ge 2) { break }
+    }
+    Write-Host "  the daemon is holding $(@(Daemon-Sessions).Count) session(s)" -ForegroundColor DarkGray
+    Wait-Settled $hM 30 | Out-Null
     # Tab one is a screen of directory listing, tab two a bare prompt.
     $script:onTwo = Capture-Window $hM
     # Control first: a click in the middle of tab one's row. If this does
@@ -2740,9 +2755,16 @@ if (-not $Only -or $Only -eq "maxtop") {
   else { Fail "maxtop" "the window did not maximize - the rest of this scene is about a maximized window" }
   if ($zoomedAfterEnter) { Pass "and Enter afterwards leaves it maximized" }
   else { Fail "maxtop" "Enter put the window back - focus stayed on the maximize button, which is the reported bug" }
-  $tx = Transcripts
-  if ($tx -match "MAXFOCUS-31337") { Pass "and what was typed after the click reached the shell" }
-  else { Fail "maxtop" "nothing typed after the maximize click reached the shell - focus never came back to the terminal" }
+  if ($typedInto -match "MAXFOCUS-31337") { Pass "and what was typed after the click reached the shell" }
+  else {
+    # What the shell actually got, because "nothing arrived" has two very
+    # different causes - the keyboard never reaching the terminal, and the
+    # terminal having no shell behind it yet - and the first run of this
+    # scene blamed the app for the second one.
+    $tail = ($typedInto -replace "`e\[[0-9;?]*[a-zA-Z]", "" -replace "\s+", " ").Trim()
+    if ($tail.Length -gt 200) { $tail = "..." + $tail.Substring($tail.Length - 200) }
+    Fail "maxtop" "nothing typed after the maximize click reached the shell - focus never came back to the terminal. The shell's transcript ends: '$tail'"
+  }
   # Below the tab row and above the status bar: the terminal itself, which
   # is what changes when the tab changes.
   $ctrl = Frame-Diff $onTwo $onOneMid -FromY 60 -IgnoreBottom 40
