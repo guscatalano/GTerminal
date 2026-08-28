@@ -2433,6 +2433,23 @@ function fitPanes(key: number) {
   }
 }
 
+/// Maximized, tao sizes the client area to the monitor's work area, so the
+/// tab row's first pixel is the screen's. The stylesheet hands the row's top
+/// padding to the tabs while this class is on, which is what makes flinging
+/// the mouse at the top of the screen land on a tab instead of on nothing.
+async function markMaximized() {
+  app.classList.toggle("maximized", await getCurrentWindow().isMaximized());
+}
+
+/// Give the keyboard back to the terminal after a chrome button was clicked.
+/// A button keeps DOM focus after its click, so the next Enter presses it
+/// again — hit maximize, type Enter, and the window unmaximizes itself.
+function handBackToTerminal() {
+  (document.activeElement as HTMLElement | null)?.blur();
+  const tab = activeId !== null ? tabs.get(activeId) : undefined;
+  tab?.term.focus();
+}
+
 function focusPane(id: number) {
   const key = paneTab.get(id);
   if (key === undefined) return;
@@ -8493,9 +8510,22 @@ async function main() {
   // Custom window controls (native title bar is off). Close detaches —
   // the daemon keeps every session running, same as before.
   const win = getCurrentWindow();
-  document.getElementById("win-min")!.addEventListener("click", () => void win.minimize());
-  document.getElementById("win-max")!.addEventListener("click", () => void win.toggleMaximize());
+  document.getElementById("win-min")!.addEventListener("click", () => {
+    handBackToTerminal();
+    void win.minimize();
+  });
+  document.getElementById("win-max")!.addEventListener("click", async () => {
+    await win.toggleMaximize();
+    void markMaximized();
+    handBackToTerminal();
+  });
   document.getElementById("win-close")!.addEventListener("click", () => void win.close());
+  // The tab row loses its top padding while maximized (see styles.css), so
+  // the class has to follow the window — including a window that was already
+  // maximized when it opened, and one maximized by double-clicking the drag
+  // region or by Win+Up rather than by the button.
+  void markMaximized();
+  void win.onResized(() => void markMaximized());
   const historyBtn = document.getElementById("historybtn")!;
   historyBtn.addEventListener("click", (e) => {
     e.stopPropagation();

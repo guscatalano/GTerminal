@@ -301,6 +301,29 @@ body,
   position: relative;
 }
 
+/* Maximized, tao sizes the client area to the monitor's work area, so the
+   row's first pixel is the screen's first pixel — and the 6px of breathing
+   room above the tabs becomes a dead strip exactly where a mouse flung at
+   the top of the screen lands. Give it back to the tabs while maximized;
+   the window controls already reached the edge with a negative margin, so
+   theirs goes when the padding it was cancelling does.
+
+   Only while maximized. Unmaximized, the top few pixels are hit-tested as
+   the resize edge before the webview ever sees them — tao skips that test
+   when the window is maximized and not otherwise — so tabs pushed up there
+   would be a strip that resizes the window instead of switching tabs. */
+#app.maximized #tabbar-row {
+  padding-top: 0;
+}
+#app.maximized .win-ctl,
+#app.maximized #win-grip {
+  margin-top: 0;
+}
+/* Square off the top corners so the whole strip is tab, not rounding. */
+#app.maximized .tab {
+  border-radius: 0;
+}
+
 /* Custom window controls (frameless window). */
 .win-ctl {
   flex: none;

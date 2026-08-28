@@ -23,6 +23,7 @@
     "core:window:allow-is-focused",
     "core:window:allow-unminimize",
     "core:window:allow-is-minimized",
+    "core:window:allow-is-maximized",
     "core:window:allow-request-user-attention",
     "core:window:allow-set-title",
     "global-shortcut:allow-register",

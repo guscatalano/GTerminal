@@ -65,6 +65,50 @@ check(
   "expected observer.observe(paneBody); watching .pane misses resizes of the body itself"
 );
 
+// ── the tab strip when maximized ───────────────────────────────────────
+// Reported as "if the window is maximized i miss them frequently". A
+// maximized window's client area starts at the monitor's top edge, so the
+// tab row's 6px of top padding sits exactly where a mouse flung at the top
+// of the screen stops — a dead strip over the tabs. The rule that gives it
+// back is invisible when it breaks: the tabs still work, they are just a
+// few pixels lower than the edge you aimed at.
+const rowPad = /#tabbar-row\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+check("#tabbar-row rule exists", rowPad !== "", "could not find the #tabbar-row rule");
+const maxRow = /#app\.maximized\s+#tabbar-row\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+check(
+  "maximized, the tab row gives up its top padding",
+  /padding(-top)?\s*:\s*0/.test(maxRow),
+  "expected `#app.maximized #tabbar-row { padding-top: 0 }` — without it the top 6px of a maximized window is padding, not tab"
+);
+// The window controls cancel that padding with a negative margin so they
+// reach the edge. Left in once the padding is gone, they hang above the
+// row and lose the top of their own hit box — the same bug, moved.
+const ctlPull = /\.win-ctl\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+const pulls = /margin\s*:\s*-/.test(ctlPull) || /margin-top\s*:\s*-/.test(ctlPull);
+const maxCtl = /#app\.maximized[^{]*\.win-ctl[^{]*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+check(
+  "and the window controls stop pulling themselves above it",
+  !pulls || /margin(-top)?\s*:\s*0/.test(maxCtl),
+  ".win-ctl has a negative top margin to cancel that padding; with the padding gone it needs zeroing under #app.maximized"
+);
+// The class is the whole mechanism. It has to follow the window rather
+// than only the button, since Win+Up, a double-click on the drag region
+// and a window restored maximized all get there without one.
+check(
+  "the maximized class follows the window",
+  /classList\.toggle\("maximized"/.test(ts) && /onResized\(/.test(ts),
+  'expected classList.toggle("maximized", …) driven by window.onResized — a class set only by the maximize button misses Win+Up and a window that opened maximized'
+);
+
+// Clicking a chrome button leaves DOM focus on it, and the next Enter
+// presses it again: hit maximize, press Enter, and the window unmaximizes
+// itself. Reported exactly that way.
+check(
+  "the maximize button hands the keyboard back to the terminal",
+  /toggleMaximize\(\)[\s\S]{0,200}?handBackToTerminal\(\)/.test(ts),
+  "expected handBackToTerminal() after win.toggleMaximize() — otherwise focus stays on the button and Enter toggles it back"
+);
+
 if (failed) {
   console.log(`${failed} style test(s) failed`);
   process.exit(1);

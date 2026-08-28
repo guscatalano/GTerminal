@@ -113,7 +113,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "selectright", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "selectright", "maxtop", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -142,6 +142,9 @@ $sig = @'
 [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
 [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, UIntPtr e);
 [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+[DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
+[DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
+[DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h);
 [DllImport("user32.dll")] public static extern bool GetLayeredWindowAttributes(IntPtr h, out uint key, out byte alpha, out uint flags);
 [DllImport("user32.dll", EntryPoint="GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
 [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
@@ -150,6 +153,8 @@ $sig = @'
 public delegate bool EnumWindowsProc(IntPtr h, IntPtr l);
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
 public struct RECT { public int L,T,R,B; }
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+public struct POINT { public int X,Y; }
 '@
 $U = (Add-Type -MemberDefinition $sig -Name Vis -Namespace GTerm -PassThru) |
   Where-Object { $_.Name -eq 'Vis' }
@@ -424,6 +429,33 @@ function Click {
   Start-Sleep -Milliseconds 50
   $U::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
   Start-Sleep -Milliseconds 350
+}
+
+# A window is not its client area, and the difference is exactly the size
+# of the thing the maximize scene is about. Undecorated-with-shadow insets
+# the client a few pixels inside the window rect; maximized, tao sizes the
+# client to the monitor's work area while the window rect still hangs off
+# every edge of the screen. Clicking "the first row of pixels" through
+# GetWindowRect therefore lands in the padding in one state and off the
+# screen in the other. These measure from the client instead.
+function Client-Size {
+  param($hwnd)
+  $r = New-Object 'GTerm.Vis+RECT'
+  [void]$U::GetClientRect($hwnd, [ref]$r)
+  [pscustomobject]@{ W = ($r.R - $r.L); H = ($r.B - $r.T) }
+}
+
+function Client-Click {
+  param($hwnd, [int]$x, [int]$y)
+  $p = New-Object 'GTerm.Vis+POINT'
+  $p.X = $x; $p.Y = $y
+  [void]$U::ClientToScreen($hwnd, [ref]$p)
+  [void]$U::SetCursorPos($p.X, $p.Y)
+  Start-Sleep -Milliseconds 150
+  $U::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+  Start-Sleep -Milliseconds 50
+  $U::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+  Start-Sleep -Milliseconds 400
 }
 
 function Focus-Pane {
@@ -2647,6 +2679,89 @@ if (-not $Only -or $Only -eq "selectright") {
   }
   Write-Host "  frames saved to $dump" -ForegroundColor DarkGray
   Stop-App $ctx31
+}
+
+# ══ scene: maximized chrome ════════════════════════════════════════════
+# Two reports about a maximized window, both about the same corner of it.
+#
+#   "after i hit maximize the focus should go back to the terminal, it
+#    doesnt so if i hit enter it unmaximizes"
+#   "is there a way that the tabs can go all the way to the top? if the
+#    window is maximized i miss them frequently"
+#
+# The first is a focus bug: the button keeps DOM focus after its click, so
+# the next Enter presses it again. The second is Fitts's law - maximized,
+# the client area starts at the very top of the screen, and 6px of padding
+# above the tabs is the whole difference between flinging the mouse up and
+# landing on a tab and landing on nothing.
+if (-not $Only -or $Only -eq "maxtop") {
+  # history_days on purpose: what was typed after the maximize click is
+  # read back out of the daemon's own transcript, not off the screen.
+  $ctxM = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7}"
+  $hM = $ctxM.Hwnd
+  Record-Scene "maxtop" 70 $ctxM {
+    # Two tabs that look nothing alike, so which one is on screen can be
+    # read off a frame instead of inferred.
+    Run-Cmd 'Get-ChildItem C:\Windows' 5
+    Key 0x54 @([byte]$VK_CTRL, [byte]$VK_SHIFT)   # Ctrl+Shift+T
+    Start-Sleep -Seconds 8
+    Run-Cmd 'cls' 3
+    # Maximize the way a hand does it: the button in the corner. Second
+    # from the right, 40px wide; y=17 is inside it maximized or not.
+    $sz = Client-Size $hM
+    Client-Click $hM ($sz.W - 60) 17
+    Start-Sleep -Seconds 3
+    $script:zoomedAfterClick = $U::IsZoomed($hM)
+    # Now type. With focus left on the button the letters go nowhere and
+    # the Enter presses it again - which is the report, and is why both
+    # halves are checked: focus landing on nothing would pass an "it is
+    # still maximized" test on its own.
+    Send-Text 'echo MAXFOCUS-31337'
+    Key $VK_RETURN
+    Start-Sleep -Seconds 3
+    $script:zoomedAfterEnter = $U::IsZoomed($hM)
+    # Tab one is a screen of directory listing, tab two a bare prompt.
+    $script:onTwo = Capture-Window $hM
+    # Control first: a click in the middle of tab one's row. If this does
+    # not switch tabs the coordinates are wrong and nothing below means
+    # anything.
+    Client-Click $hM 151 20
+    Start-Sleep -Seconds 2
+    $script:onOneMid = Capture-Window $hM
+    Client-Click $hM 375 20
+    Start-Sleep -Seconds 2
+    $script:backTwo = Capture-Window $hM
+    # And the row of pixels the mouse actually stops at.
+    Client-Click $hM 151 1
+    Start-Sleep -Seconds 2
+    $script:onOneTop = Capture-Window $hM
+  }
+  if ($zoomedAfterClick) { Pass "the maximize button maximizes the window" }
+  else { Fail "maxtop" "the window did not maximize - the rest of this scene is about a maximized window" }
+  if ($zoomedAfterEnter) { Pass "and Enter afterwards leaves it maximized" }
+  else { Fail "maxtop" "Enter put the window back - focus stayed on the maximize button, which is the reported bug" }
+  $tx = Transcripts
+  if ($tx -match "MAXFOCUS-31337") { Pass "and what was typed after the click reached the shell" }
+  else { Fail "maxtop" "nothing typed after the maximize click reached the shell - focus never came back to the terminal" }
+  # Below the tab row and above the status bar: the terminal itself, which
+  # is what changes when the tab changes.
+  $ctrl = Frame-Diff $onTwo $onOneMid -FromY 60 -IgnoreBottom 40
+  $toOne = Frame-Diff $onOneMid $onOneTop -FromY 60 -IgnoreBottom 40
+  $toTwo = Frame-Diff $backTwo $onOneTop -FromY 60 -IgnoreBottom 40
+  Write-Host ("  a mid-row click changes {0:p1} of the terminal; after the top-row click the screen is {1:p1} from tab one and {2:p1} from tab two" -f $ctrl, $toOne, $toTwo) -ForegroundColor DarkGray
+  if ($ctrl -gt 0.02) { Pass "clicking a tab switches to it" }
+  else { Fail "maxtop" ("clicking the middle of tab one changed nothing ({0:p1}) - these coordinates miss the tabs, so the top row proves nothing" -f $ctrl) }
+  if ($toTwo -gt 0.02 -and $toOne -lt ($toTwo * 0.5)) { Pass "and so does the very first row of pixels" }
+  else { Fail "maxtop" ("the top row of a maximized window is not the tab: after clicking it the screen is {0:p1} from tab one and {1:p1} from tab two" -f $toOne, $toTwo) }
+  $dumpM = Join-Path $outDir "maxtop-frames"
+  New-Item -ItemType Directory -Force $dumpM | Out-Null
+  $i = 0
+  foreach ($f in $onTwo, $onOneMid, $backTwo, $onOneTop) {
+    $f.Save((Join-Path $dumpM "$i.png"), [System.Drawing.Imaging.ImageFormat]::Png); $i++
+    $f.Dispose()
+  }
+  Write-Host "  frames saved to $dumpM" -ForegroundColor DarkGray
+  Stop-App $ctxM
 }
 
 # ══ scene: tray ════════════════════════════════════════════════════════

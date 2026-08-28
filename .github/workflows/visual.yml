@@ -80,7 +80,5 @@ jobs:
           path: |
             docs/visual/*.avi
             docs/visual/*.gif
-            docs/visual/tui-frames/*.png
-            docs/visual/clip-frames/*.png
-            docs/visual/window-frames/*.png
+            docs/visual/*-frames/*.png
           if-no-files-found: warn

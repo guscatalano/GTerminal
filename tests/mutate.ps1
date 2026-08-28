@@ -79,6 +79,25 @@ $mutations = @(
     Check = "lifecycle"
   },
   @{
+    Name = "maximize-keeps-the-focus"
+    What = "leave focus on the maximize button after it is clicked"
+    File = "src/main.ts"
+    Find = '    await win.toggleMaximize();' + "`n" + '    void markMaximized();' + "`n" + '    handBackToTerminal();'
+    With = '    await win.toggleMaximize();' + "`n" + '    void markMaximized();'
+    Check = "visual:maxtop"
+  },
+  @{
+    Name = "tabs-below-the-top-edge"
+    What = "keep the maximized tab row's top padding, so its first pixels are not tab"
+    # Renaming the selector rather than deleting the rule: the rule stays
+    # in the file for the stylesheet test to find, and only stops applying
+    # to the window - which is the shape the bug had.
+    File = "src/styles.css"
+    Find = '#app.maximized #tabbar-row {'
+    With = '#app.was-maximized #tabbar-row {'
+    Check = "visual:maxtop"
+  },
+  @{
     Name = "minify-with-esbuild"
     What = "minify with the bundler that breaks xterm's enums"
     File = "vite.config.ts"
@@ -111,7 +130,7 @@ function Build-For {
     }
     # A daemon left running holds the exe open and the build fails
     # silently into a stale binary. Only ever this repo's own build.
-    $repoExe = Join-Path $repo "src-tauri	arget\debug\gterminal.exe"
+    $repoExe = Join-Path $repo 'src-tauri\target\debug\gterminal.exe'
     Get-CimInstance Win32_Process | Where-Object { $_.Name -like "gterminal*" } | ForEach-Object {
       # This repo's own build, and the copies the suites run from their
       # scratch directories. Never anything under WindowsApps, which is

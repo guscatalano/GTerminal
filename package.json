@@ -9,7 +9,7 @@
     "app": "tauri build --debug --no-bundle",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test": "pwsh -NoProfile -File tests/typing.ps1 && pwsh -NoProfile -File tests/lifecycle.ps1 && node tests/contrast.mjs && node tests/keys.mjs && node tests/blocks.mjs && node tests/layout.mjs && node tests/titles.mjs && node tests/format.mjs && node tests/restore.mjs && node tests/daemon.mjs && node tests/menus.mjs && node tests/uilog.mjs && node tests/controls.mjs && node tests/firstrun.mjs && node tests/windows.mjs && node tests/retag.mjs && node tests/windownames.mjs && node tests/styles.mjs && node tests/bundle.mjs && cargo test --manifest-path src-tauri/Cargo.toml --lib",
+    "test": "pwsh -NoProfile -File tests/typing.ps1 && pwsh -NoProfile -File tests/lifecycle.ps1 && node tests/contrast.mjs && node tests/keys.mjs && node tests/blocks.mjs && node tests/layout.mjs && node tests/titles.mjs && node tests/format.mjs && node tests/restore.mjs && node tests/daemon.mjs && node tests/menus.mjs && node tests/uilog.mjs && node tests/controls.mjs && node tests/firstrun.mjs && node tests/windows.mjs && node tests/retag.mjs && node tests/windownames.mjs && node tests/styles.mjs && node tests/capabilities.mjs && node tests/bundle.mjs && cargo test --manifest-path src-tauri/Cargo.toml --lib",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
     "test:keys": "node tests/keys.mjs",
     "test:layout": "node tests/layout.mjs",
