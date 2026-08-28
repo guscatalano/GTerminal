@@ -12,6 +12,12 @@ name: Visual
 
 on:
   workflow_dispatch:
+    inputs:
+      scene:
+        description: 'Run only this scene (blank = all of them). A new scene is worth five minutes here rather than forty.'
+        required: false
+        type: string
+        default: ''
   # Called by the release pipeline, which will not publish without it.
   workflow_call:
   schedule:
@@ -23,7 +29,12 @@ permissions:
 jobs:
   visual:
     runs-on: windows-latest
-    timeout-minutes: 40
+    # Measured, not guessed: the last six full runs took 22, 22, 28, 30, 33
+    # and 37 minutes, and the nightly before this was killed at exactly 40 -
+    # reported as "cancelled", which reads like someone stopped it rather
+    # than like the suite running out of room. Scenes only get added, so the
+    # ceiling has to sit well above the slowest run rather than beside it.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v7
 
@@ -68,7 +79,16 @@ jobs:
       # -Force because nobody is at this keyboard: the idle check exists
       # to protect a person, and there is not one here.
       - name: Visual scenes
-        run: npm run test:visual -- -Yes -Force -Exe "src-tauri/target/debug/gterminal.exe"
+        shell: pwsh
+        run: |
+          # github.event.inputs, not inputs: this workflow is also called by
+          # the release pipeline, where a dispatch input does not exist.
+          $scene = '${{ github.event.inputs.scene }}'
+          $a = @('run', 'test:visual', '--', '-Yes', '-Force', '-Exe', 'src-tauri/target/debug/gterminal.exe')
+          if ($scene) { $a += @('-Only', $scene) }
+          Write-Host "npm $($a -join ' ')"
+          & npm @a
+          if ($LASTEXITCODE -ne 0) { throw "visual scenes failed ($LASTEXITCODE)" }
 
       # The videos and any saved frames are the point when something
       # fails: a scene that says "frame 2 looks like frame 1" is far
