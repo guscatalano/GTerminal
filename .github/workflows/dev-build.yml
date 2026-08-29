@@ -93,14 +93,31 @@ jobs:
           # increasing, and obviously not a release at a glance.
           $dev = "$($parts[0]).$($parts[1]).$(1000 + [int]'${{ github.run_number }}')"
           Write-Host "release version $($conf.version) -> dev version $dev"
-          $raw = Get-Content src-tauri/tauri.conf.json -Raw
-          $raw = $raw -replace '"version": "' + [regex]::Escape($conf.version) + '"', ('"version": "' + $dev + '"')
-          Set-Content src-tauri/tauri.conf.json -Value $raw -NoNewline
-          # package.json too, so anything reading either agrees.
-          $pkgRaw = Get-Content package.json -Raw
-          $pkg = $pkgRaw | ConvertFrom-Json
-          $pkgRaw = $pkgRaw -replace '"version": "' + [regex]::Escape($pkg.version) + '"', ('"version": "' + $dev + '"')
-          Set-Content package.json -Value $pkgRaw -NoNewline
+
+          # Patterns and replacements in variables, never built inline in
+          # the -replace. PowerShell binds + tighter than the comma, so
+          #   $raw -replace 'a' + $x + '"', $replacement
+          # parses as 'a' + $x + ('"', $replacement) - string plus array,
+          # joined into ONE string - and -replace then gets a single
+          # argument: a pattern matching nothing and no replacement. It
+          # changes nothing and reports success, which is how the first dev
+          # release went out tagged 0.12.1002 carrying an 0.12.10 installer.
+          function Set-Version($path, $from, $to) {
+            $raw = Get-Content $path -Raw
+            $pattern = '"version": "' + [regex]::Escape($from) + '"'
+            $replacement = '"version": "' + $to + '"'
+            $out = $raw -replace $pattern, $replacement
+            if ($out -eq $raw) { throw "version rewrite matched nothing in $path (looked for $from)" }
+            Set-Content $path -Value $out -NoNewline
+            # Read it back. The whole failure above was a step that did
+            # nothing and said it worked.
+            $now = (Get-Content $path -Raw | ConvertFrom-Json).version
+            if ($now -ne $to) { throw "$path still says $now after the rewrite" }
+            Write-Host "  $path -> $now"
+          }
+          Set-Version 'src-tauri/tauri.conf.json' $conf.version $dev
+          $pkg = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          Set-Version 'package.json' $pkg $dev
           "version=$dev" >> $env:GITHUB_OUTPUT
 
       - name: Build the installer
@@ -118,6 +135,13 @@ jobs:
           $v = '${{ steps.ver.outputs.version }}'
           $msi = Get-ChildItem src-tauri/target/release/bundle/msi/*.msi | Select-Object -First 1
           if (-not $msi) { throw "no MSI was built" }
+          # The tag and the installer must agree. They did not once: a tag
+          # of 0.12.1002 carrying an 0.12.10 installer, which the updater
+          # would offer for ever and never appear to install, because the
+          # version it ends up running is not the one it just fetched.
+          if ($msi.Name -notlike "*$v*") {
+            throw "the tag says $v but the installer is $($msi.Name) - the version rewrite did not reach the build"
+          }
           $notes = @"
           Dev build of ``main`` at ${{ github.sha }}.
 
