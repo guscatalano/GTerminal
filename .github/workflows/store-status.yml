@@ -48,11 +48,19 @@ jobs:
           if (-not $pendingId) {
             Write-Host ""
             Write-Host "No pending submission - the slot is free, a tag can publish." -ForegroundColor Green
-            exit 0
           }
 
+          # Asked either way. With nothing pending this command falls back to
+          # the last PUBLISHED submission - the quirk that makes its exit code
+          # useless for detecting a draft is exactly what answers "which
+          # version is actually live right now", which is the question anyone
+          # runs this workflow to settle.
           msstore submission get $productId | Out-File -Encoding utf8 probe.txt
-          if ($LASTEXITCODE -ne 0) { throw "there is a pending submission ($pendingId) but it could not be read" }
+          if ($LASTEXITCODE -ne 0) {
+            if ($pendingId) { throw "there is a pending submission ($pendingId) but it could not be read" }
+            Write-Host "and no published submission could be read either."
+            exit 0
+          }
 
           $pt = Get-Content -Raw probe.txt
           $sub = ($pt.Substring($pt.IndexOf('{')) -replace "\r?\n[ \t]*", '') | ConvertFrom-Json -Depth 50

@@ -113,7 +113,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "selectright", "maxtop", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "selectright", "selectmax", "maxtop", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -2725,6 +2725,77 @@ if (-not $Only -or $Only -eq "selectright") {
   }
   Write-Host "  frames saved to $dump" -ForegroundColor DarkGray
   Stop-App $ctx31
+}
+
+# ══ scene: select and copy, maximized ══════════════════════════════════
+# Reported again after selectright was already passing: "selecting and
+# then right click copy still doesnt work".
+#
+# selectright drives a 1280x800 window. The window this was reported from
+# is maximized - measured on it, 1440x960 with the client area starting at
+# the very top of the screen - and nothing in this suite had ever selected
+# text in one. That is a different layout, a different distance to every
+# screen edge for the menu to open against, and the configuration the
+# report actually came from, so it gets its own scene rather than a wider
+# drag in the old one.
+#
+# The selection is deliberately several lines tall and wide: the point is
+# whether a selection survives the right-click and reaches the clipboard,
+# not whether the test can guess one line's y at this theme's line height.
+if (-not $Only -or $Only -eq "selectmax") {
+  # bladerunner again: a background image makes the app dispose WebGL and
+  # fall back to the DOM renderer, and selection is drawn by the renderer.
+  $ctxS = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7,`"theme`":`"bladerunner`"}"
+  $hS = $ctxS.Hwnd
+  Set-Clipboard -Value "clipboard-before-selectmax"
+  Record-Scene "selectmax" 44 $ctxS {
+    $null = Wait-Prompt 1
+    # Maximize with the button, then let the reflow finish before anything
+    # is measured or dragged over.
+    $sz = Client-Size $hS
+    Client-Click $hS ($sz.W - 60) 17
+    Start-Sleep -Seconds 3
+    $script:maxOk = $U::IsZoomed($hS)
+    Run-Cmd 'echo SELECTMAX-13579' 3
+    Wait-Settled $hS 20 | Out-Null
+    # A block covering the first several lines, so which line the marker
+    # landed on does not matter.
+    Drag $hS 30 45 760 210
+    Start-Sleep -Seconds 1
+    $script:maxSel = Capture-Window $hS
+    # On top of the selection, which is where a hand goes when the thing
+    # it wants to copy is right there.
+    Right-Click $hS 300 120
+    Start-Sleep -Seconds 2
+    $script:maxAfterMenu = Capture-Window $hS
+    # First item with a selection is Copy, 12px below the click.
+    Click $hS 340 132
+    Start-Sleep -Seconds 2
+  }
+  if ($maxOk) { Pass "the window maximized" }
+  else { Fail "selectmax" "the window did not maximize - this scene is about a maximized one" }
+  # The band the selection covers. A highlight that is lost when the menu
+  # opens is the reported bug, and it shows up here and nowhere else.
+  $maxGone = Frame-Diff $maxSel $maxAfterMenu -FromY 40 -ToY 215
+  Write-Host ("  the selected block changed {0:p1} when the menu opened over it" -f $maxGone) -ForegroundColor DarkGray
+  if ($maxGone -lt 0.25) { Pass "a selection survives being right-clicked in a maximized window" }
+  else { Fail "selectmax" ("the highlight vanished when it was right-clicked ({0:p0} of the block changed) - this is the reported bug" -f $maxGone) }
+  $gotMax = try { Get-Clipboard -Raw } catch { "" }
+  if ($gotMax -match "SELECTMAX-13579") { Pass "and Copy puts it on the clipboard" }
+  else {
+    $seen = ($gotMax -replace "\s+", " ").Trim()
+    if ($seen.Length -gt 120) { $seen = $seen.Substring(0, 120) + "..." }
+    Fail "selectmax" "Copy did not put the selection on the clipboard - got '$seen'"
+  }
+  $dumpS = Join-Path $outDir "selectmax-frames"
+  New-Item -ItemType Directory -Force $dumpS | Out-Null
+  $k = 0
+  foreach ($f in $maxSel, $maxAfterMenu) {
+    $f.Save((Join-Path $dumpS "$k.png"), [System.Drawing.Imaging.ImageFormat]::Png); $k++
+    $f.Dispose()
+  }
+  Write-Host "  frames saved to $dumpS" -ForegroundColor DarkGray
+  Stop-App $ctxS
 }
 
 # ══ scene: maximized chrome ════════════════════════════════════════════
