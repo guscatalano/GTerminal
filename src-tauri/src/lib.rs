@@ -1,6 +1,7 @@
 mod mux;
 mod stats;
 mod update;
+mod weather;
 
 use mux::Request;
 use serde_json::Value;
@@ -171,6 +172,33 @@ fn open_logs_folder() -> Result<String, String> {
         .spawn()
         .map_err(|e| format!("{e}"))?;
     Ok(dir)
+}
+
+/// Open a folder in Explorer.
+///
+/// The terminal's own working directory, from its right-click menu: the
+/// thing you want after `cd`-ing somewhere three levels deep is that
+/// folder in a window, and the alternative is retyping the path.
+///
+/// Spawned the same way the logs button ended up being spawned, for the
+/// same reason - the opener plugin does nothing often enough that "the
+/// button did nothing" has been reported twice.
+#[tauri::command]
+fn open_folder(path: String) -> Result<String, String> {
+    use std::os::windows::process::CommandExt;
+    // A directory that exists, and nothing else. The path arrives from the
+    // window, which got it from the shell's reported cwd - but this command
+    // starts a process, so it checks rather than assumes.
+    let p = std::path::Path::new(&path);
+    if !p.is_dir() {
+        return Err(format!("{path} is not a folder"));
+    }
+    std::process::Command::new("explorer.exe")
+        .arg(p)
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .spawn()
+        .map_err(|e| format!("{e}"))?;
+    Ok(path)
 }
 
 /// Where the logs live, so the window can offer to open the folder.
@@ -408,6 +436,49 @@ fn get_config() -> serde_json::Value {
 #[tauri::command]
 fn set_config(value: serde_json::Value) -> Result<(), String> {
     mux::write_config(&value)
+}
+
+// ── weather and air quality ────────────────────────────────────────────
+
+/// The last report, and what was asked for to get it.
+///
+/// The status bar ticks every second and these are free, keyless services
+/// someone else pays for. Ten minutes is far fresher than the weather
+/// changes and roughly 600 times fewer requests than the tick rate.
+static WEATHER_CACHE: Mutex<Option<(String, weather::Report)>> = Mutex::new(None);
+const WEATHER_TTL_MS: u64 = 10 * 60 * 1000;
+
+/// Weather and air quality for a postcode.
+///
+/// Nothing is requested until a postcode is set: this is the only thing the
+/// app sends anywhere that says something about where you are, so it is
+/// blank by default, the same as the optional AI endpoint. See PRIVACY.md.
+#[tauri::command]
+async fn weather_report(
+    zip: String,
+    country: String,
+    fahrenheit: bool,
+    force: bool,
+) -> Result<weather::Report, String> {
+    let key = format!("{}|{}|{fahrenheit}", zip.trim().to_lowercase(), country.trim().to_lowercase());
+    if !force {
+        if let Some((k, r)) = WEATHER_CACHE.lock().unwrap().as_ref() {
+            let age = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0)
+                .saturating_sub(r.fetched_ms);
+            if k == &key && age < WEATHER_TTL_MS {
+                return Ok(r.clone());
+            }
+        }
+    }
+    let (z, c) = (zip.clone(), country.clone());
+    let report = tauri::async_runtime::spawn_blocking(move || weather::fetch(&z, &c, fahrenheit))
+        .await
+        .map_err(|e| format!("the weather lookup did not come back: {e}"))??;
+    *WEATHER_CACHE.lock().unwrap() = Some((key, report.clone()));
+    Ok(report)
 }
 
 // ── updating an installed build ────────────────────────────────────────
@@ -1207,6 +1278,7 @@ pub fn run() {
             restart_daemon,
             logs_path,
             open_logs_folder,
+            open_folder,
             log_ui,
             summon_toggle,
             window_labels,
@@ -1217,6 +1289,7 @@ pub fn run() {
             kill_session,
             get_config,
             set_config,
+            weather_report,
             update_status,
             update_versions,
             update_check,

@@ -175,6 +175,12 @@ interface AppConfig {
   /// Updating an installed (non-Store) build. update_pin holds a version:
   /// someone pinning is usually pinning because the newer one broke them,
   /// so nothing replaces it while it is set.
+  /// Weather and air quality for the status bar. Blank means nothing is
+  /// ever requested - a postcode is the most identifying thing this app
+  /// would send anywhere, so it is opt-in. See PRIVACY.md.
+  weather_zip?: string;
+  weather_country?: string;
+  weather_fahrenheit?: boolean;
   update_auto?: boolean;
   update_pin?: string;
   update_prerelease?: boolean;
@@ -4511,6 +4517,22 @@ async function createTab(
           term.focus();
         },
       });
+      // The folder this shell is actually in. After cd-ing three levels
+      // deep, the alternative to this is retyping the path into Explorer.
+      // Only offered when the cwd is known - the shells report it, but a
+      // session restored cold may not have said yet, and a menu item that
+      // opens the wrong folder is worse than one that is not there.
+      const cwdNow = lastInfo.get(id)?.cwd;
+      if (cwdNow) {
+        items.push({
+          label: "Open folder in Explorer",
+          action: () => {
+            invoke("open_folder", { path: cwdNow })
+              .catch((e) => logUi("error", { message: `open folder: ${String(e)}` }))
+              .finally(() => term.focus());
+          },
+        });
+      }
       // The command you right-clicked on. Copying an error usually means
       // copying its output without the prompt line, or the command
       // together with what it printed — the two things people otherwise
@@ -6584,6 +6606,89 @@ interface UpdateVersion {
   relation: "current" | "newer" | "older";
 }
 
+/// A plain text setting. mkSelect and mkNumber existed; this did not.
+function mkText(value: string, onChange: (v: string) => void): HTMLInputElement {
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "set-control";
+  input.spellcheck = false;
+  input.value = value;
+  input.addEventListener("change", () => onChange(input.value));
+  return input;
+}
+
+/// Where the weather comes from, and whether it is asked for at all.
+///
+/// Blank by default and blank means silent: no postcode, no request. This
+/// is the only thing the app sends anywhere that says something about
+/// where you are, so it follows the same rule as the optional AI endpoint
+/// and PRIVACY.md spells out both.
+function buildWeatherSection() {
+  settingsSection("Weather");
+
+  const zip = document.createElement("input");
+  zip.type = "text";
+  zip.className = "set-control";
+  zip.placeholder = "none — nothing is requested";
+  zip.spellcheck = false;
+  zip.value = config.weather_zip ?? "";
+  const state = document.createElement("div");
+  state.className = "setting-status";
+  const say = () => {
+    const z = (config.weather_zip ?? "").trim();
+    state.textContent = z
+      ? `Looked up through Zippopotam, then Open-Meteo for the forecast and air quality. No account, no API key, and nothing goes to the developer.`
+      : "Blank: nothing is requested, and the two items show a prompt instead of a reading.";
+  };
+  zip.addEventListener("change", () => {
+    config.weather_zip = zip.value.trim();
+    saveConfig();
+    // Ask again immediately rather than at the next ten-minute mark -
+    // typing a postcode and waiting ten minutes to find out it was wrong
+    // is not a setting, it is a puzzle.
+    weatherLastRun = 0;
+    statusCtx.weather = null;
+    statusCtx.weatherError = "";
+    say();
+    void sampleStatus();
+  });
+  const stack = document.createElement("div");
+  stack.className = "setting-stack";
+  stack.append(zip, state);
+  say();
+  settingRow(
+    "Postcode",
+    "Add the Weather and Air quality items to the status bar to see it. Leave blank and nothing is ever requested.",
+    stack
+  );
+
+  settingRow(
+    "Country",
+    "Two-letter code for the postcode lookup — us, gb, ca, de…",
+    mkText(config.weather_country ?? "us", (v) => {
+      config.weather_country = v.trim().toLowerCase() || "us";
+      saveConfig();
+      weatherLastRun = 0;
+      void sampleStatus();
+    })
+  );
+
+  settingRow(
+    "Units",
+    "",
+    mkSelect(
+      [["f", "Fahrenheit, mph"], ["c", "Celsius, km/h"]],
+      config.weather_fahrenheit === false ? "c" : "f",
+      (v) => {
+        config.weather_fahrenheit = v === "f";
+        saveConfig();
+        weatherLastRun = 0;
+        void sampleStatus();
+      }
+    )
+  );
+}
+
 /// Every shortcut, on the settings page, where someone can find it.
 ///
 /// Ctrl+Shift+Tab and Ctrl+1..9 existed and were written down nowhere: in
@@ -7758,6 +7863,7 @@ function buildSettingsPage() {
     })()
   );
 
+  buildWeatherSection();
   buildShortcutsSection();
   buildUpdatesSection();
 
@@ -7889,10 +7995,30 @@ function fpsNow(): number {
   return avg > 0 ? Math.round(1000 / avg) : 0;
 }
 
+interface WeatherReport {
+  place: string;
+  temp: number;
+  feels_like: number;
+  unit: string;
+  humidity: number;
+  wind: number;
+  wind_unit: string;
+  conditions: string;
+  aqi: number | null;
+  aqi_label: string;
+  pm2_5: number | null;
+  pm10: number | null;
+  fetched_ms: number;
+}
+
 interface StatusCtx {
   stats: SystemStats;
   perf: Record<string, number>;
   custom: Record<string, string>;
+  /// Null until a postcode is set and the first fetch comes back. Nothing
+  /// is requested without one - see PRIVACY.md.
+  weather: WeatherReport | null;
+  weatherError: string;
 }
 
 interface StatusDetail {
@@ -7911,6 +8037,71 @@ interface StatusItemDef {
 
 
 const STATUS_BUILTINS: Record<string, StatusItemDef> = {
+  weather: {
+    label: "Weather",
+    render: (c) =>
+      c.weather
+        ? `${Math.round(c.weather.temp)}${c.weather.unit} ${c.weather.conditions}`
+        : c.weatherError
+          ? "wx —"
+          : config.weather_zip
+            ? "wx …"
+            : "wx: set a postcode",
+    detail: (c) => {
+      const w = c.weather;
+      if (!w) {
+        return {
+          rows: [
+            ["Postcode", config.weather_zip || "not set"],
+            ["Status", c.weatherError || (config.weather_zip ? "loading…" : "Set one in Settings → Weather")],
+          ],
+        };
+      }
+      return {
+        rows: [
+          ["Place", w.place],
+          ["Temperature", `${Math.round(w.temp)}${w.unit}`],
+          ["Feels like", `${Math.round(w.feels_like)}${w.unit}`],
+          ["Conditions", w.conditions],
+          ["Humidity", `${Math.round(w.humidity)}%`],
+          ["Wind", `${Math.round(w.wind)} ${w.wind_unit}`],
+          ["Updated", new Date(w.fetched_ms).toLocaleTimeString()],
+        ],
+        links: [{ label: "Forecast", url: "https://open-meteo.com/" }],
+      };
+    },
+  },
+  aqi: {
+    label: "Air quality",
+    render: (c) =>
+      c.weather && c.weather.aqi !== null
+        ? `AQI ${Math.round(c.weather.aqi)} ${c.weather.aqi_label}`
+        : config.weather_zip
+          ? "AQI —"
+          : "AQI: set a postcode",
+    detail: (c) => {
+      const w = c.weather;
+      if (!w) {
+        return {
+          rows: [
+            ["Postcode", config.weather_zip || "not set"],
+            ["Status", c.weatherError || (config.weather_zip ? "loading…" : "Set one in Settings → Weather")],
+          ],
+        };
+      }
+      return {
+        rows: [
+          ["Place", w.place],
+          ["US AQI", w.aqi === null ? "—" : String(Math.round(w.aqi))],
+          ["Band", w.aqi_label],
+          ["PM2.5", w.pm2_5 === null ? "—" : `${w.pm2_5.toFixed(1)} µg/m³`],
+          ["PM10", w.pm10 === null ? "—" : `${w.pm10.toFixed(1)} µg/m³`],
+          ["Updated", new Date(w.fetched_ms).toLocaleTimeString()],
+        ],
+        links: [{ label: "About the AQI", url: "https://www.airnow.gov/aqi/aqi-basics/" }],
+      };
+    },
+  },
   clock: {
     label: "Clock",
     render: () => new Date().toLocaleTimeString(),
@@ -8196,6 +8387,8 @@ let statusCtx: StatusCtx = {
   },
   perf: {},
   custom: {},
+  weather: null,
+  weatherError: "",
 };
 
 /// Items whose data costs a wildcard PDH sweep; only those groups get
@@ -8210,6 +8403,9 @@ const STATUS_GROUPS: Record<string, string> = {
 let statusOpenId: string | null = null;
 let statusTimer: number | undefined;
 const customLastRun = new Map<string, number>();
+/// When the weather was last asked for. Its own clock because it is the
+/// one status item that costs somebody else a request.
+let weatherLastRun = 0;
 
 function statusItemIds(): string[] {
   return config.status_items ?? ["clock", "cpu", "mem", "diskio"];
@@ -8290,6 +8486,33 @@ async function sampleStatus() {
   if (paths.length) {
     const got = await invoke<Record<string, number>>("perf_counters", { paths }).catch(() => ({}));
     Object.assign(statusCtx.perf, got);
+  }
+  // Weather and air quality keep their own, much slower cadence: they are
+  // free services someone else pays for, and the weather does not change
+  // between ticks of a status bar. Nothing at all is requested until a
+  // postcode is set - see PRIVACY.md.
+  if (ids.includes("weather") || ids.includes("aqi")) {
+    const zip = (config.weather_zip ?? "").trim();
+    if (zip && Date.now() - weatherLastRun > 10 * 60 * 1000) {
+      weatherLastRun = Date.now();
+      invoke<WeatherReport>("weather_report", {
+        zip,
+        country: (config.weather_country ?? "us").trim() || "us",
+        fahrenheit: config.weather_fahrenheit !== false,
+        force: false,
+      })
+        .then((w) => {
+          statusCtx.weather = w;
+          statusCtx.weatherError = "";
+          renderStatusBar();
+        })
+        .catch((e) => {
+          statusCtx.weatherError = String(e);
+          // Retry sooner than the full interval, but not on every tick.
+          weatherLastRun = Date.now() - 9 * 60 * 1000;
+          renderStatusBar();
+        });
+    }
   }
   // Command items keep their own cadence — they cost a process each.
   const now = Date.now();
