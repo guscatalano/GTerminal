@@ -66,6 +66,17 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # The E2E suites drive this binary rather than a mock, so it has to
+      # exist before they run - without it typing.ps1 stops at "build
+      # first: cargo build in src-tauri", which is what this workflow did
+      # on its first outing.
+      #
+      # Deliberately without GTERMINAL_CHANNEL: the suites expect the
+      # ordinary state directory, and build.rs re-runs when that variable
+      # changes, so the channel build below is a separate compile.
+      - name: Build daemon (debug, used by E2E suites)
+        run: cargo build --manifest-path src-tauri/Cargo.toml
+
       # Cheap, and it is the whole suite that does not need a screen. A dev
       # build people install on a real machine should not be worse tested
       # than one that goes to the Store.
