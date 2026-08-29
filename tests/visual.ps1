@@ -2758,6 +2758,12 @@ if (-not $Only -or $Only -eq "selectmax") {
     $script:maxOk = $U::IsZoomed($hS)
     Run-Cmd 'echo SELECTMAX-13579' 3
     Wait-Settled $hS 20 | Out-Null
+    # Before the drag, so "the highlight survived" cannot pass by there
+    # never having been one. A drag that selects nothing leaves both later
+    # frames identical and the survival check reads as green - the
+    # clipboard assertion would still fail the scene, but it would blame
+    # Copy for something that went wrong two steps earlier.
+    $script:maxBare = Capture-Window $hS
     # A block covering the first several lines, so which line the marker
     # landed on does not matter.
     Drag $hS 30 45 760 210
@@ -2776,8 +2782,11 @@ if (-not $Only -or $Only -eq "selectmax") {
   else { Fail "selectmax" "the window did not maximize - this scene is about a maximized one" }
   # The band the selection covers. A highlight that is lost when the menu
   # opens is the reported bug, and it shows up here and nowhere else.
+  $maxDrawn = Frame-Diff $maxBare $maxSel -FromY 40 -ToY 215
   $maxGone = Frame-Diff $maxSel $maxAfterMenu -FromY 40 -ToY 215
-  Write-Host ("  the selected block changed {0:p1} when the menu opened over it" -f $maxGone) -ForegroundColor DarkGray
+  Write-Host ("  the drag highlighted {0:p1} of the block; it then changed {1:p1} when the menu opened over it" -f $maxDrawn, $maxGone) -ForegroundColor DarkGray
+  if ($maxDrawn -gt 0.05) { Pass "the drag actually selected something" }
+  else { Fail "selectmax" ("the drag highlighted nothing ({0:p1}) - nothing below is about the reported bug" -f $maxDrawn) }
   if ($maxGone -lt 0.25) { Pass "a selection survives being right-clicked in a maximized window" }
   else { Fail "selectmax" ("the highlight vanished when it was right-clicked ({0:p0} of the block changed) - this is the reported bug" -f $maxGone) }
   $gotMax = try { Get-Clipboard -Raw } catch { "" }
@@ -2790,7 +2799,7 @@ if (-not $Only -or $Only -eq "selectmax") {
   $dumpS = Join-Path $outDir "selectmax-frames"
   New-Item -ItemType Directory -Force $dumpS | Out-Null
   $k = 0
-  foreach ($f in $maxSel, $maxAfterMenu) {
+  foreach ($f in $maxBare, $maxSel, $maxAfterMenu) {
     $f.Save((Join-Path $dumpS "$k.png"), [System.Drawing.Imaging.ImageFormat]::Png); $k++
     $f.Dispose()
   }
