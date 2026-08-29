@@ -37,6 +37,7 @@ import {
   sessionState,
 } from "./restore";
 import type { SessionState } from "./restore";
+import { SHORTCUTS } from "./shortcuts";
 import { staleDaemon, shellsAtRisk, daemonNotice } from "./daemon";
 import type { DaemonInfo } from "./daemon";
 import { activates } from "./menus";
@@ -6583,6 +6584,33 @@ interface UpdateVersion {
   relation: "current" | "newer" | "older";
 }
 
+/// Every shortcut, on the settings page, where someone can find it.
+///
+/// Ctrl+Shift+Tab and Ctrl+1..9 existed and were written down nowhere: in
+/// the key handler and in no table, so the only way to discover them was to
+/// read the source. A shortcut nobody can find may as well not be there.
+///
+/// The group name goes in the description rather than into headings of its
+/// own, so the settings search finds "pane" and lands on the pane keys -
+/// the search matches each row's text, and a heading is not part of a row.
+function buildShortcutsSection() {
+  settingsSection("Keyboard shortcuts");
+  for (const group of SHORTCUTS) {
+    for (const s of group.items) {
+      const keys = document.createElement("div");
+      keys.className = "kbd-keys";
+      // Split on + so each key is its own cap, but leave "Ctrl+1 … Ctrl+8"
+      // and arrow clusters alone - they read as one thing.
+      for (const part of s.keys.split("+")) {
+        const k = document.createElement("kbd");
+        k.textContent = part;
+        keys.appendChild(k);
+      }
+      settingRow(s.what, s.only ? `${group.title} — ${s.only}` : group.title, keys);
+    }
+  }
+}
+
 /// Say a newer build exists, without getting in the way.
 ///
 /// Deliberately a dot on the settings button rather than anything in the
@@ -7730,6 +7758,7 @@ function buildSettingsPage() {
     })()
   );
 
+  buildShortcutsSection();
   buildUpdatesSection();
 
   settingsSection("About");
