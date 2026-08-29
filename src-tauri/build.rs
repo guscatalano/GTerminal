@@ -24,5 +24,24 @@ fn main() {
         .expect("tauri.conf.json has a version");
     println!("cargo:rustc-env=GTERMINAL_VERSION={version}");
 
+    // Which build this is. Empty for the one that ships to the Store; "dev"
+    // for the installer built to try things out on a real machine without
+    // waiting on certification.
+    //
+    // It decides the state directory, and that is the whole point of it: a
+    // test build sharing %LOCALAPPDATA%\GTerminal would share the daemon
+    // holding somebody's live sessions. That is not hypothetical - a
+    // side-by-side package did exactly that here, attached to the running
+    // daemon and took a session out of a window that was in use.
+    println!("cargo:rerun-if-env-changed=GTERMINAL_CHANNEL");
+    let channel = std::env::var("GTERMINAL_CHANNEL").unwrap_or_default();
+    let channel = channel.trim().to_lowercase();
+    // Anything that would leave the path ambiguous or escape the folder is
+    // refused outright rather than sanitised into something surprising.
+    if !channel.is_empty() && !channel.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        panic!("GTERMINAL_CHANNEL must be alphanumeric or '-', got {channel:?}");
+    }
+    println!("cargo:rustc-env=GTERMINAL_CHANNEL={channel}");
+
     tauri_build::build()
 }

@@ -98,6 +98,46 @@ $mutations = @(
     Check = "visual:maxtop"
   },
   @{
+    Name = "update-installs-from-anywhere"
+    What = "accept an installer URL from any host the releases list names"
+    File = "src-tauri/src/update.rs"
+    Find = '        if !url.starts_with("https://github.com/guscatalano/GTerminal/releases/download/") {'
+    With = '        if false {'
+    Check = "rust"
+  },
+  @{
+    Name = "update-ignores-a-pin"
+    What = "update past a pinned version"
+    File = "src-tauri/src/update.rs"
+    Find = '    if let Some(pin) = pinned {'
+    With = '    if let Some(pin) = None::<&str> {'
+    Check = "rust"
+  },
+  @{
+    Name = "update-compares-versions-as-text"
+    What = "compare versions as text, so 0.12.9 looks newer than 0.12.10"
+    File = "src-tauri/src/update.rs"
+    Find = '    let (a, b) = (parts(a), parts(b));'
+    With = '    if true { return a.trim_start_matches(''v'').cmp(b.trim_start_matches(''v'')); }' + "`n" + '    let (a, b) = (parts(a), parts(b));'
+    Check = "rust"
+  },
+  @{
+    Name = "store-install-updates-itself"
+    What = "let a Store install run an MSI over itself"
+    File = "src-tauri/src/update.rs"
+    Find = '    !packaged'
+    With = '    let _ = packaged; true'
+    Check = "rust"
+  },
+  @{
+    Name = "dev-channel-shares-the-real-state-dir"
+    What = "put a test build's daemon in the folder holding real sessions"
+    File = "src-tauri/src/mux.rs"
+    Find = '        format!("GTerminal-{channel}")'
+    With = '        "GTerminal".to_string()'
+    Check = "rust"
+  },
+  @{
     Name = "minify-with-esbuild"
     What = "minify with the bundler that breaks xterm's enums"
     File = "vite.config.ts"
@@ -173,6 +213,10 @@ function Invoke-Check {
         & npm run test:lifecycle 2>&1 | Out-String -OutVariable out | Out-Null
         return @{ Failed = ($LASTEXITCODE -ne 0); Output = $out }
       }
+      '^rust$' {
+        & cargo test --manifest-path src-tauri/Cargo.toml --lib 2>&1 | Out-String -OutVariable out | Out-Null
+        return @{ Failed = ($LASTEXITCODE -ne 0); Output = $out }
+      }
       '^bundle$' {
         & node tests/bundle.mjs 2>&1 | Out-String -OutVariable out | Out-Null
         return @{ Failed = ($LASTEXITCODE -ne 0); Output = $out }
@@ -196,7 +240,12 @@ foreach ($m in $mutations) {
   try {
     Set-Content -Path $path -Value ($original.Replace($m.Find, $m.With)) -NoNewline
     $exe = $null
+    # Neither of these needs the app built: the bundle check reads dist,
+    # and cargo test compiles what it runs. Sending them through Build-For
+    # would also make a mutation that does not compile abort the whole run
+    # instead of being reported as the one entry it is.
     if ($m.Check -eq "bundle") { Push-Location $repo; & npm run build 2>&1 | Out-Null; Pop-Location }
+    elseif ($m.Check -eq "rust") { }
     else { $exe = Build-For $m.Check }
     $r = Invoke-Check $m.Check $exe
     if ($r.Failed) {

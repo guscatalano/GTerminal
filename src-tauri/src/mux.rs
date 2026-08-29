@@ -687,6 +687,29 @@ mod second_daemon_tests {
 }
 
 #[cfg(test)]
+mod channel_tests {
+    use super::state_dir_name;
+
+    /// The shipping build must keep the folder it has always used. Renaming
+    /// it would strand every existing session, history transcript and
+    /// setting on an installed machine - the update would look like the app
+    /// forgot everything.
+    #[test]
+    fn the_shipping_build_keeps_the_folder_it_always_had() {
+        assert_eq!(state_dir_name(""), "GTerminal");
+        assert_eq!(state_dir_name("   "), "GTerminal");
+    }
+
+    /// And a channel must not land on it by accident, because sharing this
+    /// folder means sharing the daemon holding somebody's live shells.
+    #[test]
+    fn a_channel_gets_a_folder_of_its_own() {
+        assert_eq!(state_dir_name("dev"), "GTerminal-dev");
+        assert_ne!(state_dir_name("dev"), state_dir_name(""));
+    }
+}
+
+#[cfg(test)]
 mod daemon_binary_tests {
     /// A Store update replaces the package, and a running process holds
     /// its own file open. The daemon outlives the app by design, so if it
@@ -895,9 +918,33 @@ type Sessions = Arc<Mutex<DaemonState>>;
 static NEXT_SESSION: AtomicU32 = AtomicU32::new(1);
 static NEXT_CONN: AtomicU64 = AtomicU64::new(1);
 
+/// The folder this build keeps its state in, under %LOCALAPPDATA%.
+///
+/// A channel gets its own: the daemon, the sessions, the config and the
+/// history all live here, so two builds sharing this folder share the
+/// daemon holding somebody's live shells. A side-by-side test package did
+/// exactly that here - it attached to the running daemon and took a
+/// session out of a window that was in use - which is why the installer
+/// built for trying things out is a separate channel rather than the same
+/// app from a different file.
+pub fn state_dir_name(channel: &str) -> String {
+    let channel = channel.trim();
+    if channel.is_empty() {
+        "GTerminal".to_string()
+    } else {
+        format!("GTerminal-{channel}")
+    }
+}
+
 fn state_dir() -> PathBuf {
     let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".into());
-    PathBuf::from(base).join("GTerminal")
+    PathBuf::from(base).join(state_dir_name(env!("GTERMINAL_CHANNEL")))
+}
+
+/// Which build this is: "" for the one that ships to the Store, "dev" for
+/// the installer built to try things out without waiting on certification.
+pub fn channel() -> &'static str {
+    env!("GTERMINAL_CHANNEL")
 }
 
 /// The state directory, for callers outside this module (the window

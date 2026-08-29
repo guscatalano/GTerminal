@@ -434,6 +434,66 @@ body,
   background: var(--panel);
 }
 
+/* A newer build exists. Absolutely positioned on purpose: the tab row's
+   contents decide where every tab sits, and a notice that took space in
+   the row would move them - the visual scenes click tabs by coordinate,
+   so an update notice would break tests about tabs. This takes no space
+   at all. */
+#settingsbtn {
+  position: relative;
+}
+#settingsbtn.has-update::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* The version list in Settings → Updates. Rows are a version, when it was
+   published, and the one action that applies to it — install, go back, or
+   pin if it is the one already running. */
+.update-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  overflow-y: auto;
+  margin-top: 6px;
+}
+.update-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.update-row:hover {
+  background: var(--hover);
+}
+.update-ver {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  font: 12px "Segoe UI", sans-serif;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The one you are running, so the list has somewhere to orient from. */
+.update-ver.current {
+  font-weight: 600;
+  color: var(--accent);
+}
+.update-when {
+  flex: none;
+  color: var(--muted2);
+  font: 11px "Segoe UI", sans-serif;
+}
+
 /* about block at the bottom of settings */
 .about-block {
   padding: 10px 0 28px;

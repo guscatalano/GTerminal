@@ -171,6 +171,12 @@ interface CustomTheme {
 }
 
 interface AppConfig {
+  /// Updating an installed (non-Store) build. update_pin holds a version:
+  /// someone pinning is usually pinning because the newer one broke them,
+  /// so nothing replaces it while it is set.
+  update_auto?: boolean;
+  update_pin?: string;
+  update_prerelease?: boolean;
   cursor_style?: CursorStyle;
   cursor_blink?: boolean;
   ctrl_v_paste?: boolean;
@@ -6545,6 +6551,183 @@ function settingRow(title: string, desc: string, control: HTMLElement) {
   settingsList.appendChild(row);
 }
 
+// ── updates ─────────────────────────────────────────────────────────────
+// The Store round trip is submission, certification and a wait measured in
+// hours. Right for a release, wrong for finding out whether a fix works.
+//
+// So an installed build lists the project's published versions and installs
+// any of them. Any of them, deliberately: going back is the same action as
+// going forward, because an update that breaks something has to be undoable
+// on the spot rather than after the next release.
+
+interface UpdateStatus {
+  version: string;
+  channel: string;
+  supported: boolean;
+  packaged: boolean;
+  pinned: string;
+  auto: boolean;
+  prerelease: boolean;
+}
+
+interface UpdateVersion {
+  tag: string;
+  version: string;
+  url: string;
+  file: string;
+  published_at: string;
+  prerelease: boolean;
+  /// Where this sits relative to the running build, decided by the Rust
+  /// side. Comparing versions here as well would be a second copy of a
+  /// rule that only has tests in one place.
+  relation: "current" | "newer" | "older";
+}
+
+/// Say a newer build exists, without getting in the way.
+///
+/// Deliberately a dot on the settings button rather than anything in the
+/// tab row: the row's contents decide where every tab sits, and the visual
+/// scenes click tabs by coordinate. A notice that shifted them would break
+/// tests that have nothing to do with updating. The dot is absolutely
+/// positioned and changes no layout at all.
+///
+/// Nothing installs itself. An update that arrives while you are working
+/// is the one thing worse than an update you have to ask for.
+async function announceUpdate() {
+  // After the window has settled: restoring sessions matters more than
+  // this, and the check costs a network round trip.
+  await new Promise((r) => window.setTimeout(r, 5000));
+  let found: UpdateVersion | null = null;
+  try {
+    found = await invoke<UpdateVersion | null>("update_check");
+  } catch {
+    return; // offline, rate-limited, or not an updatable build
+  }
+  if (!found) return;
+  const btn = document.getElementById("settingsbtn");
+  if (!btn) return;
+  btn.classList.add("has-update");
+  btn.title = `Version ${found.version} is available — Settings → Updates`;
+  logUi("update.available", { version: found.version, tag: found.tag });
+}
+
+async function buildUpdatesSection() {
+  let status: UpdateStatus;
+  try {
+    status = await invoke<UpdateStatus>("update_status");
+  } catch {
+    return;
+  }
+  settingsSection("Updates");
+
+  const where = document.createElement("div");
+  where.className = "setting-status";
+  const chan = status.channel ? ` (${status.channel} channel)` : "";
+  where.textContent = `Running ${status.version}${chan}.`;
+  settingRow("This build", "", where);
+
+  if (!status.supported) {
+    // Said plainly rather than by leaving the controls out. A packaged
+    // install cannot install an MSI over itself - that is a second copy
+    // of the app under a different identity, with the Store still
+    // believing its package is the one in use.
+    const note = document.createElement("div");
+    note.className = "setting-status";
+    note.textContent =
+      "Installed from the Microsoft Store, so the Store keeps it up to date. " +
+      "The installer build updates itself from GitHub instead.";
+    settingRow("Updating", "", note);
+    return;
+  }
+
+  settingRow(
+    "Update automatically",
+    "Check for a newer version on startup and offer it. Pinning a version below turns this off for as long as the pin is there.",
+    mkSelect([["on", "On"], ["off", "Off"]], status.auto ? "on" : "off", (v) => {
+      config.update_auto = v === "on";
+      saveConfig();
+    })
+  );
+
+  const list = document.createElement("div");
+  list.className = "setting-stack";
+  const state = document.createElement("div");
+  state.className = "setting-status";
+  state.textContent = "Loading versions…";
+  const rows = document.createElement("div");
+  rows.className = "update-list";
+  list.append(state, rows);
+
+  const render = (versions: UpdateVersion[], pinned: string) => {
+    rows.innerHTML = "";
+    if (!versions.length) {
+      state.textContent = "No published versions with an installer were found.";
+      return;
+    }
+    state.textContent = pinned
+      ? `Pinned to ${pinned} — nothing will replace it until you unpin.`
+      : `${versions.length} version(s) published. Installing an older one is how you get back.`;
+    for (const v of versions) {
+      const row = document.createElement("div");
+      row.className = "update-row";
+      const label = document.createElement("span");
+      label.className = "update-ver";
+      const isCurrent = v.relation === "current";
+      label.textContent = v.version + (v.prerelease ? " (pre-release)" : "");
+      if (isCurrent) label.classList.add("current");
+      const when = document.createElement("span");
+      when.className = "update-when";
+      when.textContent = (v.published_at || "").slice(0, 10);
+      const act = document.createElement("button");
+      act.className = "set-control";
+      if (isCurrent) {
+        act.textContent = pinned ? "Unpin" : "Pin";
+        act.title = pinned
+          ? "Stop holding this version"
+          : "Hold this version — updates will not replace it";
+        act.addEventListener("click", () => {
+          const next = pinned ? "" : status.version;
+          config.update_pin = next;
+          saveConfig();
+          render(versions, next);
+        });
+      } else {
+        act.textContent = v.relation === "older" ? "Go back to this" : "Install";
+        act.addEventListener("click", () => void installVersion(v, act));
+      }
+      row.append(label, when, act);
+      rows.appendChild(row);
+    }
+  };
+
+  settingRow(
+    "Versions",
+    "Every published build with an installer. Installing runs its MSI and restarts the window; the daemon keeps your sessions running across it.",
+    list
+  );
+
+  try {
+    const versions = await invoke<UpdateVersion[]>("update_versions");
+    render(versions, status.pinned);
+  } catch (e) {
+    state.textContent = `Could not reach the version list: ${e}`;
+  }
+}
+
+async function installVersion(v: UpdateVersion, btn: HTMLButtonElement) {
+  const was = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Downloading…";
+  try {
+    await invoke("update_install", { tag: v.tag });
+    btn.textContent = "Installing…";
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = was;
+    alert(`Could not install ${v.version}: ${e}`);
+  }
+}
+
 function buildSettingsPage() {
   // Conditional rows rebuild the page; keep the scroll position stable.
   const scroller = document.getElementById("settings-page")!;
@@ -7547,6 +7730,8 @@ function buildSettingsPage() {
     })()
   );
 
+  buildUpdatesSection();
+
   settingsSection("About");
   const about = document.createElement("div");
   about.className = "about-block";
@@ -8526,6 +8711,7 @@ async function main() {
   // region or by Win+Up rather than by the button.
   void markMaximized();
   void win.onResized(() => void markMaximized());
+  void announceUpdate();
   const historyBtn = document.getElementById("historybtn")!;
   historyBtn.addEventListener("click", (e) => {
     e.stopPropagation();

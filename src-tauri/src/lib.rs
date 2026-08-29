@@ -1,5 +1,6 @@
 mod mux;
 mod stats;
+mod update;
 
 use mux::Request;
 use serde_json::Value;
@@ -407,6 +408,123 @@ fn get_config() -> serde_json::Value {
 #[tauri::command]
 fn set_config(value: serde_json::Value) -> Result<(), String> {
     mux::write_config(&value)
+}
+
+// ── updating an installed build ────────────────────────────────────────
+// The Store round trip is submission, certification and a wait measured in
+// hours. Right for a release, wrong for finding out whether a fix works, so
+// an installer build can fetch its own versions and install any of them -
+// going back as easily as forward, because an update that breaks something
+// has to be undoable on the spot.
+
+/// What this build is, and whether it may update itself at all.
+#[tauri::command]
+fn update_status() -> serde_json::Value {
+    let cfg = mux::read_config();
+    let pinned = cfg
+        .get("update_pin")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    serde_json::json!({
+        "version": env!("GTERMINAL_VERSION"),
+        "channel": mux::channel(),
+        // A packaged install is the Store's to update. Saying so lets the
+        // settings page explain itself instead of offering a button that
+        // would quietly install a second copy of the app.
+        "supported": update::updates_supported(package_family_name().is_some()),
+        "packaged": package_family_name().is_some(),
+        "pinned": pinned,
+        "auto": cfg.get("update_auto").and_then(|v| v.as_bool()).unwrap_or(true),
+        // Dev builds are published as pre-releases, so on that channel
+        // pre-releases are the ordinary supply rather than an opt-in.
+        "prerelease": cfg
+            .get("update_prerelease")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(mux::channel() == "dev"),
+    })
+}
+
+/// Every version that can be installed, newest first.
+#[tauri::command]
+async fn update_versions() -> Result<Vec<update::Version>, String> {
+    tauri::async_runtime::spawn_blocking(update::fetch_versions)
+        .await
+        .map_err(|e| format!("the version list did not come back: {e}"))?
+}
+
+/// What this build would install on its own, if anything. Null when it is
+/// already current, pinned, or not an updatable build.
+#[tauri::command]
+async fn update_check() -> Result<Option<update::Version>, String> {
+    let cfg = mux::read_config();
+    if !update::updates_supported(package_family_name().is_some()) {
+        return Ok(None);
+    }
+    if !cfg.get("update_auto").and_then(|v| v.as_bool()).unwrap_or(true) {
+        return Ok(None);
+    }
+    let pin = cfg
+        .get("update_pin")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let pre = cfg
+        .get("update_prerelease")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(mux::channel() == "dev");
+    let list = tauri::async_runtime::spawn_blocking(update::fetch_versions)
+        .await
+        .map_err(|e| format!("the version list did not come back: {e}"))??;
+    Ok(
+        update::choose_update(env!("GTERMINAL_VERSION"), &list, Some(pin.as_str()), pre)
+            .cloned(),
+    )
+}
+
+/// Install a named version - newer or older, it is the same action.
+///
+/// The tag is looked up in the list this build fetched rather than trusting
+/// a URL from the caller: a command that downloads and runs whatever URL it
+/// is handed is a remote code execution hole with an update button on it.
+#[tauri::command]
+async fn update_install(tag: String) -> Result<(), String> {
+    if !update::updates_supported(package_family_name().is_some()) {
+        return Err(
+            "this is a Store install - updating it is the Store's job, not this button's".into(),
+        );
+    }
+    let chosen = tauri::async_runtime::spawn_blocking(move || {
+        let list = update::fetch_versions()?;
+        let found = list
+            .into_iter()
+            .find(|v| v.tag == tag || v.version == tag)
+            .ok_or_else(|| format!("no published version called {tag}"))?;
+        let path = update::download(&found)?;
+        Ok::<_, String>((found, path))
+    })
+    .await
+    .map_err(|e| format!("the download did not come back: {e}"))??;
+
+    let (found, path) = chosen;
+    update::launch_installer(&path)?;
+    // Into the same log the paste and menu entries go to: when an update
+    // goes wrong, which version was installed and from where is the first
+    // thing anyone needs and the last thing they can reconstruct.
+    let _ = log_ui(format!(
+        "update: installing {} from {}",
+        found.version,
+        path.display()
+    ));
+    // The installer replaces the files this process is running from, and on
+    // Windows that fails while they are open. The daemon is deliberately
+    // left alone: it runs from its own copy beside the sessions, so the
+    // shells stay up across the update and the new build reattaches.
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        std::process::exit(0);
+    });
+    Ok(())
 }
 
 /// A history transcript row for the History page. `stem` names the
@@ -1099,6 +1217,10 @@ pub fn run() {
             kill_session,
             get_config,
             set_config,
+            update_status,
+            update_versions,
+            update_check,
+            update_install,
             history_list,
             history_read,
             launch_info,

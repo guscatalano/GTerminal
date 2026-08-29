@@ -37,7 +37,9 @@ Every theme is a complete look — 80 of them, from clean classics to full scene
 | Double-click tab | Rename it (custom names stick) |
 | Right-click tab | Context menu: rename, tab groups, hide/detach/kill |
 | Right-click terminal | Menu: Copy (with selection), Paste, Select all |
-| `Ctrl+Shift+T` · `Ctrl+Tab` | New tab · cycle tabs |
+| `Ctrl+Shift+T` | New tab |
+| `Ctrl+Tab` · `Ctrl+Shift+Tab` | Next · previous tab |
+| `Ctrl+1`…`Ctrl+8` · `Ctrl+9` | Jump to that tab · jump to the **last** tab, however many there are |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste |
 
 Tabs shrink browser-style as they multiply; overflow collapses into a `+N` menu. Tabs can be organized into colored, collapsible groups (right-click a tab); groups and names persist across restarts and reboots. Tab icons show what's running inside (✳️ Claude Code, 🐍 python, 🦀 cargo, 🐳 docker, …).

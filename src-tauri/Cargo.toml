@@ -30,6 +30,12 @@ tauri-plugin-dialog = "2.7.2"
 tauri-plugin-global-shortcut = "2.3.2"
 tauri-plugin-clipboard-manager = "2.3.2"
 tauri-plugin-single-instance = "2.4.3"
+# The updater talks to the project's GitHub releases and downloads an
+# MSI. Blocking client on a worker thread: the whole interaction is
+# "fetch a list" and "fetch a file", and an async stack would be a lot
+# of machinery for two requests. rustls rather than schannel so the
+# trust store is the same one the tests run against.
+ureq = { version = "2", default-features = false, features = ["tls", "json", "gzip"] }
 
 [target.'cfg(windows)'.dependencies]
 # Reaching WebView2's own settings, to turn Edge's accelerator keys off.

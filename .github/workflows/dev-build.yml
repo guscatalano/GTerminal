@@ -1,0 +1,122 @@
+name: Dev build
+
+# An installable build of main, without the Store.
+#
+# The Store round trip is submission, certification and a wait measured in
+# hours - right for a release, wrong for finding out whether a fix works on
+# a real machine. This publishes an MSI on every push to main, as a
+# pre-release the app can list and install from.
+#
+# Two things make it safe to run alongside the installed app:
+#
+#   - It is built with GTERMINAL_CHANNEL=dev, so its daemon, sessions,
+#     config and history live in %LOCALAPPDATA%\GTerminal-dev. A test build
+#     sharing the ordinary folder would share the daemon holding real
+#     sessions, which has already happened here once: a side-by-side
+#     package attached to the running daemon and took a session out of a
+#     window that was in use.
+#   - It is marked pre-release, so nothing about the Store listing or the
+#     release line changes.
+#
+# Versioning: Windows Installer ignores the fourth version field when
+# deciding whether one MSI upgrades another, so the patch has to move for
+# an update to install at all. Dev builds therefore run in a 1000+ patch
+# series - 0.12.1042 rather than 0.12.10 - which is always above the
+# release line and is visibly not a release. Going back to a real release
+# from a dev build is a deliberate choice in the version list, and pinning
+# is what stops the next dev build taking it away again.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'src-tauri/**'
+      - 'index.html'
+      - 'package.json'
+      - 'vite.config.ts'
+      - '.github/workflows/dev-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dev-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # Cheap, and it is the whole suite that does not need a screen. A dev
+      # build people install on a real machine should not be worse tested
+      # than one that goes to the Store.
+      - name: Every suite that does not need a screen
+        run: npm test
+
+      - name: Version this build
+        id: ver
+        shell: pwsh
+        run: |
+          $conf = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $parts = $conf.version.Split('.')
+          # 1000 + the run number: always above the release line, always
+          # increasing, and obviously not a release at a glance.
+          $dev = "$($parts[0]).$($parts[1]).$(1000 + [int]'${{ github.run_number }}')"
+          Write-Host "release version $($conf.version) -> dev version $dev"
+          $raw = Get-Content src-tauri/tauri.conf.json -Raw
+          $raw = $raw -replace '"version": "' + [regex]::Escape($conf.version) + '"', ('"version": "' + $dev + '"')
+          Set-Content src-tauri/tauri.conf.json -Value $raw -NoNewline
+          # package.json too, so anything reading either agrees.
+          $pkgRaw = Get-Content package.json -Raw
+          $pkg = $pkgRaw | ConvertFrom-Json
+          $pkgRaw = $pkgRaw -replace '"version": "' + [regex]::Escape($pkg.version) + '"', ('"version": "' + $dev + '"')
+          Set-Content package.json -Value $pkgRaw -NoNewline
+          "version=$dev" >> $env:GITHUB_OUTPUT
+
+      - name: Build the installer
+        env:
+          # The whole point: its own state directory, so it cannot touch
+          # the sessions of the app already installed on the machine.
+          GTERMINAL_CHANNEL: dev
+        run: npx tauri build --bundles msi
+
+      - name: Publish the dev release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $v = '${{ steps.ver.outputs.version }}'
+          $msi = Get-ChildItem src-tauri/target/release/bundle/msi/*.msi | Select-Object -First 1
+          if (-not $msi) { throw "no MSI was built" }
+          $notes = @"
+          Dev build of ``main`` at ${{ github.sha }}.
+
+          Its own state directory (``%LOCALAPPDATA%\GTerminal-dev``), so it runs
+          alongside an installed GTerminal without touching its sessions.
+
+          Not a release. Settings -> Updates lists every version and installs
+          any of them, so going back is a click.
+          "@
+          gh release create "v$v" $msi.FullName `
+            --title "v$v (dev)" `
+            --notes "$notes" `
+            --prerelease
