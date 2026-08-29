@@ -78,6 +78,71 @@ function Drain2 {
   $out
 }
 
+# Wait for the shell to finish a command, rather than for a number of
+# seconds.
+#
+# The shell marks each new prompt with OSC 133;A, so "it has finished" is
+# something to wait for rather than a duration to guess. Drain the
+# connection first, or the prompt being waited for is the one that was
+# already on screen.
+function Run-Await {
+  param($conn, [string]$data, [int]$timeoutSec = 45)
+  $conn.Writer.WriteLine($data)
+  $out = ""
+  $deadline = (Get-Date).AddSeconds($timeoutSec)
+  while ((Get-Date) -lt $deadline) {
+    $out += Drain2 $conn 400
+    if ($out -like "*]133;A*") { break }
+  }
+  $out
+}
+
+# Wait until the shell has drawn its first prompt.
+#
+# Every site that needed this slept five seconds and then DISCARDED what
+# had arrived - throwing away the one piece of evidence that the shell was
+# up at all. When five seconds was not enough, the checks that depend on
+# the integration failed together, which is what gave it away: one at a
+# time looked like flaky tests, all at once looked like the single cause
+# it was.
+function Wait-Ready {
+  param($conn, [int]$timeoutSec = 60)
+  $out = ""
+  $deadline = (Get-Date).AddSeconds($timeoutSec)
+  while ((Get-Date) -lt $deadline) {
+    $out += Drain2 $conn 400
+    if ($out -like "*]133;A*") { return $out }
+  }
+  Write-Host "  note: no prompt mark after ${timeoutSec}s - the shell never drew a prompt" -ForegroundColor DarkYellow
+  $out
+}
+
+# Ask again until the answer arrives, or fail for real at a deadline.
+#
+# These checks are about whether the shell integration registers things: a
+# prompt hook, a predictor plugin, a PredictionSource. All of it happens
+# while the shell starts, and how long that takes is the machine's
+# business. Asking once at a chosen moment tests how fast the machine is;
+# asking until a deadline tests whether it happens at all, which is what
+# is actually being claimed.
+#
+# Waiting for the first prompt was not enough on its own - that mark is
+# emitted before the predictor subsystem has finished registering, so a
+# run could see the prompt and still find no predictor.
+function Retry-Until {
+  param($conn, [string]$data, [scriptblock]$ok, [int]$timeoutSec = 40)
+  $deadline = (Get-Date).AddSeconds($timeoutSec)
+  $out = ""
+  while ((Get-Date) -lt $deadline) {
+    $null = Drain2 $conn
+    $out = Run-Await $conn $data 12
+    if (& $ok $out) { return $out }
+    Start-Sleep -Milliseconds 500
+  }
+  $out
+}
+
+
 function Request2 {
   param($port, $json, $retries = 2)
   for ($r = 0; $r -le $retries; $r++) {
@@ -460,19 +525,23 @@ $p2 = New-Conn $port
 $p2.Writer.WriteLine("{""cmd"":""attach"",""id"":$id10}")
 $null = Read-Line2 $p2
 $p2.Writer.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')
-Start-Sleep -Seconds 5
-$null = Drain2 $p2
-$p2.Writer.WriteLine('{"cmd":"write","data":"echo gterm-cmdlog-777\r"}')
-Start-Sleep -Seconds 3   # the prompt AFTER the command logs it
-$null = Drain2 $p2
+$null = Wait-Ready $p2
+# The prompt AFTER the command is what logs it, and the hook that writes
+# it is installed while the shell starts. Run it again until the line
+# turns up rather than once at a moment of this test's choosing.
 $clog = "$env:LOCALAPPDATA\GTerminal\commands.log"
-$clogText = if (Test-Path $clog) { Get-Content $clog -Raw } else { "" }
+$clogText = ""
+$clogDeadline = (Get-Date).AddSeconds(40)
+while ((Get-Date) -lt $clogDeadline) {
+  $null = Run-Await $p2 '{"cmd":"write","data":"echo gterm-cmdlog-777\r"}' 12
+  Start-Sleep -Milliseconds 300
+  $clogText = if (Test-Path $clog) { Get-Content $clog -Raw } else { "" }
+  if ($clogText -like "*`techo gterm-cmdlog-777*") { break }
+}
 if ($clogText -like "*`techo gterm-cmdlog-777*") {
   Pass "prompt hook logs commands with their directory"
 } else { Fail "cmdlog" "commands.log missing cwd-tab-command entry" }
-$p2.Writer.WriteLine('{"cmd":"write","data":"[System.Management.Automation.Subsystem.SubsystemManager]::GetSubsystemInfo([System.Management.Automation.Subsystem.SubsystemKind]::CommandPredictor).Implementations.Name -join *q*,*q*\r"}'.Replace("*q*", "'"))
-Start-Sleep -Seconds 3
-$pred = Drain2 $p2 1000
+$pred = Retry-Until $p2 ('{"cmd":"write","data":"[System.Management.Automation.Subsystem.SubsystemManager]::GetSubsystemInfo([System.Management.Automation.Subsystem.SubsystemKind]::CommandPredictor).Implementations.Name -join *q*,*q*\r"}'.Replace("*q*", "'")) { param($o) $o -like "*gterm*" }
 if ($pred -like "*gterm*") { Pass "gterm predictor plugin registered" } else { Fail "predictor" "gterm not among CommandPredictor implementations" }
 $p2.Client.Close()
 $null = Request2 $port "{""cmd"":""kill"",""id"":$id10}"
@@ -485,11 +554,10 @@ $p3 = New-Conn $port
 $p3.Writer.WriteLine("{""cmd"":""attach"",""id"":$id11}")
 $null = Read-Line2 $p3
 $p3.Writer.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')
-Start-Sleep -Seconds 5
-$null = Drain2 $p3
-$p3.Writer.WriteLine('{"cmd":"write","data":"echo \"src=$((Get-PSReadLineOption).PredictionSource)\"\r"}')
-Start-Sleep -Seconds 3
-$srcOut = Drain2 $p3 1000
+$null = Wait-Ready $p3
+# Retried until it answers at all, not until it answers correctly: the
+# assertion below is still the one deciding whether Plugin is the value.
+$srcOut = Retry-Until $p3 '{"cmd":"write","data":"echo \"src=$((Get-PSReadLineOption).PredictionSource)\"\r"}' { param($o) $o -like "*src=Plugin*" -or $o -like "*src=HistoryAndPlugin*" }
 if ($srcOut -like "*src=Plugin*" -and $srcOut -notlike "*src=HistoryAndPlugin*") {
   Pass "GTerminal-only mode sets PredictionSource Plugin"
 } else { Fail "plugin-only" "PredictionSource not Plugin" }
@@ -506,8 +574,7 @@ $n2 = New-Conn $port
 $n2.Writer.WriteLine("{""cmd"":""attach"",""id"":$id9}")
 $null = Read-Line2 $n2
 $n2.Writer.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')
-Start-Sleep -Seconds 5
-$null = Drain2 $n2
+$null = Wait-Ready $n2
 foreach ($c in "git sta".ToCharArray()) {
   $n2.Writer.WriteLine("{""cmd"":""write"",""data"":""$c""}")
   Start-Sleep -Milliseconds 120
@@ -532,8 +599,7 @@ $b1 = New-Conn $port
 $b1.Writer.WriteLine("{""cmd"":""attach"",""id"":$id12}")
 $null = Read-Line2 $b1
 $b1.Writer.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')
-Start-Sleep -Seconds 5
-$firstPrompt = Drain2 $b1 2000
+$firstPrompt = Wait-Ready $b1
 if ($firstPrompt -like "*]133;A*" -and $firstPrompt -like "*]133;B*") {
   Pass "prompt emits OSC 133 A and B marks"
 } else { Fail "osc133-ab" "no 133;A / 133;B in the first prompt" }

@@ -688,7 +688,7 @@ mod second_daemon_tests {
 
 #[cfg(test)]
 mod channel_tests {
-    use super::state_dir_name;
+    use super::{shell_init_for, state_dir_name, with_state_dir, PREDICTOR_PS, PROMPT_CMD_LOG};
 
     /// The shipping build must keep the folder it has always used. Renaming
     /// it would strand every existing session, history transcript and
@@ -706,6 +706,45 @@ mod channel_tests {
     fn a_channel_gets_a_folder_of_its_own() {
         assert_eq!(state_dir_name("dev"), "GTerminal-dev");
         assert_ne!(state_dir_name("dev"), state_dir_name(""));
+    }
+
+    /// The shell snippets name the folder literally, and there are three of
+    /// them. Left alone, a channel build's shells would write their command
+    /// log into the release build's folder and dot-source the release
+    /// build's predictor - the crossing over the channel exists to stop,
+    /// happening inside the shell rather than in the daemon.
+    #[test]
+    fn the_injected_shell_paths_follow_the_build() {
+        // On the shipping build nothing moves: this must be a no-op there,
+        // or every installed machine's command log changes address.
+        assert_eq!(with_state_dir(PROMPT_CMD_LOG), PROMPT_CMD_LOG);
+        assert_eq!(with_state_dir(PREDICTOR_PS), PREDICTOR_PS);
+
+        // And the whole thing a channel build injects, composed the way the
+        // daemon composes it, must not name the release folder anywhere.
+        // Against the composition rather than the constants: the constants
+        // being redirectable proves nothing if a call site forgets to do it,
+        // which is exactly what this test failed to catch the first time it
+        // was written.
+        let dir = state_dir_name("dev");
+        for prediction in ["shell", "inline", "list", "plugin-inline", "plugin-list", "off"] {
+            for history in [true, false] {
+                let init = shell_init_for(prediction, history, &dir);
+                assert!(
+                    !init.contains("$env:LOCALAPPDATA 'GTerminal\\"),
+                    "{prediction}/history={history} still sends the shell at the release folder"
+                );
+            }
+        }
+        // And it really is redirecting rather than dropping the paths.
+        let dev = shell_init_for("plugin-list", true, &dir);
+        assert!(dev.contains("GTerminal-dev\\commands.log"));
+        assert!(dev.contains("GTerminal-dev\\predictor.ps1"));
+
+        // The shipping build still writes exactly where it always did.
+        let ship = shell_init_for("plugin-list", true, &state_dir_name(""));
+        assert!(ship.contains("$env:LOCALAPPDATA 'GTerminal\\commands.log"));
+        assert!(ship.contains("$env:LOCALAPPDATA 'GTerminal\\predictor.ps1"));
     }
 }
 
@@ -934,6 +973,28 @@ pub fn state_dir_name(channel: &str) -> String {
     } else {
         format!("GTerminal-{channel}")
     }
+}
+
+/// Point injected PowerShell at THIS build's state directory.
+///
+/// Three snippets injected into the user's shell name the folder
+/// literally: the command log twice, and the predictor script once. A
+/// channel build keeps its state in GTerminal-dev, so left alone its
+/// shells would write their command log into the release build's folder
+/// and dot-source the release build's predictor - exactly the crossing
+/// over that having a separate channel is meant to prevent.
+pub fn with_state_dir(script: &str) -> String {
+    with_state_dir_in(script, &state_dir_name(channel()))
+}
+
+/// The same, for a named directory. The channel is baked in at compile
+/// time, so this is the only way a test can ask what a channel build would
+/// put in front of a shell.
+pub fn with_state_dir_in(script: &str, dir: &str) -> String {
+    script.replace(
+        "$env:LOCALAPPDATA 'GTerminal",
+        &format!("$env:LOCALAPPDATA '{dir}"),
+    )
 }
 
 fn state_dir() -> PathBuf {
@@ -1222,7 +1283,10 @@ pub fn run_daemon() {
     std::fs::write(port_file(), port.to_string()).expect("write port file");
 
     finalize_stale_history();
-    let _ = std::fs::write(state_dir().join("predictor.ps1"), PREDICTOR_PS);
+    let _ = std::fs::write(
+        state_dir().join("predictor.ps1"),
+        with_state_dir(PREDICTOR_PS),
+    );
     spawn_flush_thread(sessions.clone());
     spawn_purge_thread(sessions.clone());
     spawn_child_monitor(sessions.clone());
@@ -1775,6 +1839,52 @@ fn conn_loop(
 /// as pre-existing scrollback (used when resurrecting a cold session).
 /// `shell` is a profile name: "pwsh", "powershell", "cmd", or "auto"
 /// (PowerShell 7 with Windows PowerShell fallback).
+/// Argument order flipped so the multi-line call site above reads the
+/// same as it did before it took a directory.
+fn with_state_dir_in2(dir: &str, script: &str) -> String {
+    with_state_dir_in(script, dir)
+}
+
+/// The PowerShell this build puts in front of a shell.
+///
+/// Takes the state directory rather than reading it, because the channel
+/// is baked in at compile time: parameterised, a test can ask what a
+/// channel build would inject without having to be one. Every path in
+/// here names the folder literally, and one that is missed sends a
+/// channel build's shell at the release build's files.
+fn shell_init_for(prediction: &str, history: bool, dir: &str) -> String {
+    let base = if history {
+        PROMPT_CMD_LOG
+    } else {
+        PROMPT_CMD
+    };
+    let mut ps_init = with_state_dir_in(base, dir);
+    match prediction {
+        // "plugin-*" = GTerminal-only suggestions (no cross-app PSReadLine
+        // history); plain "inline"/"list" merge both sources.
+        "inline" | "list" | "plugin-inline" | "plugin-list" => {
+            let view = if prediction.ends_with("list") { "ListView" } else { "InlineView" };
+            let source = if prediction.starts_with("plugin") { "Plugin" } else { "HistoryAndPlugin" };
+            ps_init.push_str("; try { Set-PSReadLineOption -PredictionSource ");
+            ps_init.push_str(source);
+            ps_init.push_str(" -PredictionViewStyle ");
+            ps_init.push_str(view);
+            ps_init.push_str(" -ErrorAction Stop } catch { try { Set-PSReadLineOption -PredictionSource History -PredictionViewStyle ");
+            ps_init.push_str(view);
+            // Dot-sourcing defers the predictor's parse: on PSReadLine/PS
+            // versions without the subsystem API it fails into the catch.
+            ps_init.push_str(&with_state_dir_in2(dir, 
+                " } catch {} }; try { . (Join-Path $env:LOCALAPPDATA 'GTerminal\\predictor.ps1') } catch {}",
+            ));
+        }
+        "off" => {
+            ps_init.push_str("; try { Set-PSReadLineOption -PredictionSource None -ErrorAction Stop } catch {}");
+        }
+        _ => {}
+    }
+    ps_init
+}
+
 fn start_session(
     sessions: &Sessions,
     id: u32,
@@ -1810,33 +1920,11 @@ fn start_session(
         .unwrap_or("shell")
         .to_string();
     // Command logging rides on the same switch as history recording.
-    let base = if history_days() > 0 {
-        PROMPT_CMD_LOG
-    } else {
-        PROMPT_CMD
-    };
-    let mut ps_init = base.to_string();
-    match prediction.as_str() {
-        // "plugin-*" = GTerminal-only suggestions (no cross-app PSReadLine
-        // history); plain "inline"/"list" merge both sources.
-        "inline" | "list" | "plugin-inline" | "plugin-list" => {
-            let view = if prediction.ends_with("list") { "ListView" } else { "InlineView" };
-            let source = if prediction.starts_with("plugin") { "Plugin" } else { "HistoryAndPlugin" };
-            ps_init.push_str("; try { Set-PSReadLineOption -PredictionSource ");
-            ps_init.push_str(source);
-            ps_init.push_str(" -PredictionViewStyle ");
-            ps_init.push_str(view);
-            ps_init.push_str(" -ErrorAction Stop } catch { try { Set-PSReadLineOption -PredictionSource History -PredictionViewStyle ");
-            ps_init.push_str(view);
-            // Dot-sourcing defers the predictor's parse: on PSReadLine/PS
-            // versions without the subsystem API it fails into the catch.
-            ps_init.push_str(" } catch {} }; try { . (Join-Path $env:LOCALAPPDATA 'GTerminal\\predictor.ps1') } catch {}");
-        }
-        "off" => {
-            ps_init.push_str("; try { Set-PSReadLineOption -PredictionSource None -ErrorAction Stop } catch {}");
-        }
-        _ => {}
-    }
+    let mut ps_init = shell_init_for(
+        prediction.as_str(),
+        history_days() > 0,
+        &state_dir_name(channel()),
+    );
     // PSReadLine's bell is the beeping people actually hear: it dings on a
     // tab-completion with no match, an unbound key, backspace at the start
     // of a line. It calls Beep() directly, so the sound never passes
