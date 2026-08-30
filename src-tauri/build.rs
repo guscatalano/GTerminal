@@ -43,5 +43,9 @@ fn main() {
     }
     println!("cargo:rustc-env=GTERMINAL_CHANNEL={channel}");
 
+    // cargo-llvm-cov compiles with --cfg=coverage; declaring it here stops
+    // the unexpected-cfg lint firing on the daemon's mid-run profile flush.
+    println!("cargo:rustc-check-cfg=cfg(coverage)");
+
     tauri_build::build()
 }

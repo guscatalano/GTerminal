@@ -48,8 +48,9 @@ jobs:
   # What the tests actually reach, in both languages, published to the run's
   # summary page.
   #
-  # Its own job rather than a step on `test`: nothing should wait on a
-  # number to find out whether the code works.
+  # Its own job rather than a step on `test`: it instruments the binary and
+  # re-runs the E2E suites against it, which roughly doubles the time, and
+  # nothing should wait on a number to find out whether the code works.
   #
   # Deliberately no threshold. The honest figures here are per-area and a
   # single gate over them would be gameable in the worst direction: the
@@ -58,7 +59,7 @@ jobs:
   # see. See tests/coverage-report.mjs for what is and is not measured.
   coverage:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 

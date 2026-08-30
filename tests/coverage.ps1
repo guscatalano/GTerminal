@@ -7,31 +7,41 @@
 #     modules; main.ts is webview code a node-side tool cannot see, and
 #     tests/coverage-report.mjs says so rather than averaging it in.
 #
-#   Rust - cargo-llvm-cov over the unit tests only.
+#   Rust - cargo-llvm-cov over the unit tests AND the E2E suites. The
+#     binary is instrumented and lifecycle.ps1 / typing.ps1 run against
+#     it, which is what makes the daemon count: on unit tests alone mux.rs
+#     reads 32%, with the suites it reads 87%.
 #
-#     Running the E2E suites under instrumentation was tried and does not
-#     work, which is worth writing down because it looks like it should.
-#     The daemon copies itself to <state dir>in\gterminal-daemon-<ver>.exe
-#     and runs from there (see mux::daemon_binary - it exists so a Store
-#     update is not blocked by the running daemon holding its own file).
-#     llvm-cov can only attribute counters to objects it was given, that
-#     copy is not one of them, and cargo-llvm-cov exposes no --object to
-#     add it. Measured either way: the daemon accept loop reports zero
-#     hits, and the whole report comes out byte-identical with the suites
-#     run and without them. Fifteen minutes for no signal.
+#     Getting that to work took two wrong answers worth recording. The
+#     first was that the daemon runs from a self-copy llvm-cov cannot
+#     attribute - it does copy itself (mux::daemon_binary), but the suites
+#     run `$exe --daemon` directly, so that was never in the path. The
+#     real cause is that an instrumented process writes its .profraw from
+#     an exit handler and every suite stops the daemon with taskkill /F.
+#     The second wrong answer was flushing the profile periodically
+#     without resetting: LLVM_PROFILE_FILE carries %m, so each flush
+#     re-merged the cumulative counters until llvm-profdata called them
+#     corrupt and refused to merge anything at all. See mux::flush_coverage.
 #
 # Neither number is "the coverage of GTerminal", and the report says which
-# part each one measured. That is the most a coverage report can honestly
-# be in a project whose remaining tests drive a real window - which no
-# coverage tool here can see at all.
+# part each one measured. The window and the Tauri command layer are still
+# outside it - nothing here runs a window.
+
 param(
   [switch]$SkipRust,
   [switch]$SkipTs,
-  # Run the E2E suites under instrumentation anyway. Off by default
-  # because it currently adds nothing to the report - see the note at the
-  # top - and kept only so the next person to try can start from that
-  # finding rather than rediscover it.
-  [switch]$WithE2E
+  # Skip the E2E suites. Much faster and much less true: without them
+  # mux.rs reads 32% instead of 87%, because the daemon is only exercised
+  # by lifecycle.ps1 and typing.ps1.
+  [switch]$SkipE2E,
+  # Also run the visual scenes, instrumented. That is where most of what
+  # lib.rs does actually happens - run, the window event handler, summon,
+  # leave, the tray - none of which any other suite touches.
+  #
+  # Not the default, and not because it adds nothing: it takes about forty
+  # minutes, and it takes over the keyboard and the foreground while it
+  # does. It belongs on a runner, or on a machine nobody is sitting at.
+  [switch]$WithVisual
 )
 $ErrorActionPreference = "Stop"
 $repo = Split-Path $PSScriptRoot -Parent
@@ -91,7 +101,7 @@ try {
       & cargo test --lib
       if ($LASTEXITCODE -ne 0) { throw "the unit tests failed under coverage ($LASTEXITCODE)" }
 
-      if ($WithE2E) {
+      if (-not $SkipE2E) {
         # The suites run this exact path, so building it here is what makes
         # them count.
         & cargo build
@@ -106,6 +116,20 @@ try {
           # report rather than this script's.
           if ($LASTEXITCODE -ne 0) {
             Write-Host "   note: $suite failed; its coverage still counts" -ForegroundColor DarkYellow
+          }
+        }
+        if ($WithVisual) {
+          # The scenes need the frontend baked into the binary: a plain
+          # cargo build points the window at the dev server on :1420, and
+          # every scene would photograph a blank window. Built here under
+          # the same instrumented environment.
+          Write-Host "-- building the app with its UI embedded" -ForegroundColor DarkGray
+          & npx tauri build --debug --no-bundle
+          if ($LASTEXITCODE -ne 0) { throw "the instrumented app build failed ($LASTEXITCODE)" }
+          Write-Host "-- tests/visual.ps1 (instrumented, takes the foreground)" -ForegroundColor DarkGray
+          & pwsh -NoProfile -File tests/visual.ps1 -Yes -Force -Exe $covExe
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "   note: visual.ps1 failed; its coverage still counts" -ForegroundColor DarkYellow
           }
         }
         Pop-Location

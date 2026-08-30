@@ -1174,6 +1174,20 @@ pub fn run() {
         mux::run_daemon();
         return;
     }
+    // The window's own coverage, for the same reason the daemon needs it.
+    //
+    // An instrumented process writes its .profraw from an exit handler, and
+    // the visual scenes stop the app with Stop-Process -Force - so
+    // everything the window does (run, the event handler, summon, leave,
+    // the tray) was being collected and thrown away. The daemon flushes
+    // from its own loop; the app has no equivalent, so it gets a thread.
+    //
+    // Compiled out entirely unless cargo-llvm-cov is building this.
+    #[cfg(coverage)]
+    std::thread::spawn(|| loop {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        mux::flush_coverage();
+    });
     // Single-instance is machine-wide: the plugin keys its mutex on the
     // app identifier, so *any* copy of GTerminal claims it - a Store
     // install, a development build, and every app a test suite starts.

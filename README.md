@@ -97,13 +97,17 @@ table per area (it also writes to the GitHub job summary in CI):
   at ~99%; `main.ts` reads 0% because it is webview code exercised by the
   35 visual scenes, which no node-side tool can see. The report names it
   as not-measured-here rather than averaging it into something untrue.
-- **Rust** - cargo-llvm-cov over the unit tests. The daemon and the Tauri
-  command layer are exercised by `lifecycle.ps1`, `typing.ps1` and the
-  visual scenes, and none of that is counted: running those suites under
-  instrumentation was tried and measures nothing, because the daemon runs
-  from a self-copy (`mux::daemon_binary`) that llvm-cov cannot attribute
-  counters to. So a low number there means "not reachable from a unit
-  test", which is not the same as untested.
+- **Rust** - cargo-llvm-cov over the unit tests *and* the E2E suites. The
+  binary is instrumented and `lifecycle.ps1` / `typing.ps1` run against
+  it, which is what makes the daemon count: `mux.rs` reads 32% on unit
+  tests alone and 87% with the suites. The window and the Tauri command
+  layer are still outside it - nothing here runs a window - so a low
+  number there means "not reachable from a unit test or the E2E suites",
+  which is not the same as untested.
+  `-WithVisual` also runs the visual scenes instrumented, which is where
+  most of what `lib.rs` does actually happens (`run`, the window event
+  handler, summon, leave, the tray). It is not the default: forty
+  minutes, and it takes the keyboard and foreground while it runs.
 
 There is deliberately no coverage threshold. The quickest way to raise a
 combined number here would be shallow unit tests for code already covered

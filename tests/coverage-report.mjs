@@ -37,18 +37,18 @@ const NOT_MEASURED_HERE = [
 /// invisible here) and part library (unit-tested). So it is said once,
 /// under the table, rather than pretended away.
 const RUST_CAVEAT =
-  "The daemon and the Tauri command layer are exercised by tests/lifecycle.ps1, " +
-  "tests/typing.ps1 and the visual scenes, and none of that is counted above. " +
-  "Instrumenting the binary and running those suites was tried: the daemon copies " +
-  "itself to <state dir>/bin/gterminal-daemon-<ver>.exe and runs from the copy, " +
-  "llvm-cov cannot attribute counters to an object it was not given, and " +
-  "cargo-llvm-cov exposes no way to add one — the report came out byte-identical " +
-  "with those suites run and without them. So a low number here means \"not " +
-  "reachable from a unit test\", which is not the same as untested. The " +
-  "denominator is not stable either: adding 77 lines of source to lib.rs " +
-  "moved its instrumented total by 190, because what gets instrumented " +
-  "depends on what the tests keep alive. Read these as a picture of what " +
-  "is reachable, not as a trend line.";
+  "The Tauri command layer and the window are exercised by the visual " +
+  "scenes and are not counted above - nothing here runs a window. The " +
+  "daemon IS counted: tests/lifecycle.ps1 and tests/typing.ps1 run against " +
+  "an instrumented binary, which is why mux.rs reads what it does. That " +
+  "took some getting: an instrumented process writes its .profraw from an " +
+  "exit handler and every suite stops the daemon with taskkill /F, so its " +
+  "counters were collected and thrown away on every run. It now flushes " +
+  "them itself (mux::flush_coverage, #[cfg(coverage)] only). A low number " +
+  "here still means \"not reachable from a unit test or the E2E suites\", " +
+  "which is not the same as untested. The denominator is not stable " +
+  "either: what gets instrumented depends on what the tests keep alive, so " +
+  "read these as a picture of what is reachable, not as a trend line.";
 
 const pct = (c, t) => (t === 0 ? 0 : (100 * c) / t);
 const bar = (p) => {

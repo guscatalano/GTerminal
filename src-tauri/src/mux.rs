@@ -687,6 +687,82 @@ mod second_daemon_tests {
 }
 
 #[cfg(test)]
+mod utf8_boundary_tests {
+    use super::take_valid_utf8;
+
+    /// A PTY read stops wherever the buffer ended, which is routinely in
+    /// the middle of a character. Decoding the tail anyway is how box
+    /// drawing and accented output turn into mojibake - the same failure a
+    /// replay filter caused earlier in this project's life, and the reason
+    /// this function exists at all.
+    #[test]
+    fn a_character_split_across_two_reads_is_not_decoded_early() {
+        // "caf" plus an acute e: the last character is two bytes.
+        let full = "caf\u{e9}".as_bytes().to_vec();
+        let (head, tail) = full.split_at(full.len() - 1);
+
+        let mut carry = head.to_vec();
+        // The complete part comes out; the half character is kept back.
+        assert_eq!(take_valid_utf8(&mut carry).as_deref(), Some("caf"));
+        assert_eq!(carry, vec![0xC3]);
+
+        carry.extend_from_slice(tail);
+        assert_eq!(take_valid_utf8(&mut carry).as_deref(), Some("\u{e9}"));
+        assert!(carry.is_empty());
+    }
+
+    /// Nothing usable yet is None, not an empty string: an empty string
+    /// would be written out as a real chunk and the bytes held back would
+    /// arrive detached from their first half.
+    #[test]
+    fn a_lone_leading_byte_waits_for_the_rest() {
+        let mut carry = vec![0xF0]; // start of a 4-byte emoji
+        assert_eq!(take_valid_utf8(&mut carry), None);
+        assert_eq!(carry, vec![0xF0], "the byte must be kept, not dropped");
+
+        // The whole emoji, arriving one byte at a time.
+        let emoji = "\u{1f600}".as_bytes().to_vec();
+        let mut carry = Vec::new();
+        for (i, b) in emoji.iter().enumerate() {
+            carry.push(*b);
+            let got = take_valid_utf8(&mut carry);
+            if i < emoji.len() - 1 {
+                assert_eq!(got, None, "incomplete at byte {i}");
+            } else {
+                assert_eq!(got.as_deref(), Some("\u{1f600}"));
+            }
+        }
+    }
+
+    #[test]
+    fn complete_input_comes_straight_back_out() {
+        let mut carry = "plain ascii".as_bytes().to_vec();
+        assert_eq!(take_valid_utf8(&mut carry).as_deref(), Some("plain ascii"));
+        assert!(carry.is_empty());
+
+        let mut carry = "\u{250c}\u{2500}\u{2510} caf\u{e9}".as_bytes().to_vec();
+        assert_eq!(
+            take_valid_utf8(&mut carry).as_deref(),
+            Some("\u{250c}\u{2500}\u{2510} caf\u{e9}")
+        );
+        assert!(carry.is_empty());
+    }
+
+    /// Bytes that will never become valid must not stall the stream. A
+    /// program emitting a stray high byte would otherwise hold everything
+    /// after it hostage for ever, which looks like the terminal hanging.
+    #[test]
+    fn junk_that_can_never_be_valid_is_eventually_let_through() {
+        let mut carry = vec![0xFF; 4];
+        assert_eq!(take_valid_utf8(&mut carry), None, "still waiting under 8");
+        carry.extend(vec![0xFF; 4]);
+        let out = take_valid_utf8(&mut carry).expect("let through at 8 bytes");
+        assert!(!out.is_empty());
+        assert!(carry.is_empty(), "and not left to accumulate for ever");
+    }
+}
+
+#[cfg(test)]
 mod channel_tests {
     use super::{shell_init_for, state_dir_name, with_state_dir, PREDICTOR_PS, PROMPT_CMD_LOG};
 
@@ -1339,9 +1415,48 @@ fn load_cold(state: &mut DaemonState) {
     }
 }
 
+/// Write this process's coverage counters out mid-run.
+///
+/// Only exists under instrumentation (cargo-llvm-cov passes --cfg=coverage).
+/// An instrumented binary writes its .profraw from an exit handler, and the
+/// daemon is never allowed to reach one: every suite stops it with
+/// `taskkill /F`, and the app's own restart path does the same. So the
+/// daemon's counters were being collected all along and thrown away at the
+/// end of every run - which is why the E2E suites appeared to measure
+/// nothing and mux.rs sat at 32% while lifecycle.ps1 hammered it.
+///
+/// Called from the flush thread, so a daemon killed at any moment has
+/// already written everything up to its last flush.
+#[cfg(coverage)]
+pub fn flush_coverage() {
+    extern "C" {
+        fn __llvm_profile_write_file() -> std::ffi::c_int;
+        fn __llvm_profile_reset_counters();
+    }
+    // Write, then RESET. LLVM_PROFILE_FILE carries %m, which puts the
+    // runtime in merge-on-write mode: without the reset every flush merges
+    // this process's cumulative counters into the same file again, and
+    // three hundred flushes over a fifteen minute run add them three
+    // hundred times. That does not read as a big number, it reads as
+    // "excessively large counter value suggests corrupted profile data"
+    // and llvm-profdata refuses to merge anything at all - so the whole
+    // report comes back empty, which is exactly what it did.
+    //
+    // Resetting makes each flush contribute only what happened since the
+    // last one, which is what summing across files expects.
+    unsafe {
+        __llvm_profile_write_file();
+        __llvm_profile_reset_counters();
+    }
+}
+
+#[cfg(not(coverage))]
+pub fn flush_coverage() {}
+
 fn spawn_flush_thread(sessions: Sessions) {
     std::thread::spawn(move || loop {
         std::thread::sleep(FLUSH_INTERVAL);
+        flush_coverage();
         let mut snapshots = Vec::new();
         {
             let mut state = sessions.lock().unwrap();
