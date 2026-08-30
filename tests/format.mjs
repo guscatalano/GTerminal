@@ -4,7 +4,7 @@
 // decimal that jitters, or a width that grows and shrinks makes the
 // whole bar restless — which is the sort of thing that is never reported
 // as a bug and quietly makes an app feel cheap.
-import { fmtBytes, fmtRate, fmtDuration, pct, fmtSize, clipPreview } from "../src/format.ts";
+import { fmtBytes, fmtRate, fmtDuration, pct, fmtSize, clipPreview, fmtTokens } from "../src/format.ts";
 
 let failed = 0;
 function check(name, got, want) {
@@ -78,6 +78,16 @@ check("exactly at the limit is not cut", clipPreview("y".repeat(46)), "y".repeat
 check("one over is cut", clipPreview("y".repeat(47)).endsWith("…"), true);
 check("empty stays empty", clipPreview(""), "");
 check("whitespace only collapses to nothing", clipPreview("\n\t  "), "⏎");
+
+// ── token counts ──────────────────────────────────────────────────────
+check("zero tokens", fmtTokens(0), "0");
+check("small counts stay whole", fmtTokens(227), "227");
+check("thousands get a decimal below 100K", fmtTokens(6421), "6.4K");
+check("the boundary rolls over", fmtTokens(1000), "1.0K");
+check("no decimal at 100K and up", fmtTokens(102400), "102K");
+check("millions", fmtTokens(1234567), "1.2M");
+check("negatives are not a thing here", fmtTokens(-5), "0");
+check("NaN does not leak to the screen", fmtTokens(NaN), "0");
 
 if (failed) {
   console.log(`${failed} format test(s) failed`);

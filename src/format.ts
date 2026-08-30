@@ -39,6 +39,20 @@ export function pct(n: number): string {
   return `${Math.round(n)}%`;
 }
 
+/// Token counts in the same compact shape as fmtBytes, but base 1000:
+/// tokens are counted in thousands, not kibibytes, and reusing fmtBytes
+/// here would be quietly lying about the unit.
+export function fmtTokens(n: number): string {
+  if (!isFinite(n) || n <= 0) return "0";
+  const u = ["", "K", "M", "B"];
+  let i = 0;
+  while (n >= 1000 && i < u.length - 1) {
+    n /= 1000;
+    i++;
+  }
+  return `${n >= 100 || i === 0 ? Math.round(n) : n.toFixed(1)}${u[i]}`;
+}
+
 /// Transcript sizes on the history page, where MB is the useful unit and
 /// a zero would be a lie about a file that exists.
 export function fmtSize(b: number): string {

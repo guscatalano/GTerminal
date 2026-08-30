@@ -1,3 +1,4 @@
+mod claude_usage;
 mod mux;
 mod stats;
 mod update;
@@ -481,6 +482,42 @@ async fn weather_report(
     Ok(report)
 }
 
+// ── Claude Code usage ────────────────────────────────────────────────
+
+/// The last report and when it was fetched. stats-cache.json is one
+/// small file, not hundreds of transcripts, but it is still a disk read
+/// off the status bar's per-second tick, and a minute-old number is
+/// plenty fresh for something Claude Code itself only recomputes on its
+/// own schedule (see `Report::stale`).
+static CLAUDE_USAGE_CACHE: Mutex<Option<(std::time::Instant, claude_usage::Report)>> = Mutex::new(None);
+const CLAUDE_USAGE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Token usage Claude Code itself recorded, read from its own
+/// `%USERPROFILE%\.claude\stats-cache.json`. Never fails outward - a
+/// missing `.claude` directory, a missing or unreadable cache file, or a
+/// shape that has changed since this was written, all come back as
+/// `Report { available: false, .. }` so the status item can show "—"
+/// instead of breaking the bar.
+#[tauri::command]
+async fn claude_usage() -> claude_usage::Report {
+    if let Some((at, report)) = CLAUDE_USAGE_CACHE.lock().unwrap().as_ref() {
+        if at.elapsed() < CLAUDE_USAGE_TTL {
+            return report.clone();
+        }
+    }
+    // Same variable the rest of this file uses to find the user's home
+    // directory (see mux.rs); nothing to read if it isn't set.
+    let Ok(home) = std::env::var("USERPROFILE") else {
+        return claude_usage::Report::default();
+    };
+    let dir = std::path::PathBuf::from(home).join(".claude");
+    let report = tauri::async_runtime::spawn_blocking(move || claude_usage::fetch_today(&dir))
+        .await
+        .unwrap_or_default();
+    *CLAUDE_USAGE_CACHE.lock().unwrap() = Some((std::time::Instant::now(), report.clone()));
+    report
+}
+
 // ── updating an installed build ────────────────────────────────────────
 // The Store round trip is submission, certification and a wait measured in
 // hours. Right for a release, wrong for finding out whether a fix works, so
@@ -649,11 +686,21 @@ fn history_list() -> Result<Vec<HistoryEntry>, String> {
     Ok(out)
 }
 
+/// A transcript's file stem, "{created_ms}-{id}".
+///
+/// Digits and dashes only. The stem arrives from the window and is joined
+/// onto the history directory to open a file, so this is the whole reason
+/// that join cannot be talked into leaving the directory: a stem carrying
+/// a separator, a drive letter or `..` is not a stem. Pulled out of
+/// `history_read` so it can be tested against the strings someone would
+/// actually try, rather than trusted because the comment says so.
+fn valid_stem(stem: &str) -> bool {
+    !stem.is_empty() && stem.chars().all(|c| c.is_ascii_digit() || c == '-')
+}
+
 #[tauri::command]
 fn history_read(stem: String) -> Result<String, String> {
-    // Stems are "{created_ms}-{id}" — digits and dashes only, so the
-    // path below can't escape the history directory.
-    if stem.is_empty() || !stem.chars().all(|c| c.is_ascii_digit() || c == '-') {
+    if !valid_stem(&stem) {
         return Err("bad stem".into());
     }
     let bytes = std::fs::read(mux::history_dir().join(format!("{stem}.log")))
@@ -1290,6 +1337,7 @@ pub fn run() {
             get_config,
             set_config,
             weather_report,
+            claude_usage,
             update_status,
             update_versions,
             update_check,
@@ -1475,6 +1523,32 @@ mod tests {
     /// "Control" is a substring of nothing else here, but "Quote" is a
     /// substring of "Backquote" — replacing in the wrong order turns
     /// Backquote into Back'.
+    /// The stem is joined onto the history directory and opened. It comes
+    /// from the window, so this is the check standing between "read a
+    /// transcript" and "read any file on the disk".
+    #[test]
+    fn a_transcript_stem_cannot_leave_the_history_directory() {
+        use super::valid_stem;
+        assert!(valid_stem("1787950774566-1"));
+        assert!(valid_stem("42"));
+
+        // Every shape of "somewhere else" worth trying.
+        assert!(!valid_stem(""));
+        assert!(!valid_stem(".."));
+        assert!(!valid_stem("../config"));
+        assert!(!valid_stem("..\\config"));
+        assert!(!valid_stem("\\..\\config.json"));
+        assert!(!valid_stem("C:\\Windows\\System32\\config\\SAM"));
+        assert!(!valid_stem("/etc/passwd"));
+        assert!(!valid_stem("\\\\server\\share\\file"));
+        assert!(!valid_stem("1787-1.log"));
+        // A trailing NUL is the classic way to end a path early.
+        assert!(!valid_stem("1787-1\0"));
+        // Digits that are not ASCII digits: is_numeric would accept these,
+        // and they are not what a stem is made of.
+        assert!(!valid_stem("\u{0661}\u{0662}"));
+    }
+
     #[test]
     fn backquote_survives_the_quote_rule() {
         assert_eq!(pretty_hotkey("Alt+Backquote"), "Alt+`");

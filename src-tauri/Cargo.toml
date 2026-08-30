@@ -36,6 +36,10 @@ tauri-plugin-single-instance = "2.4.3"
 # of machinery for two requests. rustls rather than schannel so the
 # trust store is the same one the tests run against.
 ureq = { version = "2", default-features = false, features = ["tls", "json", "gzip"] }
+# Already in the tree transitively (tauri and windows both pull it in);
+# depended on directly here just to convert Claude Code's UTC transcript
+# timestamps into "today" in whatever timezone this machine is set to.
+chrono = "0.4"
 
 [target.'cfg(windows)'.dependencies]
 # Reaching WebView2's own settings, to turn Edge's accelerator keys off.

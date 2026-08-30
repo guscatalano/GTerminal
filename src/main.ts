@@ -28,7 +28,7 @@ import {
 } from "./keys";
 import type { PasteLimits } from "./keys";
 import { autoTitle, SHELLS, BORING_TITLE } from "./titles";
-import { fmtBytes, fmtRate, fmtDuration, pct, fmtSize, clipPreview } from "./format";
+import { fmtBytes, fmtRate, fmtDuration, pct, fmtSize, clipPreview, fmtTokens } from "./format";
 import {
   adoptable as adoptableOf,
   inSavedOrder,
@@ -8011,6 +8011,38 @@ interface WeatherReport {
   fetched_ms: number;
 }
 
+interface ClaudeModelUsage {
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_tokens: number;
+  cache_read_tokens: number;
+  messages: number;
+}
+
+/// Mirrors claude_usage::Report in lib.rs. Today's input/output/cache
+/// split comes from summing Claude Code's own JSONL transcripts, live.
+/// `all_time_cost_usd` comes from a different, much less fresh file
+/// (stats-cache.json) and is never scoped to today - see the Rust
+/// module doc for why the two must not be blended into one figure.
+interface ClaudeUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_tokens: number;
+  cache_read_tokens: number;
+  messages: number;
+  sessions: number;
+  by_model: ClaudeModelUsage[];
+  /// null when stats-cache.json is missing, unreadable, or has nothing
+  /// to sum - the detail panel omits the cost row entirely rather than
+  /// show a number with no visible age.
+  all_time_cost_usd: number | null;
+  /// The cache's own `lastComputedDate`, so the cost row can say how
+  /// old it is. Meaningless (and typically empty) when
+  /// all_time_cost_usd is null.
+  cost_as_of: string;
+}
+
 interface StatusCtx {
   stats: SystemStats;
   perf: Record<string, number>;
@@ -8019,6 +8051,11 @@ interface StatusCtx {
   /// is requested without one - see PRIVACY.md.
   weather: WeatherReport | null;
   weatherError: string;
+  /// Null until the first fetch comes back. Unlike weather this reads
+  /// only a local file and needs no opt-in - see `ClaudeUsage.available`
+  /// for whether that file existed and parsed.
+  claude: ClaudeUsage | null;
+  claudeError: string;
 }
 
 interface StatusDetail {
@@ -8100,6 +8137,57 @@ const STATUS_BUILTINS: Record<string, StatusItemDef> = {
         ],
         links: [{ label: "About the AQI", url: "https://www.airnow.gov/aqi/aqi-basics/" }],
       };
+    },
+  },
+  claude: {
+    label: "Claude Code",
+    render: (c) => {
+      const u = c.claude;
+      if (!u || u.messages === 0) return "Claude Code —";
+      const total = u.input_tokens + u.output_tokens + u.cache_creation_tokens + u.cache_read_tokens;
+      return `Claude Code ${fmtTokens(total)} tok`;
+    },
+    detail: (c) => {
+      const u = c.claude;
+      // Not a footnote: a number that silently omits every desktop-app
+      // session would look complete while being wrong, and only the
+      // person comparing it against their own memory would ever notice -
+      // the difference between a true number and a misleading one is
+      // stating the scope up front.
+      const scope: [string, string] = [
+        "Scope",
+        "Claude Code (CLI) only. Desktop app usage is not included; it is not stored on this machine.",
+      ];
+      if (!u || u.messages === 0) {
+        return {
+          rows: [scope, ["Status", c.claudeError || "No Claude Code usage recorded for today"]],
+        };
+      }
+      const rows: Array<[string, string]> = [
+        scope,
+        ["Input tokens", fmtTokens(u.input_tokens)],
+        ["Output tokens", fmtTokens(u.output_tokens)],
+        ["Cache writes", fmtTokens(u.cache_creation_tokens)],
+        ["Cache reads", fmtTokens(u.cache_read_tokens)],
+        ["Sessions today", String(u.sessions)],
+        ["Messages today", String(u.messages)],
+      ];
+      for (const m of u.by_model) {
+        const modelTotal = m.input_tokens + m.output_tokens + m.cache_creation_tokens + m.cache_read_tokens;
+        rows.push([m.model, `${fmtTokens(modelTotal)} tok, ${m.messages} msg`]);
+      }
+      // Cost comes from a separate, much less fresh file and is always
+      // all-time - see the ClaudeUsage interface doc. Its age is put
+      // right in the label rather than left for the reader to guess,
+      // and the row is skipped entirely if there's nothing to show
+      // rather than print a number with no visible age.
+      if (u.all_time_cost_usd !== null) {
+        const label = u.cost_as_of
+          ? `All-time API-equivalent value (as of ${u.cost_as_of})`
+          : "All-time API-equivalent value";
+        rows.push([label, `$${u.all_time_cost_usd.toFixed(2)}`]);
+      }
+      return { rows };
     },
   },
   clock: {
@@ -8389,6 +8477,8 @@ let statusCtx: StatusCtx = {
   custom: {},
   weather: null,
   weatherError: "",
+  claude: null,
+  claudeError: "",
 };
 
 /// Items whose data costs a wildcard PDH sweep; only those groups get
@@ -8406,6 +8496,10 @@ const customLastRun = new Map<string, number>();
 /// When the weather was last asked for. Its own clock because it is the
 /// one status item that costs somebody else a request.
 let weatherLastRun = 0;
+/// When Claude usage was last asked for. Its own clock too: the backend
+/// already caches for a minute (CLAUDE_USAGE_TTL in lib.rs), so asking
+/// every status-bar tick would just be a wasted IPC round trip.
+let claudeLastRun = 0;
 
 function statusItemIds(): string[] {
   return config.status_items ?? ["clock", "cpu", "mem", "diskio"];
@@ -8513,6 +8607,24 @@ async function sampleStatus() {
           renderStatusBar();
         });
     }
+  }
+  // Claude usage reads local files only, so nothing here waits on a
+  // setting the way weather waits on a postcode - but the backend's own
+  // cache is a minute, so asking faster than that would just hammer IPC
+  // for a number that has not moved.
+  if (ids.includes("claude") && Date.now() - claudeLastRun > 60 * 1000) {
+    claudeLastRun = Date.now();
+    invoke<ClaudeUsage>("claude_usage")
+      .then((u) => {
+        statusCtx.claude = u;
+        statusCtx.claudeError = "";
+        renderStatusBar();
+      })
+      .catch((e) => {
+        statusCtx.claudeError = String(e);
+        claudeLastRun = Date.now() - 50 * 1000;
+        renderStatusBar();
+      });
   }
   // Command items keep their own cadence — they cost a process each.
   const now = Date.now();
