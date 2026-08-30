@@ -113,7 +113,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "selectright", "selectmax", "maxtop", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "selectright", "selectmax", "pasteboth", "maxtop", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -2725,6 +2725,68 @@ if (-not $Only -or $Only -eq "selectright") {
   }
   Write-Host "  frames saved to $dump" -ForegroundColor DarkGray
   Stop-App $ctx31
+}
+
+# ══ scene: the two ways to paste ═══════════════════════════
+# Reported: "pasting with Control+V vs right click has different paste
+# behavior. control+v truncates the output".
+#
+# pastecontent already pastes seven shapes with Ctrl+V, including one over
+# two thousand characters - so whatever this is, a Ctrl+V test on its own
+# does not see it. The claim is about a DIFFERENCE, and nothing compared
+# the two gestures until now.
+#
+# Length is measured by the shell rather than read off the screen. A three
+# thousand character line wraps, and the transcript holds it wrapped with
+# escapes threaded through it, so counting characters there measures the
+# rendering. Asking PowerShell what it received measures the paste.
+if (-not $Only -or $Only -eq "pasteboth") {
+  # No paste warning: the confirm dialog is its own path with its own
+  # tests, and this scene is about what arrives.
+  $ctxPB = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7,`"paste_warn`":false}"
+  $hPB = $ctxPB.Hwnd
+  $payload = "x" * 3000
+  Record-Scene "pasteboth" 60 $ctxPB {
+    $null = Wait-Prompt 1
+    Run-Cmd 'echo pasteboth-ready' 2
+
+    # ── Ctrl+V ──
+    Set-Clip ("`$pbA='" + $payload + "'") $hPB
+    Start-Sleep -Seconds 1
+    Key 0x56 @([byte]$VK_CTRL)
+    Start-Sleep -Seconds 3
+    Key $VK_RETURN
+    Start-Sleep -Seconds 2
+    Run-Cmd 'echo "LENA=$($pbA.Length)"' 3
+
+    # ── right-click -> Paste ──
+    Set-Clip ("`$pbB='" + $payload + "'") $hPB
+    Start-Sleep -Seconds 1
+    # No selection, so the first item is Paste; same offsets the copy and
+    # selectright scenes use.
+    Right-Click $hPB 600 300
+    Start-Sleep -Seconds 2
+    Click $hPB 640 312
+    Start-Sleep -Seconds 3
+    Key $VK_RETURN
+    Start-Sleep -Seconds 2
+    Run-Cmd 'echo "LENB=$($pbB.Length)"' 3
+    $script:pbOut = Transcripts
+  }
+  $want = $payload.Length
+  $lenA = if ($pbOut -match "LENA=(\d+)") { [int]$Matches[1] } else { -1 }
+  $lenB = if ($pbOut -match "LENB=(\d+)") { [int]$Matches[1] } else { -1 }
+  Write-Host ("  pasted {0} characters: Ctrl+V delivered {1}, the menu delivered {2}" -f $want, $lenA, $lenB) -ForegroundColor DarkGray
+  if ($lenA -eq $want) { Pass "Ctrl+V delivers the whole clipboard" }
+  else { Fail "pasteboth" "Ctrl+V delivered $lenA of $want characters" }
+  if ($lenB -eq $want) { Pass "and so does the right-click menu" }
+  else { Fail "pasteboth" "the menu delivered $lenB of $want characters" }
+  # The reported symptom is the difference, so it is asserted directly -
+  # two gestures that both truncate identically would still be a bug, but
+  # it would not be this one.
+  if ($lenA -eq $lenB) { Pass "and the two gestures agree" }
+  else { Fail "pasteboth" "Ctrl+V delivered $lenA but the menu delivered $lenB - this is the reported bug" }
+  Stop-App $ctxPB
 }
 
 # ══ scene: select and copy, maximized ══════════════════════════════════

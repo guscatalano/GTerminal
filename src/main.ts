@@ -4490,6 +4490,19 @@ async function createTab(
         pasteText(id, text, "menu");
         term.focus();
       };
+      // Pastes the snapshot taken when the menu opened, not a fresh read.
+      //
+      // That looks like an inconsistency next to Ctrl+V, which reads the
+      // clipboard at paste time, and it was reported as one. It is
+      // deliberate: this item shows what it is about to paste, and the
+      // label and the payload have to be the same text. Re-reading on
+      // click would make the preview a claim about something else - which
+      // is worse than the asymmetry, because the whole point of the
+      // preview is not running something you did not read.
+      //
+      // When the clipboard could not be read in time there is no snapshot
+      // and no preview to honour, so the fallback below reads at paste
+      // time, which is exactly what Ctrl+V does.
       if (current) {
         items.push({ label: `Paste: ${clipPreview(current)}`, action: () => writePaste(current) });
       } else {
