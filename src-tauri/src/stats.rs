@@ -650,6 +650,77 @@ mod imp {
         }
         s
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{engine_kind, ft, multi_sz, real_iface};
+
+        /// A MULTI_SZ is nul-separated and nul-terminated, so a naive read
+        /// yields a trailing empty string - which as a counter name means
+        /// an empty row in the object browser that selects nothing.
+        #[test]
+        fn a_multi_sz_is_split_on_nuls_with_no_empty_tail() {
+            let buf: Vec<u16> = "Processor Memory Network Interface  "
+                .encode_utf16()
+                .collect();
+            assert_eq!(
+                multi_sz(&buf),
+                vec!["Processor", "Memory", "Network Interface"]
+            );
+            assert!(multi_sz(&[0, 0]).is_empty());
+            assert!(multi_sz(&[]).is_empty());
+        }
+
+        /// FILETIME arrives as two 32-bit halves. Recombined wrongly the
+        /// CPU percentage is not slightly off, it is nonsense - and the
+        /// high half only moves every few minutes, so a broken shift looks
+        /// fine on a quick look and drifts.
+        #[test]
+        fn a_filetime_is_its_two_halves_in_the_right_order() {
+            use windows_sys::Win32::Foundation::FILETIME;
+            let f = FILETIME { dwLowDateTime: 0x8765_4321, dwHighDateTime: 0x1234_5678 };
+            assert_eq!(ft(f), 0x1234_5678_8765_4321);
+            let zero = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+            assert_eq!(ft(zero), 0);
+            // The low half must not be sign-extended into the high one.
+            let high_bit = FILETIME { dwLowDateTime: 0xFFFF_FFFF, dwHighDateTime: 0 };
+            assert_eq!(ft(high_bit), 0xFFFF_FFFF);
+        }
+
+        /// GPU engine instances are named
+        /// "pid_1234_luid_0x...._phys_0_eng_0_engtype_3D". Everything
+        /// before engtype_ is per-process noise; grouping on the whole
+        /// string would give one row per process instead of one per
+        /// engine kind.
+        #[test]
+        fn a_gpu_engine_is_grouped_by_its_kind() {
+            assert_eq!(engine_kind("pid_9_luid_0x0_0x1_phys_0_eng_0_engtype_3D"), "3D");
+            assert_eq!(engine_kind("pid_1_luid_0x0_0x2_phys_0_eng_1_engtype_Copy"), "Copy");
+            assert_eq!(engine_kind("pid_2_eng_3_engtype_VideoDecode"), "VideoDecode");
+            // Anything that is not shaped like one is grouped, not dropped
+            // or panicked on - a total that silently loses an engine is
+            // worse than one labelled Other.
+            assert_eq!(engine_kind("something else entirely"), "Other");
+            assert_eq!(engine_kind(""), "Other");
+        }
+
+        /// Tunnel and loopback adapters carry the same traffic twice, or
+        /// traffic that never left the machine. Counted in, they drown out
+        /// the adapter actually doing the work.
+        #[test]
+        fn only_real_adapters_count_toward_the_network_total() {
+            assert!(real_iface("Intel(R) Wi-Fi 6E AX211 160MHz"));
+            assert!(real_iface("Realtek Gaming 2.5GbE Family Controller"));
+            assert!(!real_iface("Software Loopback Interface 1"));
+            assert!(!real_iface("Microsoft ISATAP Adapter"));
+            assert!(!real_iface("Teredo Tunneling Pseudo-Interface"));
+            // Case is whatever Windows felt like; the check lowercases
+            // first, and a regression there passes every lowercase test.
+            assert!(!real_iface("SOFTWARE LOOPBACK INTERFACE 1"));
+            assert!(!real_iface("Microsoft isatap Adapter #2"));
+        }
+    }
+
 }
 
 #[cfg(not(windows))]
@@ -720,13 +791,52 @@ pub fn status_command(command: String, cwd: Option<String>) -> Result<String, St
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
     let out = cmd.output().map_err(|e| e.to_string())?;
-    let text = String::from_utf8_lossy(&out.stdout);
-    Ok(text
+    Ok(first_line_capped(&String::from_utf8_lossy(&out.stdout)))
+}
+
+/// What a command item is allowed to put in the status bar: its first line,
+/// trimmed, and no more than 120 characters of it.
+///
+/// Pulled out of `status_command` so it can be tested without starting a
+/// shell. The cap is the point - a command that prints a stack trace, or a
+/// file, would otherwise be handed to a bar one line tall, and character
+/// counting is where an off-by-one turns into a status bar that pushes
+/// everything else off the end.
+pub fn first_line_capped(stdout: &str) -> String {
+    stdout
         .lines()
         .next()
         .unwrap_or("")
         .trim()
         .chars()
         .take(120)
-        .collect())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    /// What a command item may put in the bar. The cap is the whole point:
+    /// a command that prints a stack trace or cats a file would otherwise
+    /// be handed to a strip one line tall and shove everything else off
+    /// the end of it.
+    #[test]
+    fn a_command_item_gets_one_line_and_no_more_than_120_characters() {
+        use super::first_line_capped;
+        assert_eq!(first_line_capped("main\nsecond\nthird"), "main");
+        assert_eq!(first_line_capped("  padded  \nnext"), "padded");
+        assert_eq!(first_line_capped(""), "");
+        assert_eq!(first_line_capped("\n\nlater"), "");
+
+        let long = "x".repeat(500);
+        assert_eq!(first_line_capped(&long).len(), 120);
+
+        // Characters, not bytes. Counted in bytes, a cap landing mid
+        // sequence would cut a multi-byte character in half - and this is
+        // a terminal, where a branch name or a path is routinely not
+        // ASCII.
+        let wide = "\u{e9}".repeat(200);
+        assert_eq!(first_line_capped(&wide).chars().count(), 120);
+        let emoji = "\u{1f600}".repeat(200);
+        assert_eq!(first_line_capped(&emoji).chars().count(), 120);
+    }
 }

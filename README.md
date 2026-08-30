@@ -90,6 +90,29 @@ use day to day, and the one the visual tests need (`-Exe`).
 
 Every new feature should land with coverage in one of these suites.
 
+`npm run coverage` measures what the tests actually reach and prints a
+table per area (it also writes to the GitHub job summary in CI):
+
+- **TypeScript** - c8 around every node suite. The extracted modules sit
+  at ~99%; `main.ts` reads 0% because it is webview code exercised by the
+  35 visual scenes, which no node-side tool can see. The report names it
+  as not-measured-here rather than averaging it into something untrue.
+- **Rust** - cargo-llvm-cov over the unit tests. The daemon and the Tauri
+  command layer are exercised by `lifecycle.ps1`, `typing.ps1` and the
+  visual scenes, and none of that is counted: running those suites under
+  instrumentation was tried and measures nothing, because the daemon runs
+  from a self-copy (`mux::daemon_binary`) that llvm-cov cannot attribute
+  counters to. So a low number there means "not reachable from a unit
+  test", which is not the same as untested.
+
+There is deliberately no coverage threshold. The quickest way to raise a
+combined number here would be shallow unit tests for code already covered
+end to end - the report exists to be read, not to be passed.
+
+`npm run test:mutate` is the other half of that: it breaks the code on
+purpose and checks the guarding test fails. A test nobody has watched
+fail is decoration.
+
 ## How it works
 
 [docs/architecture.md](docs/architecture.md) — the two processes, the wire

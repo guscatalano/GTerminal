@@ -1,9 +1,17 @@
 # Lifecycle regression tests: every daemon-side behavior GTerminal relies on.
 # Fully isolated (scratch LOCALAPPDATA, PID-scoped kills); exits nonzero on
 # any failure.
+param(
+  # Which binary to drive. Defaults to this repo's debug build; the
+  # coverage run points it at an instrumented copy in a scratch target
+  # directory, because the default path is often a binary somebody is
+  # running - on Windows that file is locked, and rebuilding over it
+  # would take their terminal with it.
+  [string]$Exe
+)
 $ErrorActionPreference = "Stop"
 $repo = Split-Path $PSScriptRoot -Parent
-$exe = Join-Path $repo "src-tauri\target\debug\gterminal.exe"
+$exe = if ($Exe) { $Exe } else { Join-Path $repo "src-tauri\target\debug\gterminal.exe" }
 if (-not (Test-Path $exe)) { Write-Error "build first: cargo build in src-tauri" }
 
 $env:LOCALAPPDATA = Join-Path $env:TEMP "gterminal-lifecycle-test"

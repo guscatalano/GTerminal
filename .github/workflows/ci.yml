@@ -45,6 +45,57 @@ jobs:
       - name: Typing correctness + latency suite
         run: pwsh -NoProfile -File tests/typing.ps1
 
+  # What the tests actually reach, in both languages, published to the run's
+  # summary page.
+  #
+  # Its own job rather than a step on `test`: nothing should wait on a
+  # number to find out whether the code works.
+  #
+  # Deliberately no threshold. The honest figures here are per-area and a
+  # single gate over them would be gameable in the worst direction: the
+  # quickest way to raise a combined number is to write shallow unit tests
+  # for code that is already covered end to end by suites this tool cannot
+  # see. See tests/coverage-report.mjs for what is and is not measured.
+  coverage:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          # The instrumented build is not the one the other jobs want back.
+          key: coverage
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Measure
+        run: npm run coverage
+
+      # The tables land in the job summary on their own; these are the
+      # browsable versions for when a number is not enough.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: |
+            coverage/ts/**
+            coverage/rust/**
+          if-no-files-found: warn
+
   release:
     needs: test
     if: startsWith(github.ref, 'refs/tags/v')
