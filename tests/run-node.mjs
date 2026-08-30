@@ -1,26 +1,26 @@
-// Every node suite, in one process tree.
-// Run: npm run test:node
-//
-// `npm test` runs these as a chain of separate commands, which is right
-// there: the first failure stops the run. This exists so coverage can wrap
-// them all in a single measurement - NODE_V8_COVERAGE is inherited by
-// children, so one c8 around this collects every suite.
-//
-// It keeps going after a failure on purpose. A coverage run that stops at
-// the first broken suite reports the coverage of everything before it as
-// if that were the whole picture.
 import { execFileSync } from "child_process";
-import { readdirSync } from "fs";
+import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 
 const here = dirname(fileURLToPath(import.meta.url));
+const root = join(here, "..");
 
-// Everything except the helpers: run-node itself, and anything under
-// fixtures or lib.
-const suites = readdirSync(here)
-  .filter((f) => f.endsWith(".mjs") && f !== "run-node.mjs")
-  .sort();
+// The suites `npm test` runs, taken from `npm test` itself rather than by
+// globbing this directory.
+//
+// Globbing was wrong in a way that only showed up on a clean checkout: it
+// picked up coverage-report.mjs, which is a reporter and not a suite, and
+// which exits nonzero when there is no coverage data yet. Locally there
+// always was some left over from a previous run, so it passed; in CI there
+// was none, it "failed", and that took the whole coverage job down with it
+// - the Rust half never ran at all.
+//
+// Reading the list from package.json also means this cannot drift: a suite
+// added to `npm test` is measured, and one that is not in `npm test` is
+// not silently being counted as covered.
+const testScript = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).scripts.test;
+const suites = [...testScript.matchAll(/node\s+tests\/([\w-]+)\.mjs/g)].map((m) => `${m[1]}.mjs`);
 
 let failed = [];
 for (const f of suites) {
