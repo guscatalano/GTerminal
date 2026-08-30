@@ -137,6 +137,114 @@ $mutations = @(
     With = '        "GTerminal".to_string()'
     Check = "rust"
   },
+  # ── the parsers that fail quietly ──────────────────────────────────
+  @{
+    Name = "command-output-cap-counts-bytes"
+    What = "cap a status item's output in bytes, slicing a character in half"
+    File = "src-tauri/src/stats.rs"
+    Find = '    stdout' + "`n" + '        .lines()' + "`n" + '        .next()' + "`n" + '        .unwrap_or("")' + "`n" + '        .trim()' + "`n" + '        .chars()' + "`n" + '        .take(120)' + "`n" + '        .collect()'
+    With = '    let line = stdout.lines().next().unwrap_or("").trim();' + "`n" + '    String::from_utf8_lossy(&line.as_bytes()[..line.len().min(120)]).into_owned()'
+    Check = "rust"
+  },
+  @{
+    Name = "command-output-cap-loosened"
+    What = "let a status item put 1000 characters in a one-line bar"
+    File = "src-tauri/src/stats.rs"
+    Find = '        .take(120)'
+    With = '        .take(1000)'
+    Check = "rust"
+  },
+  @{
+    Name = "multi-sz-keeps-its-empty-tail"
+    What = "read a nul-terminated MULTI_SZ as having a trailing empty entry"
+    File = "src-tauri/src/stats.rs"
+    Find = '            .filter(|s| !s.is_empty())'
+    With = '            .filter(|_s| true)'
+    Check = "rust"
+  },
+  @{
+    Name = "filetime-halves-swapped"
+    What = "recombine FILETIME backwards, so CPU% is nonsense that looks fine"
+    File = "src-tauri/src/stats.rs"
+    Find = '        ((f.dwHighDateTime as u64) << 32) | f.dwLowDateTime as u64'
+    With = '        ((f.dwLowDateTime as u64) << 32) | f.dwHighDateTime as u64'
+    Check = "rust"
+  },
+  @{
+    Name = "gpu-engines-grouped-per-process"
+    What = "group GPU engines on the whole instance name, one row per process"
+    File = "src-tauri/src/stats.rs"
+    Find = '            .map(|(_, k)| k.to_string())'
+    With = '            .map(|(k, _)| k.to_string())'
+    Check = "rust"
+  },
+  @{
+    Name = "adapter-filter-stops-lowercasing"
+    What = "let loopback and tunnel adapters into the network total by case"
+    File = "src-tauri/src/stats.rs"
+    Find = '        let n = name.to_ascii_lowercase();'
+    With = '        let n = name.to_string();'
+    Check = "rust"
+  },
+  # ── the terminal's own bytes ───────────────────────────────────────
+  @{
+    Name = "utf8-decodes-the-incomplete-tail"
+    What = "decode a character split across two PTY reads - the mojibake bug"
+    File = "src-tauri/src/mux.rs"
+    Find = '            let valid = e.valid_up_to();'
+    With = '            let valid = carry.len();'
+    Check = "rust"
+  },
+  @{
+    Name = "utf8-junk-stalls-the-stream"
+    What = "hold every byte after a stray one hostage for ever"
+    File = "src-tauri/src/mux.rs"
+    Find = '            } else if carry.len() >= 8 {'
+    With = '            } else if false {'
+    Check = "rust"
+  },
+  @{
+    Name = "utf8-drops-the-held-back-half"
+    What = "throw away the first half of a split character instead of keeping it"
+    File = "src-tauri/src/mux.rs"
+    Find = '                carry.drain(..valid);'
+    With = '                carry.clear();'
+    Check = "rust"
+  },
+  # ── paths ──────────────────────────────────────────────────────────
+  @{
+    Name = "transcript-stem-escapes-its-directory"
+    What = "accept dots and separators in a stem, so it can name any file"
+    File = "src-tauri/src/lib.rs"
+    Find = "c.is_ascii_digit() || c == '-'"
+    With = "c.is_numeric() || c == '-' || c == '.' || c == '/'"
+    Check = "rust"
+  },
+  @{
+    Name = "channel-shell-log-points-at-the-release-folder"
+    What = "inject the release folder's command log into a channel build's shell"
+    File = "src-tauri/src/mux.rs"
+    Find = '    let mut ps_init = with_state_dir_in(base, dir);'
+    With = '    let mut ps_init = base.to_string();'
+    Check = "rust"
+  },
+  @{
+    Name = "channel-predictor-points-at-the-release-folder"
+    What = "dot-source the release build's predictor from a channel build"
+    File = "src-tauri/src/mux.rs"
+    Find = '            ps_init.push_str(&with_state_dir_in2(dir, '
+    With = '            ps_init.push_str(&String::from('
+    Check = "rust"
+  },
+  # ── what a subscription plan costs ─────────────────────────────────
+  @{
+    Name = "zero-cost-reported-as-a-cost"
+    What = "show $0.00 when a plan records no per-token cost at all"
+    File = "src-tauri/src/claude_usage.rs"
+    Find = '    if cost <= 0.0 {'
+    With = '    if false {'
+    Check = "rust"
+  },
   @{
     Name = "minify-with-esbuild"
     What = "minify with the bundler that breaks xterm's enums"
