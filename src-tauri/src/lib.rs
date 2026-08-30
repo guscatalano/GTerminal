@@ -347,13 +347,33 @@ fn daemon_info() -> Result<Value, String> {
     }))
 }
 
+/// Ask the daemon to stand down once its last shell has gone.
+///
+/// The graceful half of replacing a daemon after an update. Nothing is
+/// killed and nothing is lost: it stops when it is empty anyway, and the
+/// next request starts the new build's. Returns how many live sessions it
+/// is still waiting on, so the window can say so.
+///
+/// Err when the daemon predates the verb - that is the signal to fall
+/// back to `restart_daemon`, not a failure to report.
+#[tauri::command]
+fn retire_daemon() -> Result<Value, String> {
+    let stream = mux::client::connect().map_err(|e| e.to_string())?;
+    let v = mux::client::request(stream, &Request::Shutdown { when_idle: true })?;
+    if v.get("ok").and_then(Value::as_bool) != Some(true) {
+        return Err("this daemon does not know how to stand down".into());
+    }
+    Ok(v)
+}
+
 /// Stop the running daemon so the next request starts a fresh one.
 ///
-/// Killing rather than asking: the daemon this exists for is by
-/// definition too old to know a shutdown request. Its sessions are
-/// checkpointed as it goes — they come back as ended sessions with their
-/// scrollback — but the shells themselves end, which is why this is only
-/// ever reached by someone pressing a button that says so.
+/// Asks first now. A daemon that knows the verb checkpoints everything and
+/// exits cleanly, which is strictly better than being killed mid-write.
+/// The kill stays as the fallback, because the daemon this exists for is
+/// often by definition too old to know the request - and either way the
+/// shells end, which is why this is only ever reached by someone pressing
+/// a button that says so.
 #[tauri::command]
 fn restart_daemon() -> Result<(), String> {
     let pid = match mux::client::connect() {
@@ -368,6 +388,21 @@ fn restart_daemon() -> Result<(), String> {
         mux::client::ensure()?;
         return Ok(());
     };
+    // Ask. A daemon new enough to answer writes its checkpoints and goes,
+    // and the kill below then finds nothing to do.
+    let asked = mux::client::connect()
+        .ok()
+        .and_then(|s| mux::client::request(s, &Request::Shutdown { when_idle: false }).ok())
+        .and_then(|v| v.get("ok").and_then(Value::as_bool))
+        == Some(true);
+    if asked {
+        for _ in 0..20 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if mux::client::connect().is_err() {
+                break;
+            }
+        }
+    }
     {
         use std::os::windows::process::CommandExt;
         let _ = std::process::Command::new("taskkill")
@@ -1337,6 +1372,7 @@ pub fn run() {
             peek_session,
             daemon_info,
             restart_daemon,
+            retire_daemon,
             logs_path,
             open_logs_folder,
             open_folder,

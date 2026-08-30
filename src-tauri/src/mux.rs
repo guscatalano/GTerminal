@@ -382,6 +382,29 @@ pub enum Request {
     Write { data: String },
     Resize { cols: u16, rows: u16 },
     Detach,
+    /// Stand down: checkpoint everything and exit.
+    ///
+    /// A Store update replaces the package while the daemon keeps running
+    /// from its own copy, so a new window meets the previous release's
+    /// daemon. Until now the only way to replace it was `taskkill /F`,
+    /// which ends every shell it was holding - the app says so before
+    /// doing it, but "lose your shells" is a poor only-option.
+    ///
+    /// `when_idle` is the graceful half: the daemon stops taking on
+    /// anything new and exits once its last live session has gone, so the
+    /// next request starts the new build's daemon and nobody loses a
+    /// shell. Cold sessions do not hold it open - those are on disk and
+    /// the new daemon finds them there.
+    ///
+    /// Deliberately NOT behind a protocol bump. A bump would mark every
+    /// daemon now running as stale and show its user the restart notice
+    /// for a feature that only helps the update after this one. The client
+    /// asks, and falls back to killing when the answer is "unknown
+    /// request" - which is what a daemon too old to know this verb says.
+    Shutdown {
+        #[serde(default)]
+        when_idle: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1026,6 +1049,8 @@ struct ColdSession {
 struct DaemonState {
     live: HashMap<u32, Session>,
     cold: HashMap<u32, ColdSession>,
+    /// Asked to stand down once the last live session ends.
+    retiring: bool,
 }
 
 type Sessions = Arc<Mutex<DaemonState>>;
@@ -1453,15 +1478,19 @@ pub fn flush_coverage() {
 #[cfg(not(coverage))]
 pub fn flush_coverage() {}
 
-fn spawn_flush_thread(sessions: Sessions) {
-    std::thread::spawn(move || loop {
-        std::thread::sleep(FLUSH_INTERVAL);
-        flush_coverage();
+/// Write every live session to disk right now.
+///
+/// The flush thread does this every few seconds for sessions that have
+/// changed. This does it for all of them on demand, which is what a
+/// shutdown needs: checkpoints up to three seconds stale are fine when
+/// the daemon is killed without warning, and not fine when it is being
+/// asked to stand down politely.
+fn checkpoint_now(sessions: &Sessions, only_dirty: bool) {
         let mut snapshots = Vec::new();
         {
             let mut state = sessions.lock().unwrap();
             for (id, s) in state.live.iter_mut() {
-                if s.dirty {
+                if s.dirty || !only_dirty {
                     s.dirty = false;
                     snapshots.push((
                         Meta {
@@ -1492,6 +1521,13 @@ fn spawn_flush_thread(sessions: Sessions) {
                 let _ = std::fs::write(ring_path(meta.id), &ring);
             }
         }
+}
+
+fn spawn_flush_thread(sessions: Sessions) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(FLUSH_INTERVAL);
+        flush_coverage();
+        checkpoint_now(&sessions, true);
     });
 }
 
@@ -1664,7 +1700,15 @@ fn purge_history(sessions: &Sessions, now: u64) {
 
 fn exit_if_idle(sessions: &Sessions) {
     let state = sessions.lock().unwrap();
-    if state.live.is_empty() && state.cold.is_empty() {
+    // Retiring only waits on LIVE sessions. Cold ones are checkpoints on
+    // disk that the next daemon picks up, so holding the old build open
+    // for them would mean never retiring at all.
+    let done = if state.retiring {
+        state.live.is_empty()
+    } else {
+        state.live.is_empty() && state.cold.is_empty()
+    };
+    if done {
         let _ = std::fs::remove_file(port_file());
         // Give in-flight replies (e.g. the final kill's ok) time to reach
         // their sockets: process::exit tears connections down with an RST
@@ -1945,6 +1989,28 @@ fn conn_loop(
                 }
             }
             Request::Detach => break,
+            Request::Shutdown { when_idle } => {
+                if when_idle {
+                    let live = {
+                        let mut state = sessions.lock().unwrap();
+                        state.retiring = true;
+                        state.live.len()
+                    };
+                    write_line(&mut out, &json!({"ok": true, "retiring": true, "live": live}))?;
+                    // Already idle: retire immediately rather than waiting
+                    // for an event that is not coming.
+                    exit_if_idle(sessions);
+                } else {
+                    checkpoint_now(sessions, false);
+                    write_line(&mut out, &json!({"ok": true, "exiting": true}))?;
+                    let _ = std::fs::remove_file(port_file());
+                    // The same 200ms the idle path takes, and for the same
+                    // reason: process::exit resets live sockets, and the
+                    // reply above is on one of them.
+                    std::thread::sleep(Duration::from_millis(200));
+                    std::process::exit(0);
+                }
+            }
         }
     }
     Ok(())

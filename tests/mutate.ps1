@@ -245,6 +245,23 @@ $mutations = @(
     With = '    if false {'
     Check = "rust"
   },
+  # ── standing down after an update ──────────────────────────────────
+  @{
+    Name = "retiring-daemon-leaves-at-once"
+    What = "exit the moment retirement is asked for, taking the live shells"
+    File = "src-tauri/src/mux.rs"
+    Find = '    let done = if state.retiring {' + "`n" + '        state.live.is_empty()'
+    With = '    let done = if state.retiring {' + "`n" + '        true'
+    Check = "lifecycle"
+  },
+  @{
+    Name = "shutdown-acknowledges-but-stays"
+    What = "answer a shutdown request and then keep running"
+    File = "src-tauri/src/mux.rs"
+    Find = '                    std::thread::sleep(Duration::from_millis(200));' + "`n" + '                    std::process::exit(0);'
+    With = '                    std::thread::sleep(Duration::from_millis(200));'
+    Check = "lifecycle"
+  },
   @{
     Name = "minify-with-esbuild"
     What = "minify with the bundler that breaks xterm's enums"

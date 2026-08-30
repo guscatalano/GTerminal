@@ -4755,7 +4755,42 @@ async function checkDaemonVersion(sessions: SessionInfo[]) {
   const later = document.createElement("button");
   later.className = "set-control";
   later.textContent = "Not now";
-  bar.append(note, go, later);
+  // The third option, and the only one that costs nothing: the daemon
+  // stops taking work and goes when its last shell does, so the new build
+  // takes over without anybody losing a session. Offered only when there
+  // is something to lose - with no live shells "Restart it" is already
+  // free and a second button would just be a choice to make for no reason.
+  const atRisk = shellsAtRisk(sessions);
+  const whenIdle = document.createElement("button");
+  whenIdle.className = "set-control";
+  whenIdle.textContent = "When my shells end";
+  whenIdle.title =
+    "Keeps everything running. The old service stops on its own once the last shell is gone, and the new one takes over then.";
+  if (atRisk > 0) bar.append(note, whenIdle, go, later);
+  else bar.append(note, go, later);
+  whenIdle.addEventListener("click", () => {
+    whenIdle.disabled = true;
+    go.disabled = true;
+    void (async () => {
+      try {
+        const r = await invoke<{ live?: number }>("retire_daemon");
+        const n = r?.live ?? atRisk;
+        note.textContent =
+          n > 0
+            ? `The background service will hand over when your last ${n === 1 ? "shell ends" : `${n} shells end`}. Nothing to do.`
+            : "Handing over now.";
+        logUi("daemon.retire", { live: n });
+      } catch {
+        // Too old to know the request - which is the case this whole
+        // notice exists for, so say what is actually available rather
+        // than reporting a failure nobody can act on.
+        note.textContent =
+          "This background service is too old to hand over on its own. Restarting is the only way, and it ends your shells.";
+        go.disabled = false;
+      }
+      whenIdle.remove();
+    })();
+  });
   later.addEventListener("click", () => bar.remove());
   go.addEventListener("click", () => {
     go.disabled = true;

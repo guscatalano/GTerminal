@@ -1024,6 +1024,69 @@ try {
   else { Fail "second-daemon" "the first daemon answered without ok: $($still | ConvertTo-Json -Compress)" }
 } catch { Fail "second-daemon" "the first daemon stopped answering: $_" }
 
+# ════ standing down gracefully ════
+# A Store update replaces the package while the daemon keeps running, so a
+# new window meets the previous release's daemon. Killing it was the only
+# way to replace it, and killing it ends every shell it holds.
+$sdPort = Start-Daemon
+$sdPid = $script:daemons[-1]
+
+# Retire while a shell is live: it must stay up, and say what it is
+# waiting for.
+$sdId = (Request2 $sdPort '{"cmd":"create","cols":80,"rows":24}').id
+$sdRetire = Request2 $sdPort '{"cmd":"shutdown","when_idle":true}'
+Start-Sleep -Seconds 1
+# Alive AND answering. A process that is still listed but no longer
+# serving is not "stayed up" in any sense the caller cares about.
+$sdStillUp = $null -ne (Get-Process -Id $sdPid -ErrorAction SilentlyContinue)
+if ($sdStillUp) {
+  try { $sdStillUp = (Request2 $sdPort '{"cmd":"list"}').ok -eq $true } catch { $sdStillUp = $false }
+}
+if ($sdRetire.ok -and $sdRetire.retiring -and $sdRetire.live -ge 1) {
+  Pass "a retiring daemon says how many shells it is waiting on"
+} else { Fail "retire" "expected ok/retiring/live>=1, got $($sdRetire | ConvertTo-Json -Compress)" }
+if ($sdStillUp) { Pass "and stays up while one is still running" }
+else { Fail "retire" "the daemon exited with a live session" }
+
+# Now end it. The daemon should go on its own, with nothing killed.
+# Guarded: with the retire rule broken the daemon is already gone by now,
+# and an unguarded request throws and takes the whole suite down with it -
+# which reports the bug as a crash rather than as the one assertion that
+# is actually wrong.
+$sdKilled = $true
+try {
+  $null = Request2 $sdPort ('{"cmd":"kill","id":' + $sdId + '}')
+  $null = Request2 $sdPort ('{"cmd":"kill","id":' + $sdId + '}')   # twice: skip the grace window
+} catch { $sdKilled = $false }
+if (-not $sdKilled) { Fail "retire" "the daemon stopped answering before its last shell ended" }
+$sdGone = $false
+foreach ($i in 1..60) {
+  Start-Sleep -Milliseconds 250
+  if (-not (Get-Process -Id $sdPid -ErrorAction SilentlyContinue)) { $sdGone = $true; break }
+}
+if ($sdGone) { Pass "and stands down by itself once the last shell ends" }
+else { Fail "retire" "the daemon was still running after its last session ended" }
+
+# The immediate form: checkpoint and exit on request, rather than being
+# killed mid-write.
+$sd2Port = Start-Daemon
+$sd2Pid = $script:daemons[-1]
+$null = Request2 $sd2Port '{"cmd":"create","cols":80,"rows":24}'
+$sd2Reply = Request2 $sd2Port '{"cmd":"shutdown"}'
+$sd2Gone = $false
+foreach ($i in 1..40) {
+  Start-Sleep -Milliseconds 250
+  if (-not (Get-Process -Id $sd2Pid -ErrorAction SilentlyContinue)) { $sd2Gone = $true; break }
+}
+if ($sd2Reply.ok -and $sd2Reply.exiting) { Pass "an immediate shutdown is acknowledged before it goes" }
+else { Fail "shutdown" "expected ok/exiting, got $($sd2Reply | ConvertTo-Json -Compress)" }
+if ($sd2Gone) { Pass "and the daemon actually exits" }
+else { Fail "shutdown" "the daemon was still running after being asked to stop" }
+# Checkpointed on the way out, not left as whatever the last flush caught.
+$sd2Meta = @(Get-ChildItem "$env:LOCALAPPDATA\GTerminal\sessions" -Filter *.json -ErrorAction SilentlyContinue)
+if ($sd2Meta.Count -ge 1) { Pass "and wrote its sessions to disk before exiting" }
+else { Fail "shutdown" "no session checkpoint was written on shutdown" }
+
 # ════ cleanup ════
 foreach ($d in $script:daemons) {
   if (Get-Process -Id $d -ErrorAction SilentlyContinue) { Stop-DaemonTree $d }
