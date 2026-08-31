@@ -113,7 +113,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "selectright", "selectmax", "pasteboth", "maxtop", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "selectright", "selectmax", "pasteboth", "tabkeys", "maxtop", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -2736,6 +2736,56 @@ if (-not $Only -or $Only -eq "selectright") {
   }
   Write-Host "  frames saved to $dump" -ForegroundColor DarkGray
   Stop-App $ctx31
+}
+
+# ══ scene: a shortcut straight after clicking a tab ═════════════
+# Reported: "if i click on a tab and then do control+tab it doesnt work
+# until i click the shell".
+#
+# The switch scene already presses Ctrl+Tab and passes - but it types into
+# the tab first, and typing is itself what puts focus back on the
+# terminal. So the sequence in the report, a click followed immediately by
+# a shortcut with nothing in between, has never been tested. Shortcuts are
+# read by the terminal's key handler, so anything that leaves focus off the
+# terminal makes them silently do nothing.
+if (-not $Only -or $Only -eq "tabkeys") {
+  $ctxTK = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7}"
+  $hTK = $ctxTK.Hwnd
+  Record-Scene "tabkeys" 50 $ctxTK {
+    $null = Wait-Prompt 1
+    Run-Cmd 'echo tabkeys-one' 2
+    Key 0x54 @([byte]$VK_CTRL, [byte]$VK_SHIFT)   # Ctrl+Shift+T
+    $null = Wait-Prompt 2
+    Run-Cmd 'echo tabkeys-two' 2
+
+    # Click the FIRST tab, then press Ctrl+Tab with nothing in between -
+    # no typing, which would restore focus and hide the bug.
+    Click $hTK 120 33
+    Start-Sleep -Seconds 2
+    Key 0x09 @([byte]$VK_CTRL)                    # Ctrl+Tab
+    Start-Sleep -Seconds 2
+    # Whichever tab is now active gets this. Which transcript it lands in
+    # is the answer: Ctrl+Tab worked if it is not the one just clicked.
+    Send-Text 'echo TKMARK-55555'
+    Key $VK_RETURN
+    Start-Sleep -Seconds 3
+    $script:tkOut = Transcripts
+    $script:tkLogs = @(Get-ChildItem "$scratch\GTerminal\history" -Filter *.log -ErrorAction SilentlyContinue |
+      Sort-Object Name)
+  }
+  # The marker has to have arrived somewhere at all first, or nothing
+  # below distinguishes "the shortcut did nothing" from "the keystrokes
+  # went nowhere".
+  if ($tkOut -match "TKMARK-55555") { Pass "the keystrokes after the click reached a shell" }
+  else { Fail "tabkeys" "nothing typed after clicking the tab reached any shell - focus was lost entirely" }
+  # Tab one holds tabkeys-one. If the marker is in that same transcript,
+  # Ctrl+Tab did not move anywhere.
+  $tkOne = @($tkLogs | Where-Object { (Get-Content $_.FullName -Raw) -match "tabkeys-one" }) | Select-Object -First 1
+  $tkMarkInOne = $tkOne -and ((Get-Content $tkOne.FullName -Raw) -match "TKMARK-55555")
+  Write-Host ("  the marker landed in {0}" -f $(if ($tkMarkInOne) { "the tab that was clicked - Ctrl+Tab did nothing" } else { "the other tab - Ctrl+Tab moved" })) -ForegroundColor DarkGray
+  if (-not $tkMarkInOne) { Pass "Ctrl+Tab works straight after clicking a tab" }
+  else { Fail "tabkeys" "Ctrl+Tab did nothing until the shell was clicked - this is the reported bug" }
+  Stop-App $ctxTK
 }
 
 # ══ scene: the two ways to paste ═══════════════════════════

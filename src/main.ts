@@ -4333,7 +4333,21 @@ async function createTab(
   }
 
   const tab: Tab = { id, term, fit, pane, button, label, icon, shellB, webgl, search, blocks };
+  // Register and drain in one step, before anything else can await.
+  //
+  // Output produced between create_session and this line goes to `pending`
+  // because there is no tab to route it to yet. The moment tabs.set runs,
+  // NEW output goes straight to the terminal - so draining any later than
+  // this writes the shell's first bytes after bytes that came behind them.
+  // The gap used to be three hundred lines of DOM setup, and it widens on
+  // a slow machine, which is the shape of a bug that only shows up on a
+  // loaded CI runner.
   tabs.set(id, tab);
+  const backlog = pending.get(id);
+  if (backlog) {
+    pending.delete(id);
+    for (const chunk of backlog) term.write(chunk);
+  }
   if (asPreview) void showEndedPreview(id);
 
   button.addEventListener("mousedown", (e) => {
@@ -4662,12 +4676,6 @@ async function createTab(
   paneOut.addEventListener("click", () => promotePane(id));
   paneBar.appendChild(paneOut);
   pane.appendChild(paneBar);
-
-  const backlog = pending.get(id);
-  if (backlog) {
-    pending.delete(id);
-    for (const chunk of backlog) term.write(chunk);
-  }
 
   if (splitFrom === undefined) {
     renderLayout(id);
