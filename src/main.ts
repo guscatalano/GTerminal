@@ -38,7 +38,7 @@ import {
 } from "./restore";
 import type { SessionState } from "./restore";
 import { SHORTCUTS } from "./shortcuts";
-import { staleDaemon, shellsAtRisk, daemonNotice } from "./daemon";
+import { daemonAction, shellsAtRisk, daemonNotice } from "./daemon";
 import type { DaemonInfo } from "./daemon";
 import { activates } from "./menus";
 import { visibilityReport } from "./controls";
@@ -4743,7 +4743,18 @@ function removeTab(id: number, closeWindowIfLast = true) {
 /// price attached. See docs/daemon-protocol.md.
 async function checkDaemonVersion(sessions: SessionInfo[]) {
   const info = await invoke<DaemonInfo & { required?: number }>("daemon_info").catch(() => null);
-  if (!info || !staleDaemon(info, info.required ?? 0)) return;
+  if (!info) return;
+  const action = daemonAction(info, info.required ?? 0);
+  if (action === "none") return;
+  // It can hand over by itself, so there is nothing worth interrupting
+  // anyone for: it keeps serving, and goes when the last shell does.
+  // Silence is the correct amount of ceremony for an update that costs
+  // nothing.
+  if (action === "retire") {
+    const r = await invoke<{ live?: number }>("retire_daemon").catch(() => null);
+    logUi("daemon.retire", { auto: true, from: info.version, to: info.app, live: r?.live ?? null });
+    return;
+  }
   const bar = document.createElement("div");
   bar.className = "daemon-notice";
   const note = document.createElement("span");

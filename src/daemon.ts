@@ -15,6 +15,51 @@ export interface DaemonInfo {
   protocol?: number;
   version?: string;
   pid?: number;
+  /// What this daemon can be asked to do beyond the protocol number.
+  /// Absent on anything older than the shutdown verb.
+  can?: string[];
+  /// The version of the window asking. Supplied by the Rust side so the
+  /// comparison is not two constants that can drift apart.
+  app?: string;
+}
+
+/// How the window should replace a daemon that is not the one belonging
+/// to this build.
+///
+///   "none"    - it is current, or newer. Leave it alone.
+///   "retire"  - it can stand down on its own. Ask, say nothing, lose
+///               nothing; it hands over when the last shell ends.
+///   "ask"     - it is too old to stand down. Only a restart will do it,
+///               and that ends the shells, so a person decides.
+export type DaemonAction = "none" | "retire" | "ask";
+
+/// Compare two versions numerically. "0.12.9" and "0.12.10" get this
+/// backwards as text, and that is the pair this had to separate.
+function olderThan(a: string, b: string): boolean {
+  const pa = a.split(".").map((n) => Number(n) || 0);
+  const pb = b.split(".").map((n) => Number(n) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? 0;
+    const y = pb[i] ?? 0;
+    if (x !== y) return x < y;
+  }
+  return false;
+}
+
+/// What to do about the daemon on the other end.
+///
+/// Version, not just protocol. Measured on a real machine: a 0.12.3
+/// daemon serving eight live sessions under a 0.12.9 app, considered
+/// perfectly current because both speak protocol 2 - so every daemon-side
+/// fix in six releases had never reached it. Protocol answers "can these
+/// two talk"; it does not answer "is this the daemon that belongs to this
+/// build", and only the second question notices that.
+export function daemonAction(info: DaemonInfo, required: number): DaemonAction {
+  const behind =
+    staleDaemon(info, required) ||
+    (!!info.app && !!info.version && olderThan(info.version, info.app));
+  if (!behind) return "none";
+  return info.can?.includes("shutdown") ? "retire" : "ask";
 }
 
 /// Is this daemon too old for what the window wants to do?

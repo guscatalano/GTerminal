@@ -1808,6 +1808,22 @@ fn conn_loop(
                         "protocol": PROTOCOL,
                         "version": env!("GTERMINAL_VERSION"),
                         "pid": std::process::id(),
+                        // What this daemon can be asked to do, beyond the
+                        // protocol number.
+                        //
+                        // The protocol says what a client may send; this
+                        // says what is worth offering a person. Shutdown
+                        // deliberately did not bump PROTOCOL - doing so
+                        // would mark every running daemon stale and show
+                        // its user a restart notice - so without this the
+                        // window has no way to know whether "hand over
+                        // when my shells end" will work, and would offer a
+                        // button that fails on exactly the daemons the
+                        // notice exists for.
+                        //
+                        // Additive: a daemon older than this omits it, and
+                        // an absent list means "assume nothing".
+                        "can": ["shutdown"],
                     }),
                 )?;
             }

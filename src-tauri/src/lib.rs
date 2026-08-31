@@ -341,6 +341,14 @@ fn daemon_info() -> Result<Value, String> {
         "protocol": v.get("protocol"),
         "version": v.get("version"),
         "pid": v.get("pid"),
+        // Absent on any daemon older than the shutdown verb, which is
+        // exactly how the window tells the two cases apart.
+        "can": v.get("can"),
+        // The version the window is, so "is this daemon the one that
+        // belongs to this build" is answerable at all. Protocol alone
+        // cannot answer it: a daemon several releases old can be protocol
+        // -compatible and still be missing every daemon-side fix since.
+        "app": env!("GTERMINAL_VERSION"),
         // What the *window* needs, so the comparison is not duplicated in
         // two languages that can drift apart.
         "required": mux::PROTOCOL,

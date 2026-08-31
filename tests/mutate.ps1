@@ -263,6 +263,22 @@ $mutations = @(
     Check = "lifecycle"
   },
   @{
+    Name = "daemon-staleness-ignores-version"
+    What = "call a daemon six releases old current because the protocol matches"
+    File = "src/daemon.ts"
+    Find = '    (!!info.app && !!info.version && olderThan(info.version, info.app));'
+    With = '    false;'
+    Check = "node"
+  },
+  @{
+    Name = "daemon-versions-compared-as-text"
+    What = "compare versions as text, so 0.12.9 looks newer than 0.12.10"
+    File = "src/daemon.ts"
+    Find = '  const pa = a.split(".").map((n) => Number(n) || 0);'
+    With = '  if (true) return a < b;' + "`n" + '  const pa = a.split(".").map((n) => Number(n) || 0);'
+    Check = "node"
+  },
+  @{
     Name = "minify-with-esbuild"
     What = "minify with the bundler that breaks xterm's enums"
     File = "vite.config.ts"
@@ -338,6 +354,10 @@ function Invoke-Check {
         & npm run test:lifecycle 2>&1 | Out-String -OutVariable out | Out-Null
         return @{ Failed = ($LASTEXITCODE -ne 0); Output = $out }
       }
+      '^node$' {
+        & node tests/daemon.mjs 2>&1 | Out-String -OutVariable out | Out-Null
+        return @{ Failed = ($LASTEXITCODE -ne 0); Output = $out }
+      }
       '^rust$' {
         & cargo test --manifest-path src-tauri/Cargo.toml --lib 2>&1 | Out-String -OutVariable out | Out-Null
         return @{ Failed = ($LASTEXITCODE -ne 0); Output = $out }
@@ -370,7 +390,7 @@ foreach ($m in $mutations) {
     # would also make a mutation that does not compile abort the whole run
     # instead of being reported as the one entry it is.
     if ($m.Check -eq "bundle") { Push-Location $repo; & npm run build 2>&1 | Out-Null; Pop-Location }
-    elseif ($m.Check -eq "rust") { }
+    elseif ($m.Check -eq "rust" -or $m.Check -eq "node") { }
     else { $exe = Build-For $m.Check }
     $r = Invoke-Check $m.Check $exe
     if ($r.Failed) {
