@@ -744,9 +744,20 @@ if (-not $Only -or $Only -eq "pwsh") {
     # Split, use the new pane, arrange, leave.
     Key 0x44 @([byte]$VK_CTRL, [byte]$VK_SHIFT)   # Ctrl+Shift+D
     # A split is a new session, and three seconds is not enough for one to
-    # start on a runner - "the second pane never ran anything" was this,
-    # not the split.
+    # start on a runner.
     $null = Wait-Prompt 2
+    # Which of two very different failures this is, when it fails.
+    #
+    # "The second pane never ran anything" fits both a split that never
+    # created a session and a session whose shell never reached a prompt,
+    # and they need opposite fixes. Measured headlessly, the daemon starts
+    # two back-to-back sessions perfectly well, so the answer is here: if
+    # the daemon holds two sessions the split worked and the shell is the
+    # problem; if it holds one, the split never happened.
+    $script:pwshSessions = @(Daemon-Sessions)
+    Write-Host ("  after the split the daemon holds {0} session(s): {1}" -f
+      $pwshSessions.Count,
+      (($pwshSessions | ForEach-Object { "$($_.id)(alive=$($_.alive))" }) -join " ")) -ForegroundColor DarkGray
     Run-Cmd 'echo "second pane"' 2
     Key 0x41 @([byte]$VK_CTRL, [byte]$VK_SHIFT)   # Ctrl+Shift+A: arrange
     Start-Sleep -Seconds 3
