@@ -2292,13 +2292,14 @@ if (-not $Only -or $Only -eq "closeall") {
   Write-Host ("  sessions after close:  {0}" -f (($afterClose | ForEach-Object { "$($_.id)(alive=$($_.alive),att=$($_.attached))" }) -join " ")) -ForegroundColor DarkGray
   if ($U::IsWindowVisible($h23)) { Pass "closing every tab leaves the window on screen" }
   else { Fail "closeall" "the window went away when the last tab was closed" }
+  # Dumped either way. This scene chases a race, and the sequence a
+  # PASSING run produces is half the evidence - without it there is
+  # nothing to compare a failure against.
+  Dump-Transcripts "closeall"
+  Dump-UiLog 40 "pty\.|error|session"
   if ($closeAllOut -match "24681") { Pass "and what is left is a live shell, not an empty frame" }
   else {
     Fail "closeall" "nothing ran after the last tab closed - the window is there but has no working tab"
-    # Which of the two it is: a replacement session that was never given a
-    # shell, or one whose shell started and was never typed into.
-    Dump-Transcripts "closeall"
-    Dump-UiLog 40 "pty\.|error|session"
   }
   # Guard: the close has to have happened. Without this the scene passes
   # on a window whose tab was never closed - which it did, twice, before
