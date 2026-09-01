@@ -259,14 +259,26 @@ function Press-OnDialog {
   # reports what it measured afterwards: no sessions restored, no sessions
   # closing - which reads as the app ignoring the answer rather than as
   # the answer never being given. Returns whether the press landed.
-  param($hwnd, [byte]$vk, [int]$timeoutSec = 45, [double]$floor = 0.001)
+  param($hwnd, [byte]$vk, [int]$timeoutSec = 45, [double]$floor = 0.001, [int]$answerSec = 25)
   $null = Wait-Settled $hwnd $timeoutSec
   $before = Capture-Window $hwnd
   Key $vk
-  Start-Sleep -Seconds 2
-  $after = Capture-Window $hwnd
-  $moved = Frame-Diff $before $after -IgnoreBottom 40
-  $before.Dispose(); $after.Dispose()
+  # Poll for the answer rather than looking once, two seconds later.
+  # Pressing Enter here starts six sessions attaching, and on a loaded
+  # runner the screen has not moved yet when a fixed wait expires - so a
+  # press that landed perfectly well was reported as never having landed,
+  # and the whole rest of the scene was skipped on the strength of it.
+  # This is the same assertion, given room: the screen still has to answer.
+  $moved = 0.0
+  $deadline = (Get-Date).AddSeconds($answerSec)
+  while ((Get-Date) -lt $deadline) {
+    Start-Sleep -Milliseconds 400
+    $after = Capture-Window $hwnd
+    $moved = Frame-Diff $before $after -IgnoreBottom 40
+    $after.Dispose()
+    if ($moved -gt $floor) { break }
+  }
+  $before.Dispose()
   $moved -gt $floor
 }
 
@@ -443,6 +455,24 @@ function Wait-Prompt {
 # character being dropped, which is the bug this scene exists to catch:
 # waiting only for the whole marker would sit out the full timeout before
 # reporting it, and waiting for neither would race the transcript.
+# A condition to poll rather than a duration to guess.
+#
+# The suite's recurring failure shape: do a thing, sleep a fixed number of
+# seconds, then measure. On a loaded runner the thing has not finished, the
+# measurement is taken of a half-finished state, and the scene reports the
+# app as broken. Every sleep replaced by one of these is a scene that can
+# no longer fail for being early.
+function Wait-Until {
+  param([scriptblock]$cond, [int]$timeoutSec = 45, [string]$what = "the expected state")
+  $deadline = (Get-Date).AddSeconds($timeoutSec)
+  while ((Get-Date) -lt $deadline) {
+    if (& $cond) { return $true }
+    Start-Sleep -Milliseconds 400
+  }
+  Write-Host "  note: $what did not arrive in ${timeoutSec}s" -ForegroundColor DarkYellow
+  return $false
+}
+
 $ESCCH = [char]27
 $OSC133 = "$([char]27)]133;A"
 
@@ -1040,7 +1070,9 @@ if (-not $Only -or $Only -eq "restore") {
   Record-Scene "restore" 30 $ctx2 {
     # Wait for the question to be up rather than for four seconds.
     $script:restorePressed = Press-OnDialog $hw $VK_RETURN
-    Start-Sleep -Seconds 12         # the spinner, then six tabs
+    # The spinner, then six tabs. Twelve seconds was the guess; the daemon
+    # knows when they have actually attached, so ask it.
+    $null = Wait-Until { @(Daemon-Sessions | Where-Object { $seed.Ids -contains $_.id -and $_.attached }).Count -ge 6 } 60 "six sessions attaching"
   }
   if (-not $restorePressed) { Fail "restore" "the restore question never took a keypress - nothing below was tested" }
   $now = Daemon-Sessions
@@ -1058,9 +1090,11 @@ if (-not $Only -or $Only -eq "restore") {
     Key 0x57 @([byte]$VK_CTRL, [byte]$VK_SHIFT)
     Start-Sleep -Milliseconds 300
     Key 0x57 @([byte]$VK_CTRL, [byte]$VK_SHIFT)
-    Start-Sleep -Seconds 2
+    # Each close has to register before the next pair of presses, or the
+    # second close arms a tab that is already going and the count comes up
+    # short - which reads as the app failing to put them in Closing soon.
+    $null = Wait-Until { @(Daemon-Sessions | Where-Object { $seed.Ids -contains $_.id -and $_.expires_ms }).Count -ge $i } 20 "close $i landing"
   }
-  Start-Sleep -Seconds 2
   $after = Daemon-Sessions
   $closing = @($after | Where-Object { $seed.Ids -contains $_.id -and $_.expires_ms })
   if ($closing.Count -eq 3) { Pass "closing three tabs puts all three in Closing soon" }
@@ -1663,7 +1697,13 @@ if (-not $Only -or $Only -eq "vim") {
       # -u NONE: no config, so this tests the terminal rather than
       # whatever plugins happen to be installed.
       Run-Cmd "& '$vim' -u NONE -N" 0
-      Start-Sleep -Seconds 6
+      # Wait for vim to say it has taken the screen, then for it to finish
+      # painting. Deliberately NOT a wait for the picture to change: the
+      # assertions below measure exactly that, and a scene that waits for
+      # what it is about to assert proves nothing. ?1049h is vim entering
+      # the alternate screen, which is a fact on the wire.
+      $null = Wait-Mark @("?1049h") 45
+      $null = Wait-Settled $h16 20
       $script:vimOpen = Capture-Window $h16
       Send-Text "i"
       Start-Sleep -Milliseconds 400
