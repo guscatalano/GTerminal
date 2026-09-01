@@ -116,12 +116,33 @@ function Run-Await {
 function Wait-Ready {
   param($conn, [int]$timeoutSec = 60)
   $out = ""
+  $answered = 0
   $deadline = (Get-Date).AddSeconds($timeoutSec)
   while ((Get-Date) -lt $deadline) {
     $out += Drain2 $conn 400
+    # Answer the shell's cursor-position question WHEN IT IS ASKED, the way
+    # a terminal does.
+    #
+    # These tests used to fire the answer blindly, once, straight after
+    # attaching. A shell under ConPTY draws nothing until it is answered,
+    # and it usually asks in the gap around the attach - so if the answer
+    # went first it was consumed as stray input, the question came after
+    # it, and nothing ever replied. The shell then sat there forever and
+    # the test reported whatever it was really about: a session that "did
+    # not spawn", a shell that "stopped responding after extreme resizes".
+    #
+    # The daemon only started handing the question to a client that
+    # attaches after it was asked in "Deliver the question the shell is
+    # waiting on"; before that it was stripped from the replay and blind
+    # answering was the only thing available.
+    $asked = [regex]::Matches($out, [regex]::Escape('\u001b[6n')).Count
+    while ($answered -lt $asked) {
+      $conn.Writer.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')
+      $answered++
+    }
     if ($out -like "*]133;A*") { return $out }
   }
-  Write-Host "  note: no prompt mark after ${timeoutSec}s - the shell never drew a prompt" -ForegroundColor DarkYellow
+  Write-Host "  note: no prompt mark after ${timeoutSec}s - the shell never drew a prompt (answered $answered cursor query/queries)" -ForegroundColor DarkYellow
   $out
 }
 
@@ -852,8 +873,11 @@ $rz = (Request2 $port '{"cmd":"create","cols":80,"rows":24}').id
 $rc = New-Conn $port
 $rc.Writer.WriteLine("{""cmd"":""attach"",""id"":$rz}")
 $null = Read-Line2 $rc
-$rc.Writer.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')
-Start-Sleep -Seconds 4
+# Wait for the shell to actually be up, answering its cursor query when it
+# asks, instead of firing the answer blindly and sleeping four seconds. A
+# shell that never got its answer is not a shell wedged by the resizes
+# below, but that is exactly what this reported.
+$null = Wait-Ready $rc 60
 foreach ($dim in '{"cols":0,"rows":0}', '{"cols":1,"rows":1}', '{"cols":9999,"rows":9999}', '{"cols":120,"rows":30}') {
   $rc.Writer.WriteLine("{""cmd"":""resize""," + $dim.Substring(1))
   Start-Sleep -Milliseconds 300
