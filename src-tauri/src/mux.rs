@@ -61,10 +61,24 @@ const HISTORY_MAX: u64 = 10 * 1024 * 1024;
 /// `Request::Attach`.
 fn replay_for(ring: &[u8], undelivered: bool) -> String {
     let text = String::from_utf8_lossy(ring);
-    if undelivered {
+    let stripped = strip_queries(&text);
+    // Deliver the questions only while the shell has said NOTHING else.
+    //
+    // A shell waiting on its opening handshake has drawn nothing at all -
+    // that is the whole symptom - so a ring that is nothing but questions
+    // is a shell still waiting to be answered, and the answer is owed.
+    // The moment there is any real output in it, the shell got past its
+    // handshake and anything still in there is a recording.
+    //
+    // "Never attached" on its own was too broad: a session created and
+    // left unattached accumulates a full scrollback, and handing that over
+    // unstripped replays every question in it - which is the "random
+    // characters in every new window" bug, put back. The restore scene
+    // caught that, because it seeds sessions without ever attaching them.
+    if undelivered && stripped.trim().is_empty() {
         text.into_owned()
     } else {
-        strip_queries(&text)
+        stripped
     }
 }
 
@@ -756,9 +770,25 @@ mod handshake_tests {
     }
 
     #[test]
-    fn undelivered_output_is_otherwise_untouched() {
-        let ring = "hello\r\n\x1b[32mgreen\x1b[0m\r\n";
+    fn a_ring_of_nothing_but_questions_is_delivered_whole() {
+        // Two questions and no output: the shell is still waiting, and both
+        // are owed an answer.
+        let ring = format!("{DSR}[c");
         assert_eq!(replay_for(ring.as_bytes(), true), ring);
+    }
+
+    #[test]
+    fn a_shell_that_has_already_spoken_keeps_its_questions_stripped() {
+        // The hole in the first version of this rule. "Never attached" on
+        // its own was too broad: a session created and left unattached goes
+        // on collecting output, and handing all of that over unstripped
+        // replays every question in it - the "random characters in every new
+        // window" bug, put back. The restore scene caught it, because it
+        // seeds sessions without ever attaching them.
+        let ring = format!("PS C:> {DSR}");
+        let out = replay_for(ring.as_bytes(), true);
+        assert!(!out.contains(DSR), "a shell that has drawn a prompt is not waiting: {out:?}");
+        assert!(out.contains("PS C:"), "its output must still come through: {out:?}");
     }
 
     #[test]
