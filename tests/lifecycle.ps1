@@ -1087,8 +1087,12 @@ foreach ($zrShell in "pwsh", "cmd") {
   $zr = New-Conn $zrPort
   $zr.Writer.WriteLine("{""cmd"":""attach"",""id"":$zrId}")
   $null = Read-Line2 $zr
-  $zr.Writer.WriteLine('{"cmd":"write","data":"[1;1R"}')
-  $null = Wait-Ready $zr
+  # This used to send a RAW escape byte inside the JSON string, which is
+  # not valid JSON: the daemon rejected the message, so the cursor report
+  # never arrived, the shell never drew a prompt, and "survives being
+  # resized to nothing" was asserted about a shell that had never
+  # started. It passed for that reason rather than on merit.
+  $null = Wait-Ready-Answering $zr
   # Checked after EVERY size, not once at the end. Done once at the end
   # this test did not notice the clamp being removed at all: a session
   # whose shell has ended leaves `live`, so the whole row disappears and
