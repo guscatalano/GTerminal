@@ -443,6 +443,9 @@ function Wait-Prompt {
 # character being dropped, which is the bug this scene exists to catch:
 # waiting only for the whole marker would sit out the full timeout before
 # reporting it, and waiting for neither would race the transcript.
+$ESCCH = [char]27
+$OSC133 = "$([char]27)]133;A"
+
 # What each shell actually produced, for when "nothing ran" is the finding.
 #
 # A scene that reports only the assertion it failed sends the next person
@@ -457,11 +460,18 @@ function Dump-Transcripts {
   foreach ($l in $logs) {
     $raw = Get-Content $l.FullName -Raw -ErrorAction SilentlyContinue
     if ($null -eq $raw) { $raw = "" }
-    $prompted = if ($raw -match "`e\]133;A") { "prompt" } else { "NO PROMPT" }
-    # Escapes stripped: a transcript is mostly cursor moves, and the point
-    # here is which words reached the shell.
-    $text = ($raw -replace "`e\][^`a`e]*(`a|`e\)", "") -replace "`e\[[0-9;?]*[a-zA-Z]", ""
-    $tail = (($text -split "`r?`n" | Where-Object { $_.Trim() -ne "" }) | Select-Object -Last 2) -join " | "
+    $prompted = if ($raw.IndexOf($OSC133) -ge 0) { "prompt" } else { "NO PROMPT" }
+    # Escapes stripped, so the tail reads as words rather than as cursor
+    # moves. Built from char codes and applied with [regex]::Replace: the
+    # first version wrote the ESC and BEL inline in a double-quoted
+    # PowerShell string and .NET was handed a pattern with the control
+    # characters already substituted into it, which it rejected outright -
+    # so the scene threw while reporting a failure and printed nothing.
+    $text = [regex]::Replace($raw, "$ESCCH\][^$ESCCH]*", "")
+    $text = [regex]::Replace($text, "$ESCCH\[[0-9;?]*[ -/]*[@-~]", "")
+    $text = [regex]::Replace($text, "[^ -~`r`n]", "")
+    $lines = @($text -split "`r?`n" | Where-Object { $_.Trim() -ne "" })
+    $tail = ($lines | Select-Object -Last 2) -join " | "
     if ($tail.Length -gt 160) { $tail = $tail.Substring($tail.Length - 160) }
     Write-Host ("  {0}  {1,9} bytes  {2}  {3}" -f $l.Name, $raw.Length, $prompted, $tail) -ForegroundColor DarkGray
   }
