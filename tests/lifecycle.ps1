@@ -473,7 +473,10 @@ $j = New-Conn $port
 $j.Writer.WriteLine("{""cmd"":""attach"",""id"":$id6}")
 $null = Read-Line2 $j
 $j.Writer.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')
-Start-Sleep -Seconds 6
+# Six seconds was a guess, and on a loaded runner a shell still starting
+# looks exactly like one that failed to spawn - which is what this
+# reported. Wait for the prompt it draws when it is actually up.
+$null = Wait-Ready $j 45
 $s = Get-Sessions $port | Where-Object id -eq $id6
 if ($null -eq $s -or -not $s.alive) { Fail "default-cwd-fallback" "session did not spawn with bad default_cwd" }
 elseif ($s.cwd -like "*does*not*exist*") { Fail "default-cwd-fallback" "cwd=$($s.cwd)" }
@@ -856,9 +859,11 @@ foreach ($dim in '{"cols":0,"rows":0}', '{"cols":1,"rows":1}', '{"cols":9999,"ro
   Start-Sleep -Milliseconds 300
 }
 Start-Sleep -Seconds 1
-$rc.Writer.WriteLine('{"cmd":"write","data":"echo resize-survivor\r"}')
-Start-Sleep -Seconds 3
-if ((Drain2 $rc 800) -like "*resize-survivor*") { Pass "a session survives absurd resizes" }
+# Asked until it answers. A shell a few seconds slower than the guess is
+# not a shell that "stopped responding after extreme resizes", which is
+# what a single look three seconds later reported.
+$rzOut = Retry-Until $rc 'echo resize-survivor\r' { param($o) $o -like "*resize-survivor*" } 30
+if ($rzOut -like "*resize-survivor*") { Pass "a session survives absurd resizes" }
 else { Fail "resize-extremes" "the session stopped responding after extreme resizes" }
 $rc.Client.Close()
 foreach ($k in @($keep, $rz)) {

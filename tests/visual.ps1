@@ -250,6 +250,30 @@ function Wait-Drawn {
   $frame
 }
 
+# Press a key until it actually does the thing, or say it never did.
+#
+# Press-OnDialog judges a press by the screen moving, which is all it can
+# do for a gesture with no other witness. That is a weak test in both
+# directions: it used to look once, two seconds after the press, and call
+# a slow answer no answer - and once it was given time to poll, it started
+# accepting a cursor blink as proof. A press that never landed then sailed
+# through and the scene failed further down, reporting "expected 6
+# attached, got 0" instead of "nobody heard the key".
+#
+# Where the press has a real consequence, wait for the consequence, and
+# press again if it does not come. Synthetic input to a foreground window
+# is genuinely lossy; the app is not on trial for a keystroke Windows
+# dropped, and the assertion is no weaker for retrying since the condition
+# is the thing the scene is actually about.
+function Press-Until {
+  param($hwnd, [byte]$vk, [scriptblock]$cond, [int]$tries = 3, [int]$perTrySec = 30, [string]$what = "the effect")
+  for ($t = 1; $t -le $tries; $t++) {
+    Key $vk
+    if (Wait-Until $cond $perTrySec "$what (press $t of $tries)") { return $true }
+  }
+  return $false
+}
+
 function Press-OnDialog {
   # Waits for the restore question to be up and still, then presses a key
   # and checks the screen answered.
@@ -1069,10 +1093,13 @@ if (-not $Only -or $Only -eq "restore") {
   $hw = $ctx2.Hwnd
   Record-Scene "restore" 30 $ctx2 {
     # Wait for the question to be up rather than for four seconds.
-    $script:restorePressed = Press-OnDialog $hw $VK_RETURN
-    # The spinner, then six tabs. Twelve seconds was the guess; the daemon
-    # knows when they have actually attached, so ask it.
-    $null = Wait-Until { @(Daemon-Sessions | Where-Object { $seed.Ids -contains $_.id -and $_.attached }).Count -ge 6 } 60 "six sessions attaching"
+    # Enter, judged by what it does rather than by the screen twitching:
+    # the daemon knows when the six have actually attached. Twelve seconds
+    # was the old guess for "the spinner, then six tabs".
+    $null = Wait-Settled $hw 45
+    $script:restorePressed = Press-Until $hw $VK_RETURN {
+      @(Daemon-Sessions | Where-Object { $seed.Ids -contains $_.id -and $_.attached }).Count -ge 6
+    } 3 30 "six sessions attaching"
   }
   if (-not $restorePressed) { Fail "restore" "the restore question never took a keypress - nothing below was tested" }
   $now = Daemon-Sessions
