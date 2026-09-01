@@ -300,40 +300,48 @@ function Build-For {
   param([string]$check)
   Push-Location $repo
   try {
-    if ($check -like "visual:*") {
-      $env:CARGO_TARGET_DIR = $target
+    # Everything builds into this runner's own target directory, and the
+    # suites are pointed at it with -Exe.
+    #
+    # It used to build over src-tauri	arget\debug\gterminal.exe and stop
+    # whatever was holding that file first. That is somebody's terminal:
+    # the daily driver on this machine runs from exactly that path, and a
+    # mutation run would have killed it mid-session. It never fired only
+    # because the path had a corrupted string in it and matched nothing -
+    # fixing that typo is what made it dangerous, which is a poor way for
+    # a safety property to be held.
+    #
+    # Nothing here writes to the repo's target now, so nothing here has to
+    # kill anything to get at it.
+    $env:CARGO_TARGET_DIR = $target
+    try {
       & npm run build 2>&1 | Out-Null
-      & npx tauri build --debug --no-bundle 2>&1 | Out-Null
-      Remove-Item Env:CARGO_TARGET_DIR
-      $exe = Join-Path $target "debug\gterminal.exe"
-      if (-not (Test-Path $exe)) { throw "build produced no binary" }
-      return $exe
-    }
-    # A daemon left running holds the exe open and the build fails
-    # silently into a stale binary. Only ever this repo's own build.
-    $repoExe = Join-Path $repo 'src-tauri\target\debug\gterminal.exe'
-    Get-CimInstance Win32_Process | Where-Object { $_.Name -like "gterminal*" } | ForEach-Object {
-      # This repo's own build, and the copies the suites run from their
-      # scratch directories. Never anything under WindowsApps, which is
-      # somebody's installed app holding their live shells.
-      $mine = ($_.ExecutablePath -eq $repoExe) -or
-              ($_.ExecutablePath -like "*gterminal-*-test*") -or
-              ($_.ExecutablePath -like "$([regex]::Escape($target))*")
-      if ($mine -and $_.ExecutablePath -notlike "*WindowsApps*") {
-        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+      if ($check -like "visual:*") {
+        & npx tauri build --debug --no-bundle 2>&1 | Out-Null
+      } else {
+        $buildLog = & cargo build --manifest-path src-tauri/Cargo.toml 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) {
+          # Printed rather than swallowed: the first failure here was a
+          # daemon holding the exe open, and "cargo build failed" on its
+          # own sent the search in the wrong direction.
+          Write-Host $buildLog -ForegroundColor DarkGray
+          throw "cargo build failed"
+        }
       }
-    }
-    Start-Sleep -Seconds 1
-    & npm run build 2>&1 | Out-Null
-    $buildLog = & cargo build --manifest-path src-tauri/Cargo.toml 2>&1 | Out-String
-    if ($LASTEXITCODE -ne 0) {
-      # Printed rather than swallowed: the first failure here was a
-      # daemon holding the exe open, and "cargo build failed" on its own
-      # sent the search in the wrong direction.
-      Write-Host $buildLog -ForegroundColor DarkGray
-      throw "cargo build failed"
-    }
-    return $null
+    } finally { Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue }
+
+    $exe = Join-Path $target "debug\gterminal.exe"
+    if (-not (Test-Path $exe)) { throw "build produced no binary at $exe" }
+    # Leftovers from an earlier mutation hold this file open and turn the
+    # next build into a silently stale binary - which reports a mutation
+    # as uncaught when it was never built. Only ever this runner's own
+    # target, never the repo's and never WindowsApps.
+    Get-CimInstance Win32_Process | Where-Object {
+      $_.Name -like "gterminal*" -and
+      $_.ExecutablePath -like "$target*" -and
+      $_.ExecutablePath -notlike "*WindowsApps*"
+    } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    return $exe
   } finally { Pop-Location }
 }
 
@@ -351,7 +359,7 @@ function Invoke-Check {
         return @{ Failed = ($LASTEXITCODE -ne 0); Output = $out }
       }
       '^lifecycle$' {
-        & npm run test:lifecycle 2>&1 | Out-String -OutVariable out | Out-Null
+        & pwsh -NoProfile -File tests/lifecycle.ps1 -Exe $exe 2>&1 | Out-String -OutVariable out | Out-Null
         return @{ Failed = ($LASTEXITCODE -ne 0); Output = $out }
       }
       '^node$' {
