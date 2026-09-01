@@ -428,6 +428,69 @@ function Wait-Prompt {
   return $false
 }
 
+# What reached the shell is a fact to poll, not a duration to guess.
+#
+# Same lesson as Wait-Prompt, one step later. The switch scene typed a
+# marker, slept three seconds and read the transcripts. Three seconds is
+# not enough on a loaded runner for the keystrokes to reach the shell and
+# the daemon to write them down, and the scene then reported the marker as
+# never arriving - the suite's own impatience wearing the app's clothes.
+# Two full runs failed this way on a DIFFERENT marker each time, which is
+# what a timing guess looks like from the outside; a real dropped
+# keystroke would pick the same one twice.
+#
+# Takes the near-misses too. "ZTOP" instead of "ZZTOP" is the leading
+# character being dropped, which is the bug this scene exists to catch:
+# waiting only for the whole marker would sit out the full timeout before
+# reporting it, and waiting for neither would race the transcript.
+# What each shell actually produced, for when "nothing ran" is the finding.
+#
+# A scene that reports only the assertion it failed sends the next person
+# back to CI for another forty minutes to learn what was on the screen.
+# The transcripts are already on disk and they answer the first question
+# every time: did this shell say ANYTHING, or was it never spoken to.
+function Dump-Transcripts {
+  param([string]$why = "")
+  if ($why) { Write-Host "  -- transcripts ($why) --" -ForegroundColor DarkGray }
+  $logs = @(Get-ChildItem "$scratch\GTerminal\history" -Filter *.log -ErrorAction SilentlyContinue)
+  if (-not $logs.Count) { Write-Host "  (no transcripts at all)" -ForegroundColor DarkYellow; return }
+  foreach ($l in $logs) {
+    $raw = Get-Content $l.FullName -Raw -ErrorAction SilentlyContinue
+    if ($null -eq $raw) { $raw = "" }
+    $prompted = if ($raw -match "`e\]133;A") { "prompt" } else { "NO PROMPT" }
+    # Escapes stripped: a transcript is mostly cursor moves, and the point
+    # here is which words reached the shell.
+    $text = ($raw -replace "`e\][^`a`e]*(`a|`e\)", "") -replace "`e\[[0-9;?]*[a-zA-Z]", ""
+    $tail = (($text -split "`r?`n" | Where-Object { $_.Trim() -ne "" }) | Select-Object -Last 2) -join " | "
+    if ($tail.Length -gt 160) { $tail = $tail.Substring($tail.Length - 160) }
+    Write-Host ("  {0}  {1,9} bytes  {2}  {3}" -f $l.Name, $raw.Length, $prompted, $tail) -ForegroundColor DarkGray
+  }
+}
+
+# The app's own account of what it did, which is the only place a tab that
+# was created but never wired up leaves a trace.
+function Dump-UiLog {
+  param([int]$lines = 25, [string]$match = "")
+  $path = "$scratch\GTerminal\ui.log"
+  if (-not (Test-Path $path)) { Write-Host "  (no ui.log)" -ForegroundColor DarkYellow; return }
+  Write-Host "  -- ui.log (last $lines) --" -ForegroundColor DarkGray
+  $all = @(Get-Content $path -ErrorAction SilentlyContinue)
+  if ($match) { $all = @($all | Where-Object { $_ -match $match }) }
+  foreach ($l in ($all | Select-Object -Last $lines)) { Write-Host "  $l" -ForegroundColor DarkGray }
+}
+
+function Wait-Mark {
+  param([string[]]$marks, [int]$timeoutSec = 30)
+  $deadline = (Get-Date).AddSeconds($timeoutSec)
+  while ((Get-Date) -lt $deadline) {
+    $all = Transcripts
+    foreach ($m in $marks) { if ($all -match [regex]::Escape($m)) { return $true } }
+    Start-Sleep -Milliseconds 300
+  }
+  Write-Host ("  note: none of {0} reached a transcript in {1}s" -f ($marks -join "/"), $timeoutSec) -ForegroundColor DarkYellow
+  return $false
+}
+
 function Move-Pointer {
   param($hwnd, $x, $y)
   $r = New-Object 'GTerm.Vis+RECT'
@@ -896,12 +959,12 @@ if (-not $Only -or $Only -eq "switch") {
     Click ($sh) 120 33
     Send-Text "echo ZZTOP"
     Key $VK_RETURN
-    Start-Sleep -Seconds 3
+    $null = Wait-Mark @("ZZTOP", "ZTOP")
     # And with the keyboard, which never had the problem.
     Key 0x09 @([byte]$VK_CTRL)                     # Ctrl+Tab
     Send-Text "echo YYTOP"
     Key $VK_RETURN
-    Start-Sleep -Seconds 3
+    $null = Wait-Mark @("YYTOP", "YTOP")
     # The sidebar is where the lost keystroke was actually reported: its
     # rows are plain divs, and the tab bar is display:none while it is on,
     # so this is a different click path from the one above, not a repeat.
@@ -915,7 +978,7 @@ if (-not $Only -or $Only -eq "switch") {
     $script:sideClicked = Click-Effective ($sh) 100 47    # first row, on its label
     Send-Text "echo XXTOP"
     Key $VK_RETURN
-    Start-Sleep -Seconds 3
+    $null = Wait-Mark @("XXTOP", "XTOP")
   }
   # The transcripts are the evidence — what reached the shell, not what
   # was drawn. Each session has its own, so the marker landing in the
@@ -2217,7 +2280,13 @@ if (-not $Only -or $Only -eq "closeall") {
   if ($U::IsWindowVisible($h23)) { Pass "closing every tab leaves the window on screen" }
   else { Fail "closeall" "the window went away when the last tab was closed" }
   if ($closeAllOut -match "24681") { Pass "and what is left is a live shell, not an empty frame" }
-  else { Fail "closeall" "nothing ran after the last tab closed - the window is there but has no working tab" }
+  else {
+    Fail "closeall" "nothing ran after the last tab closed - the window is there but has no working tab"
+    # Which of the two it is: a replacement session that was never given a
+    # shell, or one whose shell started and was never typed into.
+    Dump-Transcripts "closeall"
+    Dump-UiLog 30 "session|tab|error"
+  }
   # Guard: the close has to have happened. Without this the scene passes
   # on a window whose tab was never closed - which it did, twice, before
   # the session list was checked instead of assumed.
