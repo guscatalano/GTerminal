@@ -2255,7 +2255,10 @@ if (-not $Only -or $Only -eq "decrqm") {
 # The window staying is only half of it: what is left has to be usable, so
 # the scene runs a command in whatever tab took the old one's place.
 if (-not $Only -or $Only -eq "closeall") {
-  $ctx23 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7}"
+  # ui_log full: this scene's failure is a shell that never answered, and
+  # the app's own account is the only place that shows whether the answer
+  # was generated, where it was sent, and whether the send failed.
+  $ctx23 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7,`"ui_log`":`"full`"}"
   $h23 = $ctx23.Hwnd
   Record-Scene "closeall" 40 $ctx23 {
     Run-Cmd 'echo closeall-scene-ready' 3
@@ -2295,7 +2298,7 @@ if (-not $Only -or $Only -eq "closeall") {
     # Which of the two it is: a replacement session that was never given a
     # shell, or one whose shell started and was never typed into.
     Dump-Transcripts "closeall"
-    Dump-UiLog 30 "session|tab|error"
+    Dump-UiLog 40 "pty\.|error|session"
   }
   # Guard: the close has to have happened. Without this the scene passes
   # on a window whose tab was never closed - which it did, twice, before

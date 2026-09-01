@@ -4396,13 +4396,26 @@ async function createTab(
   // enough that the query lands after this function has finished wiring
   // itself up. A warm one loses that race.
   term.onData((data) => {
-    invoke("write_session", { id, data }).catch(() => {});
+    // Includes the terminal's ANSWERS, not just typing: the cursor-position
+    // reply a shell will not start without comes through here. A failure
+    // was swallowed silently, which is how a shell that never gets its
+    // answer looks like a shell that never started.
+    logUi("pty.reply", { id, bytes: data.length, hex: peek(data) });
+    invoke("write_session", { id, data }).catch((err) => {
+      logUi("error.write", { id, bytes: data.length, hex: peek(data), err: String(err) });
+    });
   });
 
   tabs.set(id, tab);
   const backlog = pending.get(id);
   if (backlog) {
     pending.delete(id);
+    logUi("pty.drain", {
+      id,
+      chunks: backlog.length,
+      bytes: backlog.reduce((a, c) => a + c.length, 0),
+      hex: peek(backlog[0] ?? ""),
+    });
     for (const chunk of backlog) term.write(chunk);
   }
   if (asPreview) void showEndedPreview(id);
@@ -5736,6 +5749,12 @@ function groupMenuItems(g: TabGroup, nameEl: HTMLElement): CtxItem[] {
 /// Record what the window did. Fire and forget, and never allowed to
 /// throw: a log that can break the thing it is logging is worse than no
 /// log. See src/uilog.ts for what may and may not be written.
+/// The first bytes of a chunk, as hex. A shell's opening handshake is
+/// control characters, and a log line that prints them raw says nothing.
+function peek(data: string, max = 24): string {
+  return [...data.slice(0, max)].map((c) => c.codePointAt(0)!.toString(16).padStart(2, "0")).join(" ");
+}
+
 function logUi(ev: string, fields: Record<string, unknown> = {}) {
   if (!shouldLog(ev, logLevel(config.ui_log))) return;
   try {
@@ -9090,6 +9109,11 @@ async function main() {
       const backlog = pending.get(event.payload.id) ?? [];
       backlog.push(event.payload.data);
       pending.set(event.payload.id, backlog);
+      logUi("pty.pending", {
+        id: event.payload.id,
+        bytes: event.payload.data.length,
+        hex: peek(event.payload.data),
+      });
     }
   });
   // Another window opened this session. It is still running - it is just
