@@ -116,25 +116,41 @@ function Run-Await {
 function Wait-Ready {
   param($conn, [int]$timeoutSec = 60)
   $out = ""
+  $deadline = (Get-Date).AddSeconds($timeoutSec)
+  while ((Get-Date) -lt $deadline) {
+    $out += Drain2 $conn 400
+    if ($out -like "*]133;A*") { return $out }
+  }
+  Write-Host "  note: no prompt mark after ${timeoutSec}s - the shell never drew a prompt" -ForegroundColor DarkYellow
+  $out
+}
+
+# The same wait, for callers that have NOT already answered blindly.
+#
+# A shell under ConPTY draws nothing until something answers its
+# cursor-position question, and it usually asks in the gap around the
+# attach. Firing the answer blindly straight after attaching - which is
+# what most sites here do - loses that race whenever the answer goes
+# first: it is consumed as stray input, the question arrives after it, and
+# nothing ever replies. The shell then sits there forever and the test
+# reports whatever it was really about, a session that "did not spawn" or
+# a shell that "stopped responding after extreme resizes".
+#
+# Answering on demand is only possible at all since "Deliver the question
+# the shell is waiting on"; before it the daemon stripped the question out
+# of the replay and a client attaching late never saw it.
+#
+# Deliberately NOT folded into Wait-Ready. The sites that already answer
+# blindly would then answer twice, and the second one is typed at the
+# prompt as literal text - which broke prediction-off and osc133-native
+# the moment it was tried.
+function Wait-Ready-Answering {
+  param($conn, [int]$timeoutSec = 60)
+  $out = ""
   $answered = 0
   $deadline = (Get-Date).AddSeconds($timeoutSec)
   while ((Get-Date) -lt $deadline) {
     $out += Drain2 $conn 400
-    # Answer the shell's cursor-position question WHEN IT IS ASKED, the way
-    # a terminal does.
-    #
-    # These tests used to fire the answer blindly, once, straight after
-    # attaching. A shell under ConPTY draws nothing until it is answered,
-    # and it usually asks in the gap around the attach - so if the answer
-    # went first it was consumed as stray input, the question came after
-    # it, and nothing ever replied. The shell then sat there forever and
-    # the test reported whatever it was really about: a session that "did
-    # not spawn", a shell that "stopped responding after extreme resizes".
-    #
-    # The daemon only started handing the question to a client that
-    # attaches after it was asked in "Deliver the question the shell is
-    # waiting on"; before that it was stripped from the replay and blind
-    # answering was the only thing available.
     $asked = [regex]::Matches($out, [regex]::Escape('\u001b[6n')).Count
     while ($answered -lt $asked) {
       $conn.Writer.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')
@@ -493,11 +509,12 @@ $id6 = (Request2 $port '{"cmd":"create","cols":100,"rows":30}').id
 $j = New-Conn $port
 $j.Writer.WriteLine("{""cmd"":""attach"",""id"":$id6}")
 $null = Read-Line2 $j
-$j.Writer.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')
+# No blind answer here: Wait-Ready-Answering below replies when the shell
+# actually asks, and answering twice types the second one at the prompt.
 # Six seconds was a guess, and on a loaded runner a shell still starting
 # looks exactly like one that failed to spawn - which is what this
 # reported. Wait for the prompt it draws when it is actually up.
-$null = Wait-Ready $j 45
+$null = Wait-Ready-Answering $j 45
 $s = Get-Sessions $port | Where-Object id -eq $id6
 if ($null -eq $s -or -not $s.alive) { Fail "default-cwd-fallback" "session did not spawn with bad default_cwd" }
 elseif ($s.cwd -like "*does*not*exist*") { Fail "default-cwd-fallback" "cwd=$($s.cwd)" }
@@ -877,7 +894,7 @@ $null = Read-Line2 $rc
 # asks, instead of firing the answer blindly and sleeping four seconds. A
 # shell that never got its answer is not a shell wedged by the resizes
 # below, but that is exactly what this reported.
-$null = Wait-Ready $rc 60
+$null = Wait-Ready-Answering $rc 60
 foreach ($dim in '{"cols":0,"rows":0}', '{"cols":1,"rows":1}', '{"cols":9999,"rows":9999}', '{"cols":120,"rows":30}') {
   $rc.Writer.WriteLine("{""cmd"":""resize""," + $dim.Substring(1))
   Start-Sleep -Milliseconds 300
