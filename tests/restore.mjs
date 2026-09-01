@@ -25,6 +25,13 @@ check("no tab, still running, is detached", sessionState({ alive: true }, false,
 check("no tab, shell gone, is ended", sessionState({ alive: false }, false, false), "ended");
 check("parked is hidden", sessionState({ alive: true }, false, true), "hidden");
 check("killed and counting down is closing", sessionState({ alive: true, expires_ms: 9 }, false, false), "closing");
+// The distinction this whole state exists for. A session the user closed
+// keeps its shell running and hands it straight back; a session whose
+// shell quit on its own reopens as a new shell. Both count down, so both
+// used to say "closing" — and a user who had closed nothing was told his
+// sessions were closing soon. Reported exactly that way, of a window left
+// minimized while a long-running program in it exited.
+check("a shell that quit on its own is exited, not closing", sessionState({ alive: false, expires_ms: 9 }, false, false), "exited");
 // A tab beats everything: it is on screen, whatever else is true of it.
 check("an open tab in its grace window still reads as open", sessionState({ alive: true, expires_ms: 9 }, true, false), "open");
 // Closing beats hidden: the countdown is the fact with a deadline on it,
@@ -33,7 +40,12 @@ check("hidden and closing is closing", sessionState({ alive: true, expires_ms: 9
 // Hidden beats ended: the user parked it on purpose, and it is still
 // theirs to bring back — the shell being gone does not undo that choice.
 check("hidden and ended is hidden", sessionState({ alive: false }, false, true), "hidden");
-check("ended and closing is closing", sessionState({ alive: false, expires_ms: 9 }, false, false), "closing");
+// Hidden loses to either countdown, for the same reason: a deadline is
+// the fact worth surfacing, whichever kind it is.
+check("hidden and exited is exited", sessionState({ alive: false, expires_ms: 9 }, false, true), "exited");
+// Liveness is the only thing separating the two countdowns, so a daemon
+// that omits it must not turn a user's own close into a mystery exit.
+check("an unknown liveness in a countdown reads as closing", sessionState({ expires_ms: 9 }, false, false), "closing");
 // The daemon omitting `alive` must not silently mark everything ended.
 check("an unknown liveness is treated as running", sessionState({}, false, false), "detached");
 check("a zero expiry is not a countdown", sessionState({ alive: true, expires_ms: 0 }, false, false), "detached");

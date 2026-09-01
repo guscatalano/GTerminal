@@ -219,6 +219,14 @@ body,
   opacity: 0.85;
 }
 
+/* Exited is ended with a deadline: same shell-is-gone mark, undimmed,
+   because this one does lose its output if it is left. Still not the
+   danger colour — danger is for the countdown the user started by closing
+   a tab, the only one that is undoing their own click. */
+.side-dot.exited {
+  color: var(--dim);
+}
+
 .side-dot.doomed {
   color: var(--danger);
 }

@@ -109,6 +109,55 @@ check(
   "expected handBackToTerminal() after win.toggleMaximize() — otherwise focus stays on the button and Enter toggles it back"
 );
 
+// ── the fit a collapsed layout computes ───────────────────────────────
+// fit() applies the resize and only then can anyone look at it, so a
+// collapsed layout - a minimized window, a pane mid-teardown - reflows
+// the buffer to one row and sends that to the pty as a real size.
+//
+// This is NOT the fix for "if i keep a window minimized for too long it
+// eventually goes into closing soon". That was the first theory, and it
+// is wrong: with the daemon's clamp removed, cmd survives 0x0, 1x1, 0x30
+// and 100x0, five runs out of five. The session behind that report had
+// simply run a program for fourteen hours and the program exited. What
+// actually misled the user was the wording, fixed in restore.ts.
+//
+// The check stays on its own merit. Handing a pty a size no terminal has
+// is a bug whether or not a shell tolerates it, and the reflow it causes
+// is destructive to the scrollback either way.
+check(
+  "a fit is proposed before it is applied",
+  /proposeDimensions\(\)/.test(ts),
+  "fitTab must call fit.proposeDimensions() and check it before fit(), or a collapsed layout resizes the pty to nothing"
+);
+check(
+  "and a degenerate proposal is refused",
+  /want\.rows\s*<\s*FIT_MIN_ROWS/.test(ts) && /want\.cols\s*<\s*FIT_MIN_COLS/.test(ts),
+  "the proposal has to be rejected below a floor; without it fit() still applies whatever a collapsed layout computed"
+);
+
+// ── what a countdown is allowed to claim ──────────────────────────────
+// The report above was a wording bug: a shell that exited on its own and
+// a tab the user closed both counted down, and both said "Closing soon".
+// One of those is the app holding a shell open *for* you; the other is a
+// program that quit while you were not looking. Telling someone who has
+// closed nothing that their sessions are closing is how a fourteen-hour
+// program exiting became "the terminal is killing my tabs".
+check(
+  "a session whose shell exited is marked as its own thing",
+  /s\.expires_ms \? "exited" : "ended"/.test(ts),
+  'the ended rows must split their dot class on the countdown, so an exited session is not drawn as a plain ended one'
+);
+check(
+  "and that mark has a rule to render with",
+  /\.side-dot\.exited\s*\{/.test(css),
+  "a dot class with no CSS rule inherits whatever came before it — the state would be invisible rather than wrong, which is the hardest kind to notice"
+);
+check(
+  "and it is listed with the ended sessions, not the closing ones",
+  /isState\(s\.id, "ended"\) \|\| isState\(s\.id, "exited"\)/.test(ts),
+  "the ended section has to include exited sessions; under a Closing soon header they read as something closing work nobody closed"
+);
+
 if (failed) {
   console.log(`${failed} style test(s) failed`);
   process.exit(1);

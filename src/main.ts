@@ -341,7 +341,14 @@ function remainingLabel(expiresMs: number): string {
 /// whose scrollback and folder were kept. It means nothing to anyone who
 /// has not read mux.rs, so nowhere the user can see says it.
 function expirySuffix(s: SessionInfo): string {
-  return s.expires_ms ? ` · closes in ${minutesLeft(s.expires_ms)}m` : s.alive ? "" : " · ended";
+  if (!s.expires_ms) return s.alive ? "" : " · ended";
+  // A countdown on a shell that is still running is the user's own close
+  // waiting to be undone. On one that is gone it is just how long the
+  // output sticks around, and saying "closes" there reads as a threat to
+  // something already over.
+  return s.alive === false
+    ? ` · ended · kept ${minutesLeft(s.expires_ms)}m`
+    : ` · closes in ${minutesLeft(s.expires_ms)}m`;
 }
 
 /// This window's label, and the storage that respects it.
@@ -3154,8 +3161,40 @@ function setActive(id: number) {
   });
 }
 
+/// The smallest thing still worth calling a terminal.
+///
+/// Below this a fit is not describing a small pane, it is describing a
+/// window with no room in it - minimized, mid-animation, or laid out
+/// before the pane has been given a size. Refusing leaves the terminal at
+/// whatever it was, which is exactly right: the window is not on screen to
+/// look wrong, and it will be fitted again when it comes back.
+const FIT_MIN_COLS = 2;
+const FIT_MIN_ROWS = 2;
+
 function fitTab(tab: Tab) {
   if (tab.pane.clientWidth === 0 || tab.pane.clientHeight === 0) return;
+  // Ask before applying. fit() RESIZES the terminal and then we read the
+  // result - so a collapsed layout reflows the buffer to a single row
+  // before anyone can object, and sends that to the pty as a real size.
+  //
+  // This was written as the fix for "I left the window minimized and my
+  // tabs went to Closing soon", on a theory that a zero-row pty ends
+  // cmd.exe. That theory is wrong - measured, cmd survives 0x0, 1x1, 0x30
+  // and 100x0 - and the report turned out to be a fourteen-hour program
+  // exiting plus a label that called it closing. Both are fixed elsewhere.
+  //
+  // The check stays because reflowing a live buffer to one row loses the
+  // user's scrollback layout for a window that is not even on screen.
+  const want = tab.fit.proposeDimensions();
+  if (
+    !want ||
+    !Number.isFinite(want.cols) ||
+    !Number.isFinite(want.rows) ||
+    want.cols < FIT_MIN_COLS ||
+    want.rows < FIT_MIN_ROWS
+  ) {
+    return;
+  }
   const before = { cols: tab.term.cols, rows: tab.term.rows };
   tab.fit.fit();
   if (tab.term.cols !== before.cols || tab.term.rows !== before.rows) {
@@ -6137,7 +6176,8 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
       hidden: "Hidden (parked) — click to restore",
       detached: "Detached and still running — click to open it in a tab",
       ended: "Its shell is gone (reboot, or the daemon stopped). Click to reopen it in its old folder with its output replayed — as a new shell.",
-      doomed: "Closing soon — click to restore before the timer runs out",
+      exited: "The program in this session exited on its own — nothing closed it. Its output was kept; click to reopen it in its old folder as a new shell, before the timer runs out.",
+      doomed: "You closed this — click to restore before the timer runs out. Its shell is still running, so you get it back exactly as you left it.",
     }[dotClass] ?? "";
     const l = document.createElement("span");
     l.className = "side-label";
@@ -6234,10 +6274,14 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
     addRow("◌", "hidden", id, titleOf(id), false, () => restoreHidden(id), [
       ["×", "Kill session — click twice", () => killSession(id), true],
     ]);
+  // Only ever called for state "detached", which by definition has no
+  // countdown — the ternaries that used to pick a ⌛ here could not fire,
+  // and reading them suggested this row renders closing sessions. It does
+  // not; they get their own section below.
   const detachedRow = (s: SessionInfo) =>
     addRow(
-      s.expires_ms ? "⌛" : "○",
-      s.expires_ms ? "doomed" : "detached",
+      "○",
+      "detached",
       s.id,
       `${titleOf(s.id)}${expirySuffix(s)}`,
       false,
@@ -6263,8 +6307,13 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
   );
   const isState = (id: number, want: SessionState, fallback?: SessionState) =>
     (stateOf.get(id) ?? fallback) === want;
+  // "Closing soon" is a list of things the user closed, and nothing else.
+  // A shell that exited on its own is also counting down, but it belongs
+  // with the ended ones — same click, same outcome, and putting it under
+  // a header that says something is closing is what made a shell quitting
+  // by itself look like the app closing tabs on a timer.
   const closing = sessions.filter((s) => isState(s.id, "closing"));
-  const ended = sessions.filter((s) => isState(s.id, "ended"));
+  const ended = sessions.filter((s) => isState(s.id, "ended") || isState(s.id, "exited"));
 
   const inGroup = (id: number, gid: string) => groupState.assign[id] === gid;
   for (const g of groupState.groups) {
@@ -6288,9 +6337,9 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
     for (const s of ended) {
       addRow(
         "◍",
-        "ended",
+        s.expires_ms ? "exited" : "ended",
         s.id,
-        titleOf(s.id),
+        `${titleOf(s.id)}${s.expires_ms ? ` · kept ${remainingLabel(s.expires_ms)}` : ""}`,
         false,
         () => createTab(s.id),
         [["×", "Forget this session and its output — click twice", () => killSession(s.id), true]]
@@ -6299,7 +6348,7 @@ async function renderSidebar(prefetched?: SessionInfo[]) {
   }
 
   if (closing.length) {
-    addHeader("Closing soon");
+    addHeader("Closing soon — you closed these");
     for (const s of closing) {
       addRow(
         "⌛",
@@ -8512,8 +8561,12 @@ const STATUS_BUILTINS: Record<string, StatusItemDef> = {
     detail: () => {
       const loose = [...lastInfo.values()].filter((s) => !s.attached && !s.expires_ms);
       const detached = loose.filter((s) => s.alive);
-      const ended = loose.filter((s) => !s.alive);
-      const doomed = [...lastInfo.values()].filter((s) => s.expires_ms);
+      // Counted the way the sidebar sections them: a shell that quit is
+      // ended whether or not its leftovers are on a clock, and only a
+      // session the user closed is closing. The daemon reports every
+      // dead-shell session detached, so liveness alone splits these.
+      const ended = [...lastInfo.values()].filter((s) => !s.alive);
+      const doomed = [...lastInfo.values()].filter((s) => s.expires_ms && s.alive);
       return {
         rows: [
           ["Open tabs", String(tabCount())], ["Panes", String(tabs.size)],

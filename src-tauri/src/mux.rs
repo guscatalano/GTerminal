@@ -1993,6 +1993,19 @@ fn conn_loop(
                 }
             }
             Request::Resize { cols, rows } => {
+                // A pty with no rows or no columns is not a small
+                // terminal, it is an invalid one. Clamped here because
+                // this process owns the pty and a client bug should not
+                // be able to hand it a size that is not a size.
+                //
+                // Kept on its own merits, NOT as a fix for anything. It
+                // went in chasing "a window left minimized ends up with
+                // sessions in Closing soon", on one observation of a cmd
+                // shell dying at 100x0. That did not reproduce: with this
+                // clamp removed, cmd survives 0x0, 1x1, 0x30 and 100x0
+                // five runs out of five. Whatever ends those shells is
+                // still unexplained, and it is not this.
+                let (cols, rows) = (cols.max(1), rows.max(1));
                 if let Some(id) = *attached_id {
                     if let Some(s) = sessions.lock().unwrap().live.get_mut(&id) {
                         let _ = s.master.resize(PtySize {

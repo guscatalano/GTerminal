@@ -1024,6 +1024,46 @@ try {
   else { Fail "second-daemon" "the first daemon answered without ok: $($still | ConvertTo-Json -Compress)" }
 } catch { Fail "second-daemon" "the first daemon stopped answering: $_" }
 
+# ════ a window with no room left ════
+# A pty with zero rows or columns is not a terminal, and the daemon
+# refuses one. This holds that invariant; it does not demonstrate a bug.
+#
+# It was written chasing "if i keep a window minimized for too long it
+# eventually goes into closing soon" - which is what a session whose SHELL
+# HAS ENDED looks like while it waits out the grace window, so something
+# is ending shells rather than killing sessions. A cmd shell was seen
+# dying on a 100x0 resize once, and it did not reproduce: with the clamp
+# removed, cmd survives every degenerate size, five runs out of five. The
+# real cause is still open.
+$zrPort = Start-Daemon
+foreach ($zrShell in "pwsh", "cmd") {
+  $zrId = (Request2 $zrPort ('{"cmd":"create","cols":100,"rows":30,"shell":"' + $zrShell + '"}')).id
+  $zr = New-Conn $zrPort
+  $zr.Writer.WriteLine("{""cmd"":""attach"",""id"":$zrId}")
+  $null = Read-Line2 $zr
+  $zr.Writer.WriteLine('{"cmd":"write","data":"[1;1R"}')
+  $null = Wait-Ready $zr
+  # Checked after EVERY size, not once at the end. Done once at the end
+  # this test did not notice the clamp being removed at all: a session
+  # whose shell has ended leaves `live`, so the whole row disappears and
+  # every reading of it looks the same as a session that is simply not
+  # there yet. Which size killed it is also the useful part of the
+  # answer - measured, cmd dies on 100x0 and survives 0x0.
+  $zrDiedAt = ""
+  foreach ($zrSize in @(@(0, 0), @(1, 1), @(0, 30), @(100, 0))) {
+    $zr.Writer.WriteLine('{"cmd":"resize","cols":' + $zrSize[0] + ',"rows":' + $zrSize[1] + '}')
+    Start-Sleep -Milliseconds 800
+    $zrRow = (Request2 $zrPort '{"cmd":"list"}').sessions | Where-Object { $_.id -eq $zrId }
+    if (-not $zrRow -or $zrRow.alive -ne $true) {
+      $zrDiedAt = "$($zrSize[0])x$($zrSize[1])"
+      break
+    }
+  }
+  if (-not $zrDiedAt) { Pass "a $zrShell shell survives being resized to nothing" }
+  else { Fail "zero-resize" "the $zrShell shell died when its terminal was resized to $zrDiedAt" }
+  $zr.Client.Close()
+}
+
 # ════ standing down gracefully ════
 # A Store update replaces the package while the daemon keeps running, so a
 # new window meets the previous release's daemon. Killing it was the only

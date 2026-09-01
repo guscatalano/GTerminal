@@ -19,7 +19,10 @@ export interface RestorableSession {
 /// Which list a session belongs in.
 ///
 /// - `open`     — it has a tab on screen
-/// - `closing`  — killed, still inside its grace window, restorable
+/// - `closing`  — *you* closed it. The shell is still running, hidden, and
+///                clicking it hands that same shell straight back.
+/// - `exited`   — its shell ended on its own, and the leftovers are on a
+///                countdown. Same deal as `ended`, with a deadline.
 /// - `hidden`   — parked deliberately
 /// - `ended`    — its shell is gone (reboot, or the daemon stopped), but
 ///                its folder and scrollback were kept. Reopening starts a
@@ -27,14 +30,27 @@ export interface RestorableSession {
 /// - `detached` — still running, just not on screen. Reopening hands back
 ///                the very shell you left.
 ///
-/// The last two look identical in a list and are not the same thing at
-/// all, which is the whole reason this exists: one click gives you your
-/// shell back, the other gives you a fresh one that merely looks like it.
+/// `ended` and `detached` look identical in a list and are not the same
+/// thing at all, which is the whole reason this exists: one click gives
+/// you your shell back, the other gives you a fresh one that merely looks
+/// like it.
 ///
-/// Order matters. A killed session counts as closing even if it was also
-/// hidden — the countdown is the more urgent fact, and the one with a
-/// deadline attached.
-export type SessionState = "open" | "closing" | "hidden" | "ended" | "detached";
+/// `exited` exists for the same reason one rung up. Both it and `closing`
+/// are a session counting down, so both used to report `closing` — which
+/// told a user who had closed nothing that something was closing their
+/// work. They are opposites: `closing` is a shell being held *for* you
+/// after you closed it, `exited` is a shell that quit while you weren't
+/// looking. Reported as "if i keep a window minimized for too long it
+/// eventually goes into closing soon" — nothing was closing, a long-lived
+/// program had exited and the wording took the blame.
+///
+/// The daemon has always drawn this line: a closed session stays in `live`
+/// with its process running, an exited one moves to `cold`. Only `alive`
+/// carries that across, so only `alive` can tell them apart here.
+///
+/// Order matters. A session with a countdown is reported by its countdown
+/// even if it was also hidden — the deadline is the more urgent fact.
+export type SessionState = "open" | "closing" | "exited" | "hidden" | "ended" | "detached";
 
 export function sessionState(
   s: { expires_ms?: number | null; alive?: boolean },
@@ -42,16 +58,19 @@ export function sessionState(
   isHidden: boolean
 ): SessionState {
   if (hasTab) return "open";
-  if (s.expires_ms) return "closing";
+  if (s.expires_ms) return s.alive === false ? "exited" : "closing";
   if (isHidden) return "hidden";
   return s.alive === false ? "ended" : "detached";
 }
 
 /// Sessions worth reopening as tabs.
 ///
-/// Three exclusions, and each matters. A session in its grace window was
-/// *closed* by the user — attaching cancels the pending kill, so adopting
-/// one would resurrect every tab they had just closed, every restart.
+/// Three exclusions, and each matters. A session in its grace window is
+/// either one the user *closed* — attaching cancels the pending kill, so
+/// adopting one would resurrect every tab they had just closed, every
+/// restart — or one whose shell exited, which reopens as a new shell and
+/// is nothing to spring on someone at start-up. Neither is adoptable, so
+/// this stays a plain `expires_ms` test rather than splitting on `alive`.
 /// A hidden session was parked deliberately and should stay parked.
 ///
 /// And a session another window already has open is not this window's to
