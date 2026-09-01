@@ -4381,6 +4381,24 @@ async function createTab(
   // The gap used to be three hundred lines of DOM setup, and it widens on
   // a slow machine, which is the shape of a bug that only shows up on a
   // loaded CI runner.
+  // Before the drain, because draining can make the terminal ANSWER.
+  //
+  // A shell under ConPTY opens by asking where the cursor is (ESC[6n) and
+  // draws nothing at all until something replies. That query is usually
+  // the first thing it emits - so it arrives before this tab exists, waits
+  // in `pending`, and is parsed by the drain below. The parse fires
+  // onData, and with no handler attached yet the reply is dropped: the
+  // shell goes on waiting and the tab sits there forever with no prompt.
+  //
+  // Not hypothetical. closeall caught it as a four-byte transcript -
+  // exactly ESC[6n, and nothing after it - on the tab that replaces your
+  // last closed one. It hides at start-up because a cold daemon is slow
+  // enough that the query lands after this function has finished wiring
+  // itself up. A warm one loses that race.
+  term.onData((data) => {
+    invoke("write_session", { id, data }).catch(() => {});
+  });
+
   tabs.set(id, tab);
   const backlog = pending.get(id);
   if (backlog) {
@@ -4638,9 +4656,6 @@ async function createTab(
     })();
   });
 
-  term.onData((data) => {
-    invoke("write_session", { id, data }).catch(() => {});
-  });
   // A BEL in the output stream — a different source from PSReadLine's own
   // beep, which never reaches us. Flash the pane instead of ignoring it,
   // unless the bell is meant to be heard and not seen.
