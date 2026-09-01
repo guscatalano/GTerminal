@@ -4384,17 +4384,17 @@ async function createTab(
   // Before the drain, because draining can make the terminal ANSWER.
   //
   // A shell under ConPTY opens by asking where the cursor is (ESC[6n) and
-  // draws nothing at all until something replies. That query is usually
-  // the first thing it emits - so it arrives before this tab exists, waits
-  // in `pending`, and is parsed by the drain below. The parse fires
-  // onData, and with no handler attached yet the reply is dropped: the
-  // shell goes on waiting and the tab sits there forever with no prompt.
+  // draws nothing until something replies. Anything the drain feeds the
+  // parser can therefore produce a reply, and a reply raised before this
+  // handler exists goes nowhere - xterm parses asynchronously, so it has
+  // not bitten, but the ordering is one macrotask away from mattering.
   //
-  // Not hypothetical. closeall caught it as a four-byte transcript -
-  // exactly ESC[6n, and nothing after it - on the tab that replaces your
-  // last closed one. It hides at start-up because a cold daemon is slow
-  // enough that the query lands after this function has finished wiring
-  // itself up. A warm one loses that race.
+  // Kept on that ground, and NOT as the fix for the tab that replaces your
+  // last closed one sitting there with no prompt. That was diagnosed here
+  // first and the diagnosis was wrong: with this handler moved up, the
+  // closeall scene still failed with the same four-byte transcript. The
+  // query never reached the app at all - the daemon was stripping it out
+  // of the replay - and the fix is in mux.rs, in replay_for.
   term.onData((data) => {
     // Includes the terminal's ANSWERS, not just typing: the cursor-position
     // reply a shell will not start without comes through here. A failure

@@ -52,6 +52,22 @@ const HISTORY_MAX: u64 = 10 * 1024 * 1024;
 ///
 /// Only replays are filtered. Live output keeps its questions, because a
 /// program that asks one is waiting for the answer.
+/// What a client gets when it attaches.
+///
+/// `undelivered` means nobody has ever been handed this session's output:
+/// the ring is live output waiting for a reader, not a recording of a
+/// conversation that already happened. The difference decides whether the
+/// questions in it are still owed an answer - see the call site in
+/// `Request::Attach`.
+fn replay_for(ring: &[u8], undelivered: bool) -> String {
+    let text = String::from_utf8_lossy(ring);
+    if undelivered {
+        text.into_owned()
+    } else {
+        strip_queries(&text)
+    }
+}
+
 fn strip_queries(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = String::with_capacity(s.len());
@@ -710,6 +726,63 @@ mod second_daemon_tests {
 }
 
 #[cfg(test)]
+mod handshake_tests {
+    use super::{replay_for, strip_queries};
+
+    /// A shell under ConPTY opens by asking where the cursor is and draws
+    /// nothing until something answers. Create and attach are two separate
+    /// requests, so that question is usually already sitting in the ring by
+    /// the time a client attaches - and stripping it there means nobody
+    /// ever answers it and the shell waits for the rest of its life.
+    ///
+    /// Caught by the closeall scene as a replacement tab whose entire
+    /// transcript was four bytes: ESC [ 6 n, and nothing after it.
+    const DSR: &str = "\x1b[6n";
+
+    #[test]
+    fn a_question_nobody_has_heard_yet_is_delivered() {
+        let out = replay_for(DSR.as_bytes(), true);
+        assert!(out.contains(DSR), "the shell's opening question must reach the client: {out:?}");
+    }
+
+    #[test]
+    fn a_question_already_answered_once_is_not_asked_again() {
+        // Second attach: whatever was in the ring has been delivered, and
+        // its questions answered. Replaying them makes the terminal answer
+        // into a shell sitting at its prompt - "random characters in every
+        // new window".
+        let out = replay_for(DSR.as_bytes(), false);
+        assert!(!out.contains(DSR), "a replayed question must be stripped: {out:?}");
+    }
+
+    #[test]
+    fn undelivered_output_is_otherwise_untouched() {
+        let ring = "hello\r\n\x1b[32mgreen\x1b[0m\r\n";
+        assert_eq!(replay_for(ring.as_bytes(), true), ring);
+    }
+
+    #[test]
+    fn ordinary_output_survives_either_way() {
+        // Colour and text are not questions and must come through both
+        // paths, or a restored session loses its scrollback formatting.
+        let ring = "\x1b[32mgreen\x1b[0m";
+        assert_eq!(replay_for(ring.as_bytes(), false), strip_queries(ring));
+        assert!(replay_for(ring.as_bytes(), false).contains("green"));
+    }
+
+    #[test]
+    fn a_preloaded_ring_still_has_its_questions_stripped() {
+        // The resurrect path hands start_session an old scrollback, so that
+        // session is a recording from its first moment - undelivered is
+        // false for it, and this is the case that made the queries have to
+        // go in the first place.
+        let ring = format!("old scrollback\r\n{DSR}");
+        assert!(!replay_for(ring.as_bytes(), false).contains(DSR));
+        assert!(replay_for(ring.as_bytes(), false).contains("old scrollback"));
+    }
+}
+
+#[cfg(test)]
 mod utf8_boundary_tests {
     use super::take_valid_utf8;
 
@@ -1024,6 +1097,13 @@ struct Session {
     /// whether it is worth keeping once its shell ends — see
     /// `worth_keeping`.
     saw_input: bool,
+    /// True until this session's output has been handed to a client once.
+    ///
+    /// Until then its ring is not a recording of a conversation somebody
+    /// already had - it is live output that has not been delivered yet,
+    /// and the questions in it are still waiting for answers. See the
+    /// replay in `Request::Attach`.
+    undelivered: bool,
     /// Soft-killed: the process is still running but will be killed for
     /// real at this time unless an attach cancels the doom.
     doomed_until: Option<u64>,
@@ -1931,7 +2011,33 @@ fn conn_loop(
                         // interleave live output mid-replay; only then does
                         // this connection start receiving live data.
                         write_line(&mut out, &json!({"ok": true}))?;
-                        let mut replay = strip_queries(&String::from_utf8_lossy(&s.ring));
+                        // Strip the questions out of a REPLAY, never out of
+                        // output nobody has seen yet.
+                        //
+                        // A shell under ConPTY opens by asking where the
+                        // cursor is, and draws nothing - no prompt, ever -
+                        // until something answers. Create and attach are two
+                        // requests, so that question is usually asked in the
+                        // gap between them and is sitting in the ring by the
+                        // time anyone attaches. Stripping it there means the
+                        // client never sees it, never answers, and the shell
+                        // waits for the rest of its life.
+                        //
+                        // Reported as a new tab that "never ran anything",
+                        // and caught by the closeall scene as a session whose
+                        // whole transcript was four bytes: ESC [ 6 n, and
+                        // nothing after it. Racy by nature - a shell that
+                        // gets its question in after the attach is answered
+                        // normally - which is why it read as flakiness in the
+                        // suite for so long.
+                        //
+                        // The queries still have to go once this ring really
+                        // is a recording: replaying an old one makes the
+                        // terminal answer into a shell sitting at its prompt,
+                        // which shows up as "random characters in every new
+                        // window". See strip_queries.
+                        let mut replay = replay_for(&s.ring, s.undelivered);
+                        s.undelivered = false;
                         // Whatever the last program left switched on, the
                         // window attaching now did not ask for.
                         replay.push_str(MODE_RESET_INLINE);
@@ -2249,6 +2355,10 @@ fn start_session(
             // so it keeps that standing rather than having to earn it
             // again with a keystroke it may never receive.
             saw_input: !ring_seed_was_empty,
+            // A preloaded ring is somebody else's old scrollback, so it is
+            // a recording from the start. One that began empty holds only
+            // what this shell has said since it started.
+            undelivered: ring_seed_was_empty,
             ring_filter: RingFilter::default(),
             transcript,
             transcript_len,
