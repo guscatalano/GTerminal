@@ -903,9 +903,23 @@ Start-Sleep -Seconds 1
 # Asked until it answers. A shell a few seconds slower than the guess is
 # not a shell that "stopped responding after extreme resizes", which is
 # what a single look three seconds later reported.
-$rzOut = Retry-Until $rc 'echo resize-survivor\r' { param($o) $o -like "*resize-survivor*" } 30
+# The full request, not the bare command: Run-Await writes what it is
+# given straight down the socket, so passing 'echo resize-survivor\r' had
+# the daemon answering {"error":"bad request"} to every retry while the
+# shell sat there perfectly alive - reported as the session having stopped
+# responding to the resizes above.
+$rzOut = Retry-Until $rc '{"cmd":"write","data":"echo resize-survivor\r"}' { param($o) $o -like "*resize-survivor*" } 30
 if ($rzOut -like "*resize-survivor*") { Pass "a session survives absurd resizes" }
-else { Fail "resize-extremes" "the session stopped responding after extreme resizes" }
+else {
+  Fail "resize-extremes" "the session stopped responding after extreme resizes"
+  # Whether the shell died or the request was refused. Those look identical
+  # from the assertion and are nothing alike: this said alive=True with
+  # {"error":"bad request"} in the tail, which is a test sending rubbish,
+  # not a session that stopped responding.
+  $rzNow = Get-Sessions $port | Where-Object id -eq $rz
+  Write-Host ("  rz: at failure alive=" + $(if ($rzNow) { $rzNow.alive } else { "GONE" }) + " lastOut=" + $rzOut.Length + " bytes") -ForegroundColor DarkYellow
+  if ($rzOut.Length) { Write-Host ("  rz: tail=" + $rzOut.Substring([Math]::Max(0, $rzOut.Length - 300))) -ForegroundColor DarkYellow }
+}
 $rc.Client.Close()
 foreach ($k in @($keep, $rz)) {
   $null = Request2 $port "{""cmd"":""kill"",""id"":$k}"
