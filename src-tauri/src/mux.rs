@@ -2129,19 +2129,28 @@ fn conn_loop(
                 }
             }
             Request::Resize { cols, rows } => {
-                // A pty with no rows or no columns is not a small
-                // terminal, it is an invalid one. Clamped here because
-                // this process owns the pty and a client bug should not
-                // be able to hand it a size that is not a size.
+                // A zero dimension is passed through on purpose. Do not
+                // "fix" it by clamping to 1x1 - that is worse, measured:
                 //
-                // Kept on its own merits, NOT as a fix for anything. It
-                // went in chasing "a window left minimized ends up with
-                // sessions in Closing soon", on one observation of a cmd
-                // shell dying at 100x0. That did not reproduce: with this
-                // clamp removed, cmd survives 0x0, 1x1, 0x30 and 100x0
-                // five runs out of five. Whatever ends those shells is
-                // still unexplained, and it is not this.
-                let (cols, rows) = (cols.max(1), rows.max(1));
+                //   resize(0,0) with a 1x1 clamp -> the shell stops
+                //   answering until something resizes it back, 3 runs of 3
+                //   resize(0,0) passed through   -> no-op, the shell stays
+                //   80x24 and responsive,        3 runs of 3
+                //
+                // Windows refuses a zero-dimension ResizePseudoConsole and
+                // the error is discarded just below, so zero costs nothing.
+                // One column is a real size, and a pty one column wide is a
+                // shell you cannot use.
+                //
+                // A clamp lived here briefly on the theory that "a pty with
+                // no rows is not a small terminal, it is an invalid one".
+                // True, and beside the point: the invalid size is ignored
+                // while the valid one wedges the shell. It went in chasing
+                // "a window left minimized ends up with sessions in Closing
+                // soon" - a report that turned out to be a program exiting
+                // after fourteen hours plus a misleading label - and a
+                // minimized window fitting to zero is exactly the case it
+                // made worse.
                 if let Some(id) = *attached_id {
                     if let Some(s) = sessions.lock().unwrap().live.get_mut(&id) {
                         let _ = s.master.resize(PtySize {

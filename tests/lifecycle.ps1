@@ -1127,6 +1127,32 @@ foreach ($zrShell in "pwsh", "cmd") {
   else { Fail "zero-resize" "the $zrShell shell died when its terminal was resized to $zrDiedAt" }
   $zr.Client.Close()
 }
+# ── a zero dimension is IGNORED, not clamped ──
+# Aliveness is not the property that matters here, and testing it is how a
+# clamp sat in the daemon for a day without a single test objecting: a
+# shell in a one-column pty is perfectly alive and completely unusable.
+# So this asks it to say something.
+#
+# Measured both ways, three runs each:
+#   resize(0,0) passed through   -> shell stays 100x30 and answers
+#   resize(0,0) clamped to 1x1   -> shell stops answering until resized back
+#
+# Windows refuses a zero-dimension ResizePseudoConsole and the daemon
+# discards the error, so zero costs nothing. One column is a real size, and
+# that is the one that hurts. A minimized window fitting to zero is exactly
+# the case a clamp would make worse.
+$zrqId = (Request2 $zrPort '{"cmd":"create","cols":100,"rows":30,"shell":"pwsh"}').id
+$zrq = New-Conn $zrPort
+$zrq.Writer.WriteLine("{""cmd"":""attach"",""id"":$zrqId}")
+$null = Read-Line2 $zrq
+$null = Wait-Ready-Answering $zrq
+$zrq.Writer.WriteLine('{"cmd":"resize","cols":0,"rows":0}')
+Start-Sleep -Milliseconds 600
+$zrqOut = Retry-Until $zrq '{"cmd":"write","data":"echo ZR-STILL-USABLE\r"}' { param($o) $o -like "*ZR-STILL-USABLE*" } 25
+if ($zrqOut -like "*ZR-STILL-USABLE*") { Pass "a zero-sized resize leaves the shell usable, not just alive" }
+else { Fail "zero-ignored" "the shell stopped answering after a 0x0 resize - a zero dimension is being turned into a real (tiny) one" }
+$zrq.Client.Close()
+
 
 # ════ standing down gracefully ════
 # A Store update replaces the package while the daemon keeps running, so a
