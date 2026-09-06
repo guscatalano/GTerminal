@@ -120,7 +120,8 @@ function iconFor(running: string[]): string {
 // Terminal); cursor_blink: boolean (default true); ctrl_v_paste and
 // ctrl_f_find: boolean (default true — Ctrl+V pastes and Ctrl+F opens the
 // find bar rather than reaching the shell, except on the alternate
-// buffer); clickable_links: boolean (default true).
+// buffer); clickable_links: boolean (default true); right_click: "menu"
+// (default) or "paste" for the console's own behaviour.
 // A "new tab" preset: right-clicking the + button lists these. Unset
 // fields fall back to the regular defaults (default_shell, default_cwd,
 // automatic titles).
@@ -188,6 +189,9 @@ interface AppConfig {
   cursor_blink?: boolean;
   ctrl_v_paste?: boolean;
   ctrl_f_find?: boolean;
+  /// What the right button does in a pane: "menu" (default) or "paste",
+  /// which is what conhost's QuickEdit and Windows Terminal both do.
+  right_click?: string;
   clickable_links?: boolean;
   summon_hotkey?: string;
   bell?: string;
@@ -2224,6 +2228,10 @@ function effCtrlVPaste(): boolean {
 
 function effCtrlFFind(): boolean {
   return config.ctrl_f_find ?? true;
+}
+
+function effRightClick(): string {
+  return config.right_click === "paste" ? "paste" : "menu";
 }
 
 let saveTimer: number | undefined;
@@ -4557,6 +4565,28 @@ async function createTab(
 
   pane.addEventListener("contextmenu", (e) => {
     e.preventDefault();
+    // The console's own right button: copy a selection, paste when there
+    // is none. That is what conhost does with QuickEdit on and what
+    // Windows Terminal ships as its default, so it is what a lot of
+    // hands already expect — and no menu can be as fast as not having
+    // one. Shift keeps the menu reachable, so nothing in it is lost.
+    //
+    // The paste still goes through pasteText, so a long or multi-line
+    // clipboard is still shown before it runs. A right button that
+    // pastes without asking is how the console does it and is not a
+    // reason to drop the one guard that matters.
+    if (effRightClick() === "paste" && !e.shiftKey) {
+      const sel = term.getSelection() || selAtRightClick;
+      if (sel) {
+        pushClip(sel);
+        clipWrite(sel).catch(() => {});
+        term.clearSelection();
+      } else {
+        void paste();
+      }
+      term.focus();
+      return;
+    }
     const x = e.clientX;
     const y = e.clientY;
     void (async () => {
@@ -7434,6 +7464,14 @@ function buildSettingsPage() {
     "Open the find bar with Ctrl+F as well as Ctrl+Shift+F. Full-screen programs still receive the key, where it pages forward in vim and less.",
     mkSelect([["on", "On"], ["off", "Off"]], effCtrlFFind() ? "on" : "off", (v) => {
       config.ctrl_f_find = v === "on";
+      changed();
+    })
+  );
+  settingRow(
+    "Right-click",
+    "What the right button does in a pane. Menu offers copy, paste, the clipboard history and the rest. Paste is the console's own behaviour — copy the selection if there is one, paste if there is not — which is what conhost with QuickEdit and Windows Terminal both do, and what most hands coming from either already expect. Shift+right-click opens the menu either way, so nothing is out of reach.",
+    mkSelect([["menu", "Menu"], ["paste", "Copy / paste"]], effRightClick(), (v) => {
+      config.right_click = v;
       changed();
     })
   );
