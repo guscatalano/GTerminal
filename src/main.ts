@@ -5464,12 +5464,16 @@ function showContextMenu(x: number, y: number, items: CtxItem[]) {
       span.textContent = it.label;
       row.appendChild(span);
       let pressedConfirm = false;
+      let travelConfirm = Number.NaN;
       row.addEventListener("mousedown", (e) => {
-        if (e.button === 0) pressedConfirm = true;
+        if (e.button !== 0) return;
+        pressedConfirm = true;
+        travelConfirm = pressTravel(row, e);
       });
       row.addEventListener("click", () => {
-        const ok = menuClickCounts(row, pressedConfirm);
+        const ok = menuClickCounts(row, pressedConfirm, travelConfirm);
         pressedConfirm = false;
+        travelConfirm = Number.NaN;
         if (!ok) return;
         if (row.classList.contains("armed")) {
           closeMenus();
@@ -5496,7 +5500,7 @@ function showContextMenu(x: number, y: number, items: CtxItem[]) {
   }
   closeMenus(ctxMenu);
   ctxMenu.classList.add("open");
-  armMenu(ctxMenu);
+  armMenu(ctxMenu, x, y);
   placeFloating(ctxMenu, x, y);
   logUi("menu.open", {
     x,
@@ -5784,15 +5788,40 @@ function logUi(ev: string, fields: Record<string, unknown> = {}) {
 }
 
 const MENU_ARM_MS = 250;
+/// How far from the point a menu opened at a press has to land before it
+/// counts as reaching for a row. Every row of a pointer-anchored menu is
+/// further than this from its corner; a press the input device emitted by
+/// itself lands exactly where the menu opened.
+const MENU_MIN_TRAVEL_PX = 8;
 
-function armMenu(el: HTMLElement) {
+/// Record when — and, for a menu placed at the pointer, where — it opened.
+/// Menus that drop from a button never sit under the cursor, so they
+/// record no point and are judged on the press and the clock alone.
+function armMenu(el: HTMLElement, x?: number, y?: number) {
   el.dataset.armedAt = String(performance.now());
+  if (x === undefined || y === undefined) {
+    delete el.dataset.anchorX;
+    delete el.dataset.anchorY;
+  } else {
+    el.dataset.anchorX = String(x);
+    el.dataset.anchorY = String(y);
+  }
 }
 
-function menuClickCounts(row: HTMLElement, pressed: boolean): boolean {
+/// How far a press landed from where its menu opened. NaN when the menu
+/// recorded no opening point, which is not something to hold against it.
+function pressTravel(row: HTMLElement, e: MouseEvent): number {
+  const menu = row.closest<HTMLElement>(".menu");
+  const ax = Number(menu?.dataset.anchorX);
+  const ay = Number(menu?.dataset.anchorY);
+  if (!Number.isFinite(ax) || !Number.isFinite(ay)) return Number.NaN;
+  return Math.hypot(e.clientX - ax, e.clientY - ay);
+}
+
+function menuClickCounts(row: HTMLElement, pressed: boolean, travel: number): boolean {
   const menu = row.closest<HTMLElement>(".menu");
   const at = Number(menu?.dataset.armedAt ?? "0");
-  return activates(pressed, performance.now() - at, MENU_ARM_MS);
+  return activates(pressed, performance.now() - at, travel, MENU_ARM_MS, MENU_MIN_TRAVEL_PX);
 }
 
 function menuRow(
@@ -5815,17 +5844,20 @@ function menuRow(
     requireConfirm(killBtn, onKill);
     row.appendChild(killBtn);
   }
-  // Only a press that began on this row can activate it — see
-  // menuClickCounts.
+  // Only a press that began on this row, having travelled from wherever
+  // the menu opened, can activate it — see menuClickCounts.
   let pressed = false;
+  let travel = Number.NaN;
   row.addEventListener("mousedown", (e) => {
-    if (e.button === 0) pressed = true;
+    if (e.button !== 0) return;
+    pressed = true;
+    travel = pressTravel(row, e);
   });
   row.addEventListener("click", (e) => {
     if (killBtn && e.target === killBtn) return;
     const menu = row.closest<HTMLElement>(".menu");
     const since = Math.round(performance.now() - Number(menu?.dataset.armedAt ?? "0"));
-    const ok = menuClickCounts(row, pressed);
+    const ok = menuClickCounts(row, pressed, travel);
     // Both outcomes are recorded. A refusal is the interesting one: it is
     // an activation nobody asked for, and without it in the log there is
     // nothing to distinguish "the menu did something on its own" from
@@ -5834,8 +5866,10 @@ function menuRow(
       label,
       pressedOnRow: pressed,
       sinceOpenMs: Number.isFinite(since) ? since : null,
+      travelPx: Number.isFinite(travel) ? Math.round(travel) : null,
     });
     pressed = false;
+    travel = Number.NaN;
     if (!ok) return;
     closeMenus();
     onClick();
