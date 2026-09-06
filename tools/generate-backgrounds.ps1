@@ -4934,4 +4934,71 @@ foreach ($nd in @(@(360, 300), @(300, 700), @(700, 880), @(760, 220))) {
 EdgeFade $g "top" 110 110; EdgeFade $g "bottom" 110 110; EdgeFade $g "left" 120 100; EdgeFade $g "right" 120 100
 Save $bmp $g "helm.png"
 
+# ── Outrun: neon grid tunnel, glowing horizon, star field ──
+# The grid is the entire picture here: no sun, no mountains, no vehicle.
+# Synthwave already owns the sunset and TRON owns the light cycles, so
+# this one is just the floor, its mirrored ceiling, and the horizon as
+# the only light in the frame.
+$rng = New-Object System.Random(1986)
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 10 3 32) (C 255 40 10 66)
+$horizon = [int]($H * 0.44)
+
+# star field, washing out as it nears the horizon glow
+for ($i = 0; $i -lt 420; $i++) {
+  $sx = $rng.Next(0, $W); $sy = $rng.Next(0, ($horizon - 30))
+  $high = 1.0 - ($sy / [double]$horizon)
+  $a = [int](35 + 175 * $high * $rng.NextDouble())
+  $b = New-Object System.Drawing.SolidBrush((C $a 220 210 255))
+  $g.FillRectangle($b, $sx, $sy, 2, 2); $b.Dispose()
+}
+
+# horizon bloom: magenta shoulders, cyan core
+Glow $g ($W / 2) $horizon 900 (C 58 255 62 220)
+Glow $g ($W / 2) $horizon 420 (C 88 34 224 255)
+Glow $g ($W / 2) $horizon 170 (C 115 200 250 255)
+
+# ceiling: the same grid mirrored and dimmed, which turns a floor into a
+# tunnel without adding anything new to look at
+$vp = $W / 2
+for ($i = -30; $i -le 30; $i++) {
+  $pen = New-Object System.Drawing.Pen((C 32 120 90 220), 1)
+  $g.DrawLine($pen, $vp, $horizon, ($vp + $i * 160), 0); $pen.Dispose()
+}
+$cy = $horizon - 4; $cstep = 4
+while ($cy -gt 0) {
+  $pen = New-Object System.Drawing.Pen((C 28 140 100 230), 1)
+  $g.DrawLine($pen, 0, $cy, $W, $cy); $pen.Dispose()
+  $cstep = [int]($cstep * 1.34) + 1; $cy -= $cstep
+}
+
+# floor: verticals all converge on the vanishing point; every fourth is
+# magenta so the grid reads as chromatic rather than one flat cyan
+for ($i = -30; $i -le 30; $i++) {
+  $col = if (($i % 4) -eq 0) { C 150 255 62 220 } else { C 118 0 228 255 }
+  $pen = New-Object System.Drawing.Pen($col, 1)
+  $g.DrawLine($pen, $vp, $horizon, ($vp + $i * 170), $H); $pen.Dispose()
+}
+# horizontals: the exponential spacing is what makes it a floor rather
+# than ruled paper, and they thicken as they come forward
+$fy = $horizon + 3; $fstep = 3
+while ($fy -lt $H) {
+  $depth = ($fy - $horizon) / [double]($H - $horizon)
+  $pen = New-Object System.Drawing.Pen((C ([int](88 + 132 * $depth)) 0 228 255), [float](1 + 2 * $depth))
+  $g.DrawLine($pen, 0, $fy, $W, $fy); $pen.Dispose()
+  $fstep = [int]($fstep * 1.28) + 1; $fy += $fstep
+}
+
+# the horizon itself: the one line in the frame that is not perspective
+$pen = New-Object System.Drawing.Pen((C 85 255 62 220), 9)
+$g.DrawLine($pen, 0, $horizon, $W, $horizon); $pen.Dispose()
+$pen = New-Object System.Drawing.Pen((C 235 195 245 255), 3)
+$g.DrawLine($pen, 0, $horizon, $W, $horizon); $pen.Dispose()
+
+# CRT scanlines over the whole frame
+$sl = New-Object System.Drawing.SolidBrush((C 26 0 0 0))
+for ($sy2 = 0; $sy2 -lt $H; $sy2 += 3) { $g.FillRectangle($sl, 0, $sy2, $W, 1) }
+$sl.Dispose()
+Save $bmp $g "outrun.png"
+
 "done -> $out"

@@ -1180,6 +1180,24 @@ THEMES.synthwave = mkTheme(
 THEMES.synthwave.xterm.cursor = "#ff7edb";
 THEMES.synthwave.xterm.selectionBackground = "#ff7edb3d";
 
+// The grid is the whole theme: no sun, no mountains, no car. Synthwave
+// above already owns the sunset, so this one is the floor, its mirrored
+// ceiling, and a horizon bright enough to be the only light in the room.
+THEMES.outrun = mkTheme(
+  "Outrun",
+  "white",
+  ['"Cascadia Code", "Cascadia Mono", monospace', 1.2, "block"],
+  'linear-gradient(rgba(18,4,38,0.42), rgba(18,4,38,0.62)), url("/backgrounds/outrun.png") center / cover no-repeat, linear-gradient(180deg, #120426, #1d0733)',
+  "#120426",
+  "#e8e3ff",
+  [
+    "#120426", "#ff3864", "#2de2c1", "#ffd319", "#3ab0ff", "#f038ff", "#22e0ff", "#d9d4f0",
+    "#6b5f8f", "#ff6b8b", "#5ff0d4", "#ffe45e", "#74c8ff", "#ff7bf7", "#7ceeff", "#fdfbff",
+  ]
+);
+THEMES.outrun.xterm.cursor = "#22e0ff";
+THEMES.outrun.xterm.selectionBackground = "#f038ff33";
+
 THEMES.everforest = mkTheme(
   "Everforest",
   "white",
@@ -2130,7 +2148,7 @@ for (const [k, v] of Object.entries({
   redacted: 70, nier: 72, "solarized-light": 75, blueprint: 75, swordfish: 75,
   hackers: 75, speakeasy: 75, sakura: 78, matrix: 80, pride: 80,
   skicabin: 80, gameboy: 80, pipboy: 82, csgo: 85, wargames: 85,
-  galactica: 85, polygon: 85, bebop: 85, akira: 88, scouter: 88,
+  galactica: 85, polygon: 85, bebop: 85, outrun: 85, akira: 88, scouter: 88,
   aperture: 88, c64: 88,
   eink: 55, whiteboard: 58, punchcard: 60, circuit: 66, mainframe: 68,
   panic: 70, git: 72, duck: 80, coral: 82, containers: 82, helm: 85,
@@ -6586,7 +6604,7 @@ const THEME_GROUPS: Array<[string, string[]]> = [
   ["Anime", ["akira", "bebop", "scouter", "nerv"]],
   ["Space", ["hyperspace", "space", "missionctl"]],
   ["Places & vibes", ["skicabin", "rave", "nightclub", "speakeasy", "datacenter", "backrooms"]],
-  ["Art & liminal", ["hermes", "nous", "synthwave", "blueprint", "redacted", "sakura", "pride"]],
+  ["Art & liminal", ["hermes", "nous", "synthwave", "outrun", "blueprint", "redacted", "sakura", "pride"]],
 ];
 
 /// Grouped theme select: optgroups per category, then Custom, then any

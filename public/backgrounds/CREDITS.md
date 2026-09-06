@@ -7,6 +7,7 @@ Seeded GDI+ renders — re-running the script reproduces them exactly.
 - `bladerunner.png` — rainy neon skyline
 - `matrix.png` — falling glyph columns
 - `synthwave.png` — striped sun over a perspective grid
+- `outrun.png` — neon grid tunnel: converging floor, mirrored ceiling, lit horizon
 - `hermes.png` — International Klein Blue field, chartreuse registration marks
 - `nous.png` — cyanotype blueprint on warm paper
 - `cyberpunk.png` — Night City neon canyon with glitch bands
