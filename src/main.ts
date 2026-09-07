@@ -121,7 +121,8 @@ function iconFor(running: string[]): string {
 // ctrl_f_find: boolean (default true — Ctrl+V pastes and Ctrl+F opens the
 // find bar rather than reaching the shell, except on the alternate
 // buffer); clickable_links: boolean (default true); right_click: "menu"
-// (default) or "paste" for the console's own behaviour.
+// (default) or "paste" for the console's own behaviour; renderer: "auto"
+// (default, WebGL) or "dom".
 // A "new tab" preset: right-clicking the + button lists these. Unset
 // fields fall back to the regular defaults (default_shell, default_cwd,
 // automatic titles).
@@ -192,6 +193,9 @@ interface AppConfig {
   /// What the right button does in a pane: "menu" (default) or "paste",
   /// which is what conhost's QuickEdit and Windows Terminal both do.
   right_click?: string;
+  /// "auto" (default) draws with WebGL; "dom" is the escape hatch for a
+  /// machine whose driver makes a mess of it.
+  renderer?: string;
   clickable_links?: boolean;
   summon_hotkey?: string;
   bell?: string;
@@ -2234,6 +2238,10 @@ function effRightClick(): string {
   return config.right_click === "paste" ? "paste" : "menu";
 }
 
+function effRenderer(): string {
+  return config.renderer === "dom" ? "dom" : "auto";
+}
+
 let saveTimer: number | undefined;
 function saveConfig() {
   window.clearTimeout(saveTimer);
@@ -2256,8 +2264,7 @@ function effXtermTheme(): ITheme {
 }
 
 /// Push current appearance settings into every open terminal, switching
-/// renderers live: WebGL can't composite transparency, so tabs move to the
-/// DOM renderer while a background is active and back to WebGL without one.
+/// renderers live when the renderer setting changes.
 function applyAppearance() {
   applyBackground();
   // Keep the chrome font in sync with the effective terminal font (theme
@@ -2269,12 +2276,12 @@ function applyAppearance() {
   statusWidths.clear();
   statusDetailSizes.clear();
   const t = { xterm: effXtermTheme() };
-  const bg = bgActive();
+  const wantWebgl = effRenderer() !== "dom";
   for (const tab of tabs.values()) {
-    if (bg && tab.webgl) {
+    if (!wantWebgl && tab.webgl) {
       tab.webgl.dispose();
       tab.webgl = undefined;
-    } else if (!bg && !tab.webgl) {
+    } else if (wantWebgl && !tab.webgl) {
       try {
         tab.webgl = new WebglAddon();
         tab.term.loadAddon(tab.webgl);
@@ -4307,10 +4314,17 @@ async function createTab(
     term.loadAddon(new WebLinksAddon((_e, uri) => void openUrl(uri).catch(() => {})));
   }
   term.open(paneBody);
-  // The WebGL renderer can't composite transparency over a decorative
-  // background; those tabs use the DOM renderer instead.
+  // WebGL for every tab, background art or not.
+  //
+  // Tabs with a background used to drop to the DOM renderer, because older
+  // versions of the addon could not composite transparency. That is no
+  // longer true of the one in this tree - and the DOM renderer is the slow
+  // one, so the effect of the old rule was that choosing any theme with art
+  // quietly bought the worst renderer, which is the last thing to spend on
+  // a terminal. tests/webgl.mjs measures the compositing rather than
+  // trusting this comment; if an upgrade takes it away, that test says so.
   let webgl: WebglAddon | undefined;
-  if (!bgActive()) {
+  if (effRenderer() !== "dom") {
     try {
       webgl = new WebglAddon();
       term.loadAddon(webgl);
@@ -7465,6 +7479,15 @@ function buildSettingsPage() {
     mkSelect([["on", "On"], ["off", "Off"]], effCtrlFFind() ? "on" : "off", (v) => {
       config.ctrl_f_find = v === "on";
       changed();
+    })
+  );
+  settingRow(
+    "Renderer",
+    "WebGL draws the terminal on the GPU and is what every tab uses. DOM is the fallback: much slower, and only worth reaching for if this machine's driver makes a mess of the GPU one - characters in the wrong place, a screen that stops repainting. The pane menu's diagnostics say which one a tab actually got, since WebGL can also fail on its own and fall back without asking.",
+    mkSelect([["auto", "WebGL"], ["dom", "DOM"]], effRenderer(), (v) => {
+      config.renderer = v;
+      changed();
+      applyAppearance();
     })
   );
   settingRow(

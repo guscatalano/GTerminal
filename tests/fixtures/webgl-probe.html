@@ -1,0 +1,100 @@
+<!doctype html>
+<!--
+  Does the WebGL renderer composite a transparent background?
+
+  Driven by tests/webgl.mjs, which loads this in headless Edge and reads
+  the verdict out of the DOM. Loads xterm straight from node_modules as ES
+  modules, so there is no bundler in the loop.
+
+  The whole renderer decision rests on the answer: every theme with
+  background art sets the terminal background to #00000000 and expects the
+  art to show through. If a future xterm makes WebGL paint over it again,
+  this says so - instead of users finding black boxes where the art was.
+-->
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css" />
+<style>
+  html,
+  body {
+    margin: 0;
+    background: #ff00ff;
+  }
+  #term {
+    width: 640px;
+    height: 200px;
+  }
+  #verdict {
+    font: 14px monospace;
+    color: #000;
+    background: #fff;
+  }
+</style>
+<div id="term"></div>
+<div id="verdict">RESULT pending</div>
+<script type="module">
+  import { Terminal } from "../../node_modules/@xterm/xterm/lib/xterm.mjs";
+  import { WebglAddon } from "../../node_modules/@xterm/addon-webgl/lib/addon-webgl.mjs";
+
+  const report = (text) => {
+    document.getElementById("verdict").textContent = text;
+  };
+  window.addEventListener("error", (e) => report(`RESULT threw ${e.message}`));
+
+  try {
+    const transparent = new URLSearchParams(location.search).get("transparent") !== "0";
+    const term = new Terminal({
+      fontFamily: "Consolas, monospace",
+      fontSize: 16,
+      cols: 40,
+      rows: 8,
+      allowTransparency: true,
+      theme: {
+        // What main.ts uses when a background is active: fully transparent
+        // cells in hex8, so the art behind shows through.
+        background: transparent ? "#00000000" : "#101020",
+        foreground: "#ffffff",
+      },
+    });
+    term.open(document.getElementById("term"));
+    // preserveDrawingBuffer only so the snapshot below can read the frame.
+    // It changes nothing about how the background is composited.
+    term.loadAddon(new WebglAddon(true));
+    term.write("MMMMMMMMMMMMMMMMMMMM\r\nMMMMMMMMMMMMMMMMMMMM");
+
+    // Headless has no compositor driving requestAnimationFrame on a
+    // schedule worth relying on, so the snapshot is on a timer.
+    setTimeout(() => {
+      try {
+        const canvases = [...document.querySelectorAll("#term canvas")];
+        if (!canvases.length) return report("RESULT no-canvas");
+        const { width, height } = canvases[0];
+        const out = document.createElement("canvas");
+        out.width = width;
+        out.height = height;
+        const ctx = out.getContext("2d");
+        for (const c of canvases) ctx.drawImage(c, 0, 0);
+        const data = ctx.getImageData(0, 0, width, height).data;
+        let clear = 0;
+        let opaque = 0;
+        let glyph = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i + 3] === 0) {
+            clear++;
+            continue;
+          }
+          opaque++;
+          // White and solid: a glyph pixel. Counting these is how the
+          // snapshot proves it caught a real frame - a buffer that had
+          // already been cleared reads as "everything is transparent",
+          // which is the false pass this has to rule out.
+          if (data[i + 3] > 200 && data[i] > 200 && data[i + 1] > 200 && data[i + 2] > 200) glyph++;
+        }
+        report(`RESULT clear=${clear} opaque=${opaque} glyph=${glyph}`);
+      } catch (e) {
+        report(`RESULT threw ${e}`);
+      }
+    }, 1200);
+  } catch (e) {
+    report(`RESULT threw ${e}`);
+  }
+</script>
