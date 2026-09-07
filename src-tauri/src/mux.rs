@@ -2604,16 +2604,16 @@ fn start_session(
             // reader that is behind; holding the daemon's one lock across
             // either is how a busy session makes an idle one feel slow to
             // type in.
-            if let Some(f) = transcript.as_mut() {
-                let _ = f.write_all(&buf[..n]);
-                transcript_len += n as u64;
-                if transcript_len >= HISTORY_MAX {
-                    let _ = f.write_all(
-                        b"\r\n\x1b[90m[transcript size cap reached - recording stopped]\x1b[0m\r\n",
-                    );
-                    transcript = None;
-                }
-            }
+            //
+            // The client goes first, and the order is the point. The
+            // transcript is a durable record nobody is waiting on; the
+            // client is somebody watching for the character they just
+            // typed. Writing the file first puts a disk on the echo's
+            // critical path, and a single write_all stalling - a slow
+            // disk, an antivirus deciding to look at the file - is then a
+            // stall in somebody's typing. The soak caught exactly one
+            // such keystroke in nine thousand, over a second long, which
+            // is the failure this ordering makes impossible.
             if let (Some((generation, sock)), Some(line)) = (client.as_mut(), line) {
                 if write_line(sock, &line).is_err() {
                     let dead = *generation;
@@ -2625,6 +2625,16 @@ fn start_session(
                             s.attached = None;
                         }
                     }
+                }
+            }
+            if let Some(f) = transcript.as_mut() {
+                let _ = f.write_all(&buf[..n]);
+                transcript_len += n as u64;
+                if transcript_len >= HISTORY_MAX {
+                    let _ = f.write_all(
+                        b"\r\n\x1b[90m[transcript size cap reached - recording stopped]\x1b[0m\r\n",
+                    );
+                    transcript = None;
                 }
             }
         }
