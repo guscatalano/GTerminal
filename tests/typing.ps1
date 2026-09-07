@@ -900,10 +900,16 @@ $soakScenarios = @(
 # The reps are shared out, so widening the matrix costs coverage of each
 # state rather than minutes on every run.
 $soakEach = [math]::Max(4, [int]($SoakReps / $soakScenarios.Count))
-$soakFloods = @()
 $soakSessions = @()
+$scenarioFlood = $null
 
 foreach ($scenario in $soakScenarios) {
+  # Whatever the last scenario was running is not part of this one. The
+  # flood used to be left going for the rest of the matrix, so "cmd" was
+  # quietly measured under load and only said so by failing - which is how
+  # it found a real stall, and is still the wrong way to find one: a
+  # scenario has to measure the state it names.
+  if ($scenarioFlood) { Close-Shell $scenarioFlood; $scenarioFlood = $null }
   if ($scenario.Load) {
     # A neighbour printing the whole time. Detached on purpose: an
     # attached client that never reads is the stalled-reader case above,
@@ -913,7 +919,7 @@ foreach ($scenario in $soakScenarios) {
     Type-Text ("1..400000 | ForEach-Object { 'flooding ' + $_ + ' ' + ('.' * 60) }" + "`r")
     $script:w.WriteLine('{"cmd":"detach"}')
     Start-Sleep -Milliseconds 500
-    $soakFloods += $flood
+    $scenarioFlood = $flood
   }
   $sess = Open-Shell $scenario.Shell
   $soakSessions += $sess
@@ -1042,7 +1048,7 @@ if ($SoakChars -gt 0) {
 
 # ── cleanup ──
 foreach ($sess in $soakSessions) { Close-Shell $sess }
-foreach ($sess in $soakFloods) { Close-Shell $sess }
+if ($scenarioFlood) { Close-Shell $scenarioFlood }
 if ($typeSess) { Close-Shell $typeSess }
 Close-Shell $flood
 Close-Shell $latSess
