@@ -2519,6 +2519,42 @@ fn start_session(
         (None, 0)
     };
 
+    // The transcript is written on its own thread, and the pump only hands
+    // it chunks.
+    //
+    // It used to be written by the pump itself. Moving that write after
+    // the client write stopped it delaying the echo of the keystroke it
+    // belonged to - but the pump is one loop, so a write_all that blocks
+    // still delays the *next* one, which is the same stall one keystroke
+    // later. The soak found it on a cmd session while a neighbour was
+    // flooding: 115ms, of which 0.5ms was this process being off-CPU, so
+    // the machine was running and something here was not.
+    //
+    // A disk has no business on that path at all. The channel is bounded
+    // rather than unbounded so a disk that is persistently slower than the
+    // pty still applies backpressure instead of growing memory without
+    // limit - it just no longer turns a hiccup into somebody's typing.
+    let transcript_tx = transcript.map(|file| {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(4096);
+        let mut len = transcript_len;
+        std::thread::spawn(move || {
+            let mut f = file;
+            for chunk in rx {
+                if f.write_all(&chunk).is_err() {
+                    break;
+                }
+                len += chunk.len() as u64;
+                if len >= HISTORY_MAX {
+                    let _ = f.write_all(
+                        b"\r\n\x1b[90m[transcript size cap reached - recording stopped]\x1b[0m\r\n",
+                    );
+                    break;
+                }
+            }
+        });
+        tx
+    });
+
     let child_pid = child.process_id();
     sessions.lock().unwrap().live.insert(
         id,
@@ -2552,8 +2588,6 @@ fn start_session(
     std::thread::spawn(move || {
         // The thread carrying the echo back - see raise_thread_priority.
         raise_thread_priority();
-        let mut transcript = transcript;
-        let mut transcript_len = transcript_len;
         let mut buf = [0u8; 8192];
         let mut carry: Vec<u8> = Vec::new();
         // The attached client's socket, cloned so a chunk can be written
@@ -2599,21 +2633,13 @@ fn start_session(
                     };
                 }
             }
-            // Disk and socket, both with the lock released. A transcript
-            // write is a file write, and the client write can block on a
-            // reader that is behind; holding the daemon's one lock across
-            // either is how a busy session makes an idle one feel slow to
-            // type in.
+            // The client write, with the lock released: it can block on a
+            // reader that is behind, and holding the daemon's one lock
+            // across that is how a busy session makes an idle one
+            // impossible to type in.
             //
-            // The client goes first, and the order is the point. The
-            // transcript is a durable record nobody is waiting on; the
-            // client is somebody watching for the character they just
-            // typed. Writing the file first puts a disk on the echo's
-            // critical path, and a single write_all stalling - a slow
-            // disk, an antivirus deciding to look at the file - is then a
-            // stall in somebody's typing. The soak caught exactly one
-            // such keystroke in nine thousand, over a second long, which
-            // is the failure this ordering makes impossible.
+            // The transcript is not here at all any more - it goes to its
+            // own thread below, so no disk is on this loop.
             if let (Some((generation, sock)), Some(line)) = (client.as_mut(), line) {
                 if write_line(sock, &line).is_err() {
                     let dead = *generation;
@@ -2627,15 +2653,11 @@ fn start_session(
                     }
                 }
             }
-            if let Some(f) = transcript.as_mut() {
-                let _ = f.write_all(&buf[..n]);
-                transcript_len += n as u64;
-                if transcript_len >= HISTORY_MAX {
-                    let _ = f.write_all(
-                        b"\r\n\x1b[90m[transcript size cap reached - recording stopped]\x1b[0m\r\n",
-                    );
-                    transcript = None;
-                }
+            // Hand the chunk to the transcript thread and move on. A send
+            // is a memcpy and a wakeup; the write happens somewhere this
+            // loop never waits for.
+            if let Some(tx) = transcript_tx.as_ref() {
+                let _ = tx.send(buf[..n].to_vec());
             }
         }
         // PTY stream ended (master dropped or conhost died): tear down the
