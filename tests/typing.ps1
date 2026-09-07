@@ -11,7 +11,24 @@ param(
   [string]$Exe,
   # How many times the soak types its sentence. The default is a couple of
   # minutes; raise it to leave the thing running for an afternoon.
-  [int]$SoakReps = 100
+  [int]$SoakReps = 100,
+  # What counts as lag.
+  #
+  # Not a round number, and not as low as it could be: echo latency has a
+  # floor that is not ours. Measured across pwsh, Windows PowerShell and
+  # cmd, every shell shows the same p99 of about 16.4ms and the same
+  # occasional 23ms - cmd included, which has no PSReadLine at all. That
+  # is ConPTY's own flush cadence on the 15.6ms Windows timer, and no
+  # change on this side of the pty can move it.
+  #
+  # So 50ms is "no more than three of those ticks", which is the tightest
+  # bar that is about this app rather than about Windows. Lower than that
+  # and the suite starts failing on a quantum nobody here owns.
+  [int]$SoakBudgetMs = 50,
+  # Characters to push through the endurance run. Zero skips it. This is
+  # the one that answers "does it still feel like this after a very long
+  # time", so the interesting values are stupid ones - a few million.
+  [int64]$SoakChars = 0
 )
 $ErrorActionPreference = "Stop"
 $repo = Split-Path $PSScriptRoot -Parent
@@ -23,6 +40,25 @@ if (-not (Test-Path $exe)) { Write-Error "build first: cargo build in src-tauri"
 # set nothing in the tree can be interrupted. See tests/lib/attended.ps1.
 . "$PSScriptRoot/lib/attended.ps1"
 $null = Enable-CtrlCHandling
+
+# The harness must not be the slow thing.
+#
+# Latency here is measured by a PowerShell process timing its own round
+# trips, so every quantum this process loses to the scheduler lands in the
+# numbers as if the daemon had stalled. It showed up as a distribution
+# with two modes: a median under a millisecond and a p99 of about 16ms,
+# which is not a coincidence - it is one Windows scheduler quantum, and
+# nothing in a pty round trip has that shape.
+#
+# Above normal, so the measurement is of the app rather than of who else
+# wanted the core. The daemon under test raises the same two threads for
+# the same reason; a test that did not would be measuring a handicap it
+# invented.
+try {
+  [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = "High"
+} catch {
+  Write-Host "  note: could not raise this process's priority; latency tails may be scheduling, not the app" -ForegroundColor DarkYellow
+}
 
 $env:LOCALAPPDATA = Join-Path $env:TEMP "gterminal-typing-test"
 New-Item -ItemType Directory -Force $env:LOCALAPPDATA | Out-Null
@@ -49,10 +85,34 @@ $script:chars = New-Object char[] 131072
 # exactly like the daemon corrupting it, and is the first thing this
 # harness must not do while testing for precisely that fault.
 $script:dec = [System.Text.Encoding]::UTF8.GetDecoder()
+# Longest stretch the previous spinning Read-Event went without running.
+#
+# A latency number measured by this process is only about the app while
+# this process is on a CPU. On a shared CI runner it often is not: the
+# host takes the core away for tens or hundreds of milliseconds, and a
+# keystroke measured across that gap looks exactly like a daemon that
+# stalled. It is not a rare effect - it is why the same commit can pass
+# this suite on one runner and fail it on the next.
+#
+# The spin loop reads the clock continuously, so the largest jump between
+# two consecutive reads is precisely how long it was descheduled. That
+# separates "the terminal was slow" from "we were not running", which no
+# amount of re-running can do.
+$script:spinGapMs = 0.0
+
 function Read-Event {
   param($timeoutMs = 2000, [switch]$spin)
   $deadline = [DateTime]::UtcNow.AddMilliseconds($timeoutMs)
+  $script:spinGapMs = 0.0
+  $freq = [double][System.Diagnostics.Stopwatch]::Frequency
+  $last = [System.Diagnostics.Stopwatch]::GetTimestamp()
   while (-not $script:acc.Contains("`n")) {
+    if ($spin) {
+      $now = [System.Diagnostics.Stopwatch]::GetTimestamp()
+      $gap = ($now - $last) * 1000.0 / $freq
+      if ($gap -gt $script:spinGapMs) { $script:spinGapMs = $gap }
+      $last = $now
+    }
     if ($script:stream.DataAvailable) {
       $n = $script:stream.Read($script:buf, 0, $script:buf.Length)
       if ($n -eq 0) { return $null }
@@ -737,24 +797,34 @@ Start-Sleep -Milliseconds 300
 # Percentiles hide the thing being looked for. A hitch every few seconds is
 # invisible at p95 and is the entire complaint, so this types a real
 # sentence over and over and asserts on the worst keystroke rather than the
-# median - and reports which keystroke and how far into the run, because a
+# median - reporting which keystroke and how far into the run, because a
 # stall on a schedule is the signature of something on a timer rather than
 # something about typing.
 #
-# An outlier is confirmed with a second pass before it fails the suite.
-# Not to be lenient: the threshold stays where it is, and anything with a
-# cause repeats - a timer, a flush, a lock - while a shared CI runner
-# descheduling this process for a second does not. A test that cries wolf
-# on other people's noise gets its threshold raised until it means nothing,
-# which is the failure mode this whole file is a reaction to. Both passes
-# are printed either way.
-$soakSess = Open-Shell "pwsh"
+# Four scenarios rather than one, because a single quiet pwsh at an empty
+# prompt is the state in which nothing has ever gone wrong:
+#
+#   pwsh            the common case, and the baseline the others are read against
+#   pwsh under load a neighbour session printing the whole time, and this
+#                   session's own ring past its cap - the state a terminal
+#                   that has been open all afternoon is actually in
+#   powershell      a different PSReadLine, older and slower to repaint
+#   cmd             no PSReadLine at all, which makes it the control for
+#                   whether a tail belongs to the shell or to us
+#
+# An outlier is confirmed with a second pass of the same scenario before it
+# fails the suite. Not to be lenient - the threshold stays where it is, and
+# anything with a cause repeats, while a runner descheduling this process
+# for a second does not. Raising a threshold each time it cries wolf is how
+# the latency test that already lived in this file came to pass through a
+# period of visible lag. Both passes are printed either way.
 $soakLine = "the quick brown fox jumps over the lazy dog while the status bar counts whatever it counts"
 
 function Invoke-Soak {
   param([int]$reps)
   $samples = New-Object System.Collections.Generic.List[double]
   $slow = New-Object System.Collections.Generic.List[object]
+  $descheduled = New-Object System.Collections.Generic.List[object]
   $clock = [System.Diagnostics.Stopwatch]::StartNew()
   $aborted = ""
   $k = 0
@@ -767,8 +837,18 @@ function Invoke-Soak {
       if ($null -eq $ev) { $aborted = "keystroke $k got no echo within 5s"; break }
       $ms = $sw.Elapsed.TotalMilliseconds
       $samples.Add($ms)
-      if ($ms -gt 50) {
-        $slow.Add([pscustomobject]@{ At = $k; Ms = [math]::Round($ms, 1); Sec = [math]::Round($clock.Elapsed.TotalSeconds, 1) })
+      if ($ms -gt $SoakBudgetMs) {
+        # Was this the terminal, or was this process not running? The spin
+        # loop knows: if most of the wait is a single gap between two of
+        # its own clock reads, nothing was measured except the scheduler.
+        $gap = [math]::Round($script:spinGapMs, 1)
+        $entry = [pscustomobject]@{
+          At   = $k
+          Ms   = [math]::Round($ms, 1)
+          Sec  = [math]::Round($clock.Elapsed.TotalSeconds, 1)
+          Gap  = $gap
+        }
+        if ($gap -ge ($ms * 0.6)) { $descheduled.Add($entry) } else { $slow.Add($entry) }
       }
       $k++
       # A short quiet gap rather than a fixed drain: 30ms per keystroke
@@ -780,52 +860,189 @@ function Invoke-Soak {
     $null = Drain 40
   }
   [pscustomobject]@{
-    Samples = $samples
-    Slow    = $slow
-    Aborted = $aborted
-    Seconds = [math]::Round($clock.Elapsed.TotalSeconds, 1)
+    Samples      = $samples
+    Slow         = $slow
+    Descheduled  = $descheduled
+    Aborted      = $aborted
+    Seconds      = [math]::Round($clock.Elapsed.TotalSeconds, 1)
   }
 }
 
+function Soak-Worst {
+  param($run)
+  [math]::Round(($run.Samples | Measure-Object -Maximum).Maximum, 1)
+}
+
+# Writes, and returns nothing. An earlier version ended with the worst
+# figure so a caller could use it, which in PowerShell put the summary line
+# on the pipeline as well - so `$worst = Show-Soak ...` captured the report
+# instead of printing it, and the run went quiet about exactly the numbers
+# it exists to show.
 function Show-Soak {
   param($label, $run)
-  $worst = [math]::Round(($run.Samples | Measure-Object -Maximum).Maximum, 1)
   $p50 = Pct $run.Samples 0.5
   $p99 = Pct $run.Samples 0.99
-  "soak ${label}: $($run.Samples.Count) keystrokes over $($run.Seconds)s - p50=${p50}ms p99=${p99}ms worst=${worst}ms, $($run.Slow.Count) over 50ms"
+  Write-Host "soak ${label}: $($run.Samples.Count) keystrokes over $($run.Seconds)s - p50=${p50}ms p99=${p99}ms worst=$(Soak-Worst $run)ms, $($run.Slow.Count) over ${SoakBudgetMs}ms, $($run.Descheduled.Count) while off-CPU"
   foreach ($slow in ($run.Slow | Select-Object -First 8)) {
-    "  slow keystroke $($slow.At) at $($slow.Sec)s: $($slow.Ms)ms"
+    Write-Host "  slow keystroke $($slow.At) at $($slow.Sec)s: $($slow.Ms)ms (off-CPU $($slow.Gap)ms of it)"
   }
-  $worst
+  foreach ($slow in ($run.Descheduled | Select-Object -First 4)) {
+    Write-Host "  not counted - this process was off-CPU for $($slow.Gap)ms of a $($slow.Ms)ms keystroke at $($slow.Sec)s"
+  }
 }
 
-$soak = Invoke-Soak $SoakReps
-if ($soak.Aborted) {
-  $failures += "soak: $($soak.Aborted)"
-} elseif ($soak.Samples.Count -lt ($SoakReps * $soakLine.Length * 0.99)) {
-  $failures += "soak: only $($soak.Samples.Count) keystrokes were measured"
-} else {
-  $worst = Show-Soak "pass 1" $soak
-  if ($soak.Slow.Count -eq 0) {
-    "PASS soak: no keystroke in $($soak.Samples.Count) took over 50ms"
+$soakScenarios = @(
+  @{ Name = "pwsh"; Shell = "pwsh"; Load = $false },
+  @{ Name = "pwsh under load"; Shell = "pwsh"; Load = $true },
+  @{ Name = "powershell"; Shell = "powershell"; Load = $false },
+  @{ Name = "cmd"; Shell = "cmd"; Load = $false }
+)
+# The reps are shared out, so widening the matrix costs coverage of each
+# state rather than minutes on every run.
+$soakEach = [math]::Max(4, [int]($SoakReps / $soakScenarios.Count))
+$soakFloods = @()
+$soakSessions = @()
+
+foreach ($scenario in $soakScenarios) {
+  if ($scenario.Load) {
+    # A neighbour printing the whole time. Detached on purpose: an
+    # attached client that never reads is the stalled-reader case above,
+    # and this one is about the work every chunk costs regardless of who
+    # is listening - the ring, its trims, the transcript, the checkpoints.
+    $flood = Open-Shell "pwsh"
+    Type-Text ("1..400000 | ForEach-Object { 'flooding ' + $_ + ' ' + ('.' * 60) }" + "`r")
+    $script:w.WriteLine('{"cmd":"detach"}')
+    Start-Sleep -Milliseconds 500
+    $soakFloods += $flood
+  }
+  $sess = Open-Shell $scenario.Shell
+  $soakSessions += $sess
+  if ($scenario.Load) {
+    # And this session's own ring past its cap, so every chunk it produces
+    # is in the trimming regime rather than the empty-buffer one.
+    Fill-Ring
+  }
+  $run = Invoke-Soak $soakEach
+  if ($run.Aborted) {
+    $failures += "soak $($scenario.Name): $($run.Aborted)"
+    continue
+  }
+  if ($run.Samples.Count -lt ($soakEach * $soakLine.Length * 0.99)) {
+    $failures += "soak $($scenario.Name): only $($run.Samples.Count) keystrokes were measured"
+    continue
+  }
+  Show-Soak $scenario.Name $run
+  if ($run.Slow.Count -eq 0) {
+    "PASS soak $($scenario.Name): no keystroke in $($run.Samples.Count) took over ${SoakBudgetMs}ms"
+    continue
+  }
+  Write-Host "  confirming: a stall with a cause repeats, a descheduled process does not"
+  $again = Invoke-Soak $soakEach
+  if ($again.Aborted) {
+    $failures += "soak $($scenario.Name) confirmation: $($again.Aborted)"
+    continue
+  }
+  Show-Soak "$($scenario.Name) pass 2" $again
+  if ($again.Slow.Count -gt 0) {
+    $failures += "soak $($scenario.Name): keystrokes over ${SoakBudgetMs}ms in both passes (worst $(Soak-Worst $run)ms then $(Soak-Worst $again)ms) - every input is supposed to be free of that"
   } else {
-    "  confirming: a stall with a cause repeats, a descheduled process does not"
-    $again = Invoke-Soak $SoakReps
-    if ($again.Aborted) {
-      $failures += "soak confirmation: $($again.Aborted)"
-    } else {
-      $worst2 = Show-Soak "pass 2" $again
-      if ($again.Slow.Count -gt 0) {
-        $failures += "soak: keystrokes over 50ms in both passes (worst ${worst}ms then ${worst2}ms) - every input is supposed to be free of that"
-      } else {
-        "PASS soak: $($soak.Slow.Count) outlier in pass 1 did not reproduce in $($again.Samples.Count) further keystrokes"
+    "PASS soak $($scenario.Name): $($run.Slow.Count) outlier did not reproduce in $($again.Samples.Count) further keystrokes"
+  }
+}
+
+# ── endurance: volume, with latency sampled the whole way through ──
+#
+# The soak above measures every keystroke, which costs a round trip each
+# and works out at about 20ms per character - fine for thousands, and
+# fifty hours for the millions it would take to answer a different
+# question: does this still type well after a very long time. Ring churn,
+# a transcript growing without bound, handles, fragmentation and every
+# checkpoint of an ever-larger buffer only show up at volume.
+#
+# So volume is pushed in bursts - keys sent as fast as the socket takes
+# them, the way a person's hands actually arrive, and the way nothing else
+# in this file types - and latency is sampled periodically along the way.
+# The samples are what enforce "no lag": drift is the failure being looked
+# for, so the first tenth of them is compared against the last.
+if ($SoakChars -gt 0) {
+  $endSess = Open-Shell "pwsh"
+  # Long bursts, because the pause that lets the echo catch up is paid per
+  # burst and not per character: at 400 characters it was most of the wall
+  # clock, and the run was measuring its own politeness.
+  $burst = ($soakLine * 14).Substring(0, 1200)
+  $sent = [int64]0
+  $sampled = New-Object System.Collections.Generic.List[double]
+  $sampleSlow = New-Object System.Collections.Generic.List[object]
+  $sampleEvery = [math]::Max(20000, [int]($SoakChars / 40))
+  $nextSample = $sampleEvery
+  $endClock = [System.Diagnostics.Stopwatch]::StartNew()
+  $endAborted = ""
+  while ($sent -lt $SoakChars -and -not $endAborted) {
+    foreach ($ch in $burst.ToCharArray()) {
+      $script:w.WriteLine("{""cmd"":""write"",""data"":""$(Esc-Json ([string]$ch))""}")
+    }
+    $sent += $burst.Length
+    # Let the echo catch up before abandoning the line, so "keeping up" is
+    # part of what is being measured rather than something skipped past.
+    if (-not (Wait-Quiet 120 60000)) { $endAborted = "the echo never caught up after $sent characters" ; break }
+    $script:w.WriteLine("{""cmd"":""write"",""data"":""\u0003""}")
+    $null = Drain 40
+    if ($sent -ge $nextSample) {
+      $nextSample = $sent + $sampleEvery
+      for ($i = 0; $i -lt 30; $i++) {
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $script:w.WriteLine("{""cmd"":""write"",""data"":""$(Esc-Json ([string]$soakLine[$i % $soakLine.Length]))""}")
+        $ev = Read-Event -timeoutMs 5000 -spin
+        $sw.Stop()
+        if ($null -eq $ev) { $endAborted = "no echo within 5s after $sent characters"; break }
+        $ms = $sw.Elapsed.TotalMilliseconds
+        $sampled.Add($ms)
+        if ($ms -gt $SoakBudgetMs) {
+          $sampleSlow.Add([pscustomobject]@{ At = $sent; Ms = [math]::Round($ms, 1); Sec = [math]::Round($endClock.Elapsed.TotalSeconds, 1) })
+        }
+        $null = Read-Event -timeoutMs 4
       }
+      $script:w.WriteLine("{""cmd"":""write"",""data"":""\u0003""}")
+      $null = Drain 40
+      $rate = [int]($sent / [math]::Max(1, $endClock.Elapsed.TotalSeconds))
+      Write-Host ("  endurance: {0:N0} characters, {1:N0}/s, {2} samples, worst {3}ms" -f $sent, $rate, $sampled.Count, [math]::Round(($sampled | Measure-Object -Maximum).Maximum, 1))
     }
   }
+  $endSecs = [math]::Round($endClock.Elapsed.TotalSeconds, 1)
+  if ($endAborted) {
+    $failures += "endurance: $endAborted"
+  } elseif ($sampled.Count -lt 20) {
+    $failures += "endurance: only $($sampled.Count) latency samples were taken over $sent characters"
+  } else {
+    $endWorst = [math]::Round(($sampled | Measure-Object -Maximum).Maximum, 1)
+    Write-Host ("endurance: {0:N0} characters over {1}s - {2} samples, p50=$(Pct $sampled 0.5)ms p99=$(Pct $sampled 0.99)ms worst=${endWorst}ms, $($sampleSlow.Count) over ${SoakBudgetMs}ms" -f $sent, $endSecs, $sampled.Count)
+    foreach ($slow in ($sampleSlow | Select-Object -First 8)) {
+      Write-Host "  slow keystroke after $($slow.At) characters, at $($slow.Sec)s: $($slow.Ms)ms"
+    }
+    # Drift is the point: a terminal that types well for a minute and
+    # badly after an hour passes every other test in this file.
+    $tenth = [math]::Max(5, [int]($sampled.Count / 10))
+    $early = Pct ($sampled[0..($tenth - 1)]) 0.5
+    $late = Pct ($sampled[-$tenth..-1]) 0.5
+    $drift = if ($early -gt 0) { [math]::Round($late / $early, 2) } else { 0 }
+    # Only judged on a long run: a tenth of sixty samples is six, and six
+    # round trips have enough spread between them to invent a drift that
+    # is not there. The nine-million-character run has hundreds.
+    Write-Host "  first $tenth samples p50=${early}ms, last $tenth p50=${late}ms (x${drift})$(if ($sampled.Count -lt 100) { ' - too few samples to judge drift' })"
+    if ($sampleSlow.Count -gt 0) {
+      $failures += "endurance: $($sampleSlow.Count) sampled keystrokes over ${SoakBudgetMs}ms (worst ${endWorst}ms) after volume"
+    } elseif ($sampled.Count -ge 100 -and $drift -gt 3) {
+      $failures += "endurance: latency drifted ${drift}x between the start and the end of $sent characters"
+    } else {
+      "PASS endurance: $sent characters, no sampled keystroke over ${SoakBudgetMs}ms, no drift"
+    }
+  }
+  Close-Shell $endSess
 }
 
 # ── cleanup ──
-Close-Shell $soakSess
+foreach ($sess in $soakSessions) { Close-Shell $sess }
+foreach ($sess in $soakFloods) { Close-Shell $sess }
 if ($typeSess) { Close-Shell $typeSess }
 Close-Shell $flood
 Close-Shell $latSess
