@@ -1,0 +1,73 @@
+name: Endurance
+
+# Nine million characters typed through a real daemon, with echo latency
+# sampled the whole way.
+#
+# The per-push soak measures every keystroke, which costs a round trip
+# each and works out around 20ms per character - thousands of keystrokes
+# is what fits in a CI job, and thousands is enough to catch a stall that
+# is there from the start. It cannot answer the other question: does this
+# still type well after a very long time. Ring churn, a transcript that
+# only grows, handles, fragmentation, and every checkpoint of an
+# ever-larger buffer are all things that need volume before they say
+# anything.
+#
+# So volume goes here instead, in bursts - keys sent as fast as the
+# socket takes them, which is also the only place in the suite that types
+# the way hands actually do - at roughly 3,300 characters a second, with
+# thirty round trips measured every few hundred thousand characters. The
+# assertion is the same one the soak makes: no sampled keystroke over the
+# budget, and no drift between the first samples and the last.
+#
+# Weekly, because it is 45 minutes of a runner to answer a question whose
+# answer changes slowly.
+
+on:
+  workflow_dispatch:
+    inputs:
+      characters:
+        description: 'How many characters to type (default nine million, about 45 minutes).'
+        required: false
+        type: string
+        default: '9000000'
+  schedule:
+    - cron: "0 5 * * 0"
+
+permissions:
+  contents: read
+
+jobs:
+  endurance:
+    runs-on: windows-latest
+    # 45 minutes of typing plus the build and the rest of the suite. The
+    # ceiling sits well above that rather than beside it, because a run
+    # killed at the limit reports as "cancelled" and reads like somebody
+    # stopped it.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # The daemon only - no window is involved, and the endurance run
+      # drives it over its socket exactly as the app does.
+      - name: Build daemon
+        run: cargo build --manifest-path src-tauri/Cargo.toml
+
+      - name: Type nine million characters
+        shell: pwsh
+        run: |
+          $chars = if ("${{ inputs.characters }}") { "${{ inputs.characters }}" } else { "9000000" }
+          pwsh -NoProfile -File tests/typing.ps1 -SoakChars $chars
