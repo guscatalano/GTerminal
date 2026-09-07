@@ -112,7 +112,7 @@ fn send_to(state: &PtyManager, id: u32, req: Request) -> Result<(), String> {
     mux::write_line(stream, &serde_json::to_value(req).unwrap()).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_sessions() -> Result<Vec<mux::SessionInfo>, String> {
     // Without a daemon there are no sessions to list — unless checkpointed
     // sessions exist on disk (e.g. after a reboot), in which case a daemon
@@ -163,7 +163,7 @@ fn attach_session(
 /// reported twice and the cost of being wrong again is that someone
 /// cannot find the file they were asked to send. Spawning the file
 /// manager needs no permission of its own and no path scope.
-#[tauri::command]
+#[tauri::command(async)]
 fn open_logs_folder() -> Result<String, String> {
     use std::os::windows::process::CommandExt;
     let dir = logs_path();
@@ -184,7 +184,7 @@ fn open_logs_folder() -> Result<String, String> {
 /// Spawned the same way the logs button ended up being spawned, for the
 /// same reason - the opener plugin does nothing often enough that "the
 /// button did nothing" has been reported twice.
-#[tauri::command]
+#[tauri::command(async)]
 fn open_folder(path: String) -> Result<String, String> {
     use std::os::windows::process::CommandExt;
     // A directory that exists, and nothing else. The path arrives from the
@@ -330,7 +330,7 @@ const UI_LOG_MAX: u64 = 2 * 1024 * 1024;
 
 /// Who the daemon is: protocol, version, pid. Empty fields mean a daemon
 /// old enough not to report them, which is itself the answer.
-#[tauri::command]
+#[tauri::command(async)]
 fn daemon_info() -> Result<Value, String> {
     let stream = match mux::client::connect() {
         Ok(s) => s,
@@ -364,7 +364,7 @@ fn daemon_info() -> Result<Value, String> {
 ///
 /// Err when the daemon predates the verb - that is the signal to fall
 /// back to `restart_daemon`, not a failure to report.
-#[tauri::command]
+#[tauri::command(async)]
 fn retire_daemon() -> Result<Value, String> {
     let stream = mux::client::connect().map_err(|e| e.to_string())?;
     let v = mux::client::request(stream, &Request::Shutdown { when_idle: true })?;
@@ -382,7 +382,7 @@ fn retire_daemon() -> Result<Value, String> {
 /// often by definition too old to know the request - and either way the
 /// shells end, which is why this is only ever reached by someone pressing
 /// a button that says so.
-#[tauri::command]
+#[tauri::command(async)]
 fn restart_daemon() -> Result<(), String> {
     let pid = match mux::client::connect() {
         Ok(stream) => mux::client::request(stream, &Request::List)
@@ -436,7 +436,7 @@ fn restart_daemon() -> Result<(), String> {
 /// ended spawns a replacement, so a window that attached in order to show
 /// you the history would be starting processes on your behalf every time
 /// you glanced at one.
-#[tauri::command]
+#[tauri::command(async)]
 fn peek_session(id: u32) -> Result<String, String> {
     let stream = match mux::client::connect() {
         Ok(s) => s,
@@ -466,7 +466,7 @@ fn detach_session(state: State<PtyManager>, id: u32) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn kill_session(id: u32) -> Result<(), String> {
     mux::client::control(&Request::Kill { id })?;
     Ok(())
@@ -497,7 +497,7 @@ const WEATHER_TTL_MS: u64 = 10 * 60 * 1000;
 /// Nothing is requested until a postcode is set: this is the only thing the
 /// app sends anywhere that says something about where you are, so it is
 /// blank by default, the same as the optional AI endpoint. See PRIVACY.md.
-#[tauri::command]
+#[tauri::command(async)]
 async fn weather_report(
     zip: String,
     country: String,
@@ -541,7 +541,7 @@ const CLAUDE_USAGE_TTL: std::time::Duration = std::time::Duration::from_secs(60)
 /// shape that has changed since this was written, all come back as
 /// `Report { available: false, .. }` so the status item can show "—"
 /// instead of breaking the bar.
-#[tauri::command]
+#[tauri::command(async)]
 async fn claude_usage() -> claude_usage::Report {
     if let Some((at, report)) = CLAUDE_USAGE_CACHE.lock().unwrap().as_ref() {
         if at.elapsed() < CLAUDE_USAGE_TTL {
@@ -569,7 +569,7 @@ async fn claude_usage() -> claude_usage::Report {
 // has to be undoable on the spot.
 
 /// What this build is, and whether it may update itself at all.
-#[tauri::command]
+#[tauri::command(async)]
 fn update_status() -> serde_json::Value {
     let cfg = mux::read_config();
     let pinned = cfg
@@ -597,7 +597,7 @@ fn update_status() -> serde_json::Value {
 }
 
 /// Every version that can be installed, newest first.
-#[tauri::command]
+#[tauri::command(async)]
 async fn update_versions() -> Result<Vec<update::Version>, String> {
     tauri::async_runtime::spawn_blocking(update::fetch_versions)
         .await
@@ -606,7 +606,7 @@ async fn update_versions() -> Result<Vec<update::Version>, String> {
 
 /// What this build would install on its own, if anything. Null when it is
 /// already current, pinned, or not an updatable build.
-#[tauri::command]
+#[tauri::command(async)]
 async fn update_check() -> Result<Option<update::Version>, String> {
     let cfg = mux::read_config();
     if !update::updates_supported(package_family_name().is_some()) {
@@ -638,7 +638,7 @@ async fn update_check() -> Result<Option<update::Version>, String> {
 /// The tag is looked up in the list this build fetched rather than trusting
 /// a URL from the caller: a command that downloads and runs whatever URL it
 /// is handed is a remote code execution hole with an update button on it.
-#[tauri::command]
+#[tauri::command(async)]
 async fn update_install(tag: String) -> Result<(), String> {
     if !update::updates_supported(package_family_name().is_some()) {
         return Err(
@@ -691,7 +691,7 @@ struct HistoryEntry {
     bytes: u64,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn history_list() -> Result<Vec<HistoryEntry>, String> {
     let dir = mux::history_dir();
     let mut out = Vec::new();
@@ -741,7 +741,7 @@ fn valid_stem(stem: &str) -> bool {
     !stem.is_empty() && stem.chars().all(|c| c.is_ascii_digit() || c == '-')
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn history_read(stem: String) -> Result<String, String> {
     if !valid_stem(&stem) {
         return Err("bad stem".into());
@@ -772,7 +772,7 @@ fn launch_info() -> LaunchInfo {
 /// Write a Windows .lnk at `path` that launches this exe with
 /// `--workspace "<workspace>"`. Uses the WScript.Shell COM object via
 /// PowerShell — no extra crate, and it produces a real shell link.
-#[tauri::command]
+#[tauri::command(async)]
 fn create_shortcut(path: String, workspace: String) -> Result<(), String> {
     let exe = std::env::current_exe()
         .map_err(|e| e.to_string())?

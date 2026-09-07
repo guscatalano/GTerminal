@@ -743,7 +743,7 @@ mod imp {
 
 /// Sampled counters behind the built-in status-bar items. `groups` opts
 /// into the costlier wildcard families: "gfx", "net", "remote".
-#[tauri::command]
+#[tauri::command(async)]
 pub fn system_stats(groups: Option<Vec<String>>) -> SystemStats {
     imp::sample(&groups.unwrap_or_default())
 }
@@ -751,19 +751,19 @@ pub fn system_stats(groups: Option<Vec<String>>) -> SystemStats {
 /// Read arbitrary Windows performance counters by path, all in one
 /// collection. A path that was just added reads back on the next call —
 /// PDH rate counters need two samples before they produce a value.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn perf_counters(paths: Vec<String>) -> HashMap<String, f64> {
     imp::read_counters(&paths)
 }
 
 /// Every performance object on this machine, for the counter picker.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn perf_objects() -> Result<Vec<String>, String> {
     imp::perf_objects()
 }
 
 /// Counters and instances under one performance object.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn perf_items(object: String) -> Result<PerfItems, String> {
     imp::perf_items(&object)
 }
@@ -772,7 +772,7 @@ pub fn perf_items(object: String) -> Result<PerfItems, String> {
 /// line. Custom command items are the other way the bar extends without a
 /// rebuild, so this stays deliberately plain: PowerShell, no profile,
 /// output capped so a chatty command can't bloat the bar.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn status_command(command: String, cwd: Option<String>) -> Result<String, String> {
     if command.trim().is_empty() {
         return Ok(String::new());
