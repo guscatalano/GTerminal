@@ -578,6 +578,107 @@ const BADGE_CHOICES: Array<[string, string]> = [
   ["⏰", "clock timer cron schedule"],
   ["📁", "folder files"],
   ["🍕", "pizza food lunch"],
+
+  // Languages and runtimes. A tab is very often "the Python one", and a
+  // mascot is quicker to find in a strip of tabs than four letters of a
+  // title that has already been elided.
+  ["🐍", "python py snake django flask"],
+  ["🦀", "rust cargo crab crates"],
+  ["🐹", "go golang gopher"],
+  ["☕", "java jvm kotlin gradle maven coffee"],
+  ["🐘", "php postgres postgresql elephant"],
+  ["🐬", "mysql mariadb dolphin"],
+  ["🍃", "mongo mongodb spring leaf"],
+  ["💎", "ruby rails gem"],
+  ["🌙", "lua moon night"],
+  ["🦕", "deno dino dinosaur"],
+  ["📜", "script shell bash logs scroll"],
+
+  // Where it is pointed. Colours because that is how everybody already
+  // labels environments, and because at tab size a colour reads before
+  // any glyph does.
+  ["🔴", "prod production live red danger"],
+  ["🟠", "canary orange rollout"],
+  ["🟡", "staging stage yellow preprod"],
+  ["🟢", "dev development green local ok"],
+  ["🔵", "preview blue sandbox"],
+  ["🟣", "purple qa scratch"],
+
+  // State, for a tab you come back to rather than one you are watching.
+  ["✅", "pass done green ok success finished"],
+  ["❌", "fail failed broken red error"],
+  ["▶️", "run running start play"],
+  ["⏸️", "paused hold pause waiting"],
+  ["⏹️", "stopped stop halted"],
+  ["🔄", "sync watch refresh loop reload"],
+  ["⏳", "waiting slow pending long"],
+  ["🛑", "blocked halt stop do-not"],
+  ["🚦", "ci gate status pipeline checks"],
+
+  // Version control.
+  ["🌿", "branch feature checkout"],
+  ["🔀", "merge pr pull-request rebase"],
+  ["🏷️", "tag label release version"],
+  ["🍒", "cherry cherry-pick pick"],
+  ["📌", "pin pinned keep sticky"],
+  ["🪝", "hook webhook trigger"],
+
+  // Running things that other people depend on.
+  ["🛡️", "security firewall waf defend audit"],
+  ["🧯", "incident firefighting outage oncall"],
+  ["🚑", "hotfix urgent emergency incident"],
+  ["🩹", "patch bandaid quickfix workaround"],
+  ["🔭", "observability monitoring telescope tracing"],
+  ["📈", "up growth metrics improving"],
+  ["📉", "down regression drop slower"],
+  ["🧱", "infra bricks platform foundation"],
+  ["🏗️", "build scaffold infra provisioning"],
+  ["💾", "save disk backup dump"],
+  ["🗃️", "archive index catalogue records"],
+  ["📤", "upload push publish deploy out"],
+  ["📥", "download pull fetch inbox in"],
+  ["🔗", "link integration api connect"],
+  ["🧊", "cache frozen cold pinned-version"],
+  ["🔋", "power battery energy capacity"],
+  ["🛰️", "satellite remote edge telemetry"],
+
+  // The shape of the work rather than its subject.
+  ["🎯", "target goal focus objective"],
+  ["🧭", "explore navigate direction spike"],
+  ["🏆", "win shipped success done"],
+  ["🎓", "learning tutorial study course"],
+  ["🌱", "new seed start init greenfield"],
+  ["🧹", "cleanup tidy refactor chore"],
+  ["🗑️", "trash delete remove prune"],
+  ["🔍", "search find grep inspect logs"],
+  ["💬", "chat comment slack discuss"],
+  ["📧", "mail email smtp inbox"],
+  ["🔔", "notify alert bell reminder"],
+  ["📅", "calendar schedule plan sprint"],
+  ["🧾", "invoice receipt billing usage"],
+  ["⏱️", "benchmark timing stopwatch perf"],
+  ["🧮", "compute math calculation numbers"],
+  ["🧩", "plugin extension addon piece"],
+  ["🧵", "thread concurrency async parallel"],
+  ["🕸️", "scrape spider crawler web"],
+
+  // Which machine, or whose.
+  ["📱", "mobile ios android phone app"],
+  ["🍎", "apple mac macos darwin"],
+  ["🪟", "windows win msix winget"],
+  ["🐧", "linux tux penguin wsl ubuntu"],
+  ["🖨️", "print printer output"],
+
+  // The ones that are just for you.
+  ["🦆", "duck rubber-duck debugging"],
+  ["🧙", "magic wizard script clever"],
+  ["👻", "ghost hidden spooky forgotten"],
+  ["🎬", "video render film capture"],
+  ["📸", "screenshot photo capture"],
+  ["🌊", "stream flow wave pipeline"],
+  ["🌈", "rainbow colour pride"],
+  ["🍺", "beer friday done celebrate"],
+  ["🐱", "cat pet kitty"],
 ];
 
 function openBadgePicker(id: number) {
