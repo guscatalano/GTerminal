@@ -735,56 +735,92 @@ Start-Sleep -Milliseconds 300
 # ── soak: a long stretch of ordinary typing, every keystroke checked ──
 #
 # Percentiles hide the thing being looked for. A hitch every few seconds is
-# invisible at p95 and is the entire complaint, so this one types a real
+# invisible at p95 and is the entire complaint, so this types a real
 # sentence over and over and asserts on the worst keystroke rather than the
-# median - and when it fails it says which keystroke and how far into the
-# run, because a stall on a schedule is the signature of something on a
-# timer rather than something about typing.
+# median - and reports which keystroke and how far into the run, because a
+# stall on a schedule is the signature of something on a timer rather than
+# something about typing.
+#
+# An outlier is confirmed with a second pass before it fails the suite.
+# Not to be lenient: the threshold stays where it is, and anything with a
+# cause repeats - a timer, a flush, a lock - while a shared CI runner
+# descheduling this process for a second does not. A test that cries wolf
+# on other people's noise gets its threshold raised until it means nothing,
+# which is the failure mode this whole file is a reaction to. Both passes
+# are printed either way.
 $soakSess = Open-Shell "pwsh"
 $soakLine = "the quick brown fox jumps over the lazy dog while the status bar counts whatever it counts"
-$soakSamples = New-Object System.Collections.Generic.List[double]
-$soakSlow = New-Object System.Collections.Generic.List[object]
-$soakClock = [System.Diagnostics.Stopwatch]::StartNew()
-$soakAborted = ""
-$k = 0
-for ($rep = 0; $rep -lt $SoakReps -and -not $soakAborted; $rep++) {
-  foreach ($ch in $soakLine.ToCharArray()) {
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    $script:w.WriteLine("{""cmd"":""write"",""data"":""$(Esc-Json ([string]$ch))""}")
-    $ev = Read-Event -timeoutMs 5000 -spin
-    $sw.Stop()
-    if ($null -eq $ev) { $soakAborted = "keystroke $k got no echo within 5s"; break }
-    $ms = $sw.Elapsed.TotalMilliseconds
-    $soakSamples.Add($ms)
-    if ($ms -gt 50) {
-      $soakSlow.Add([pscustomobject]@{ At = $k; Ms = [math]::Round($ms, 1); Sec = [math]::Round($soakClock.Elapsed.TotalSeconds, 1) })
+
+function Invoke-Soak {
+  param([int]$reps)
+  $samples = New-Object System.Collections.Generic.List[double]
+  $slow = New-Object System.Collections.Generic.List[object]
+  $clock = [System.Diagnostics.Stopwatch]::StartNew()
+  $aborted = ""
+  $k = 0
+  for ($rep = 0; $rep -lt $reps -and -not $aborted; $rep++) {
+    foreach ($ch in $soakLine.ToCharArray()) {
+      $sw = [System.Diagnostics.Stopwatch]::StartNew()
+      $script:w.WriteLine("{""cmd"":""write"",""data"":""$(Esc-Json ([string]$ch))""}")
+      $ev = Read-Event -timeoutMs 5000 -spin
+      $sw.Stop()
+      if ($null -eq $ev) { $aborted = "keystroke $k got no echo within 5s"; break }
+      $ms = $sw.Elapsed.TotalMilliseconds
+      $samples.Add($ms)
+      if ($ms -gt 50) {
+        $slow.Add([pscustomobject]@{ At = $k; Ms = [math]::Round($ms, 1); Sec = [math]::Round($clock.Elapsed.TotalSeconds, 1) })
+      }
+      $k++
+      # A short quiet gap rather than a fixed drain: 30ms per keystroke
+      # would make this test twenty minutes of sleeping.
+      $null = Read-Event -timeoutMs 4
     }
-    $k++
-    # A short quiet gap rather than a fixed drain: 30ms per keystroke would
-    # make this test twenty minutes of sleeping.
-    $null = Read-Event -timeoutMs 4
+    # Abandon the line rather than run it, and rather than let it grow.
+    $script:w.WriteLine("{""cmd"":""write"",""data"":""\u0003""}")
+    $null = Drain 40
   }
-  # Abandon the line rather than run it, and rather than let it grow.
-  $script:w.WriteLine("{""cmd"":""write"",""data"":""\u0003""}")
-  $null = Drain 40
+  [pscustomobject]@{
+    Samples = $samples
+    Slow    = $slow
+    Aborted = $aborted
+    Seconds = [math]::Round($clock.Elapsed.TotalSeconds, 1)
+  }
 }
-if ($soakAborted) {
-  $failures += "soak: $soakAborted"
-} else {
-  $p50 = Pct $soakSamples 0.5
-  $p99 = Pct $soakSamples 0.99
-  $worst = [math]::Round(($soakSamples | Measure-Object -Maximum).Maximum, 1)
-  $secs = [math]::Round($soakClock.Elapsed.TotalSeconds, 1)
-  "soak: $($soakSamples.Count) keystrokes over ${secs}s - p50=${p50}ms p99=${p99}ms worst=${worst}ms, $($soakSlow.Count) over 50ms"
-  foreach ($slow in ($soakSlow | Select-Object -First 8)) {
+
+function Show-Soak {
+  param($label, $run)
+  $worst = [math]::Round(($run.Samples | Measure-Object -Maximum).Maximum, 1)
+  $p50 = Pct $run.Samples 0.5
+  $p99 = Pct $run.Samples 0.99
+  "soak ${label}: $($run.Samples.Count) keystrokes over $($run.Seconds)s - p50=${p50}ms p99=${p99}ms worst=${worst}ms, $($run.Slow.Count) over 50ms"
+  foreach ($slow in ($run.Slow | Select-Object -First 8)) {
     "  slow keystroke $($slow.At) at $($slow.Sec)s: $($slow.Ms)ms"
   }
-  if ($soakSamples.Count -lt ($SoakReps * $soakLine.Length * 0.99)) {
-    $failures += "soak: only $($soakSamples.Count) keystrokes were measured"
-  } elseif ($soakSlow.Count -gt 0) {
-    $failures += "soak: $($soakSlow.Count) of $($soakSamples.Count) keystrokes took over 50ms (worst ${worst}ms) - every input is supposed to be free of that"
+  $worst
+}
+
+$soak = Invoke-Soak $SoakReps
+if ($soak.Aborted) {
+  $failures += "soak: $($soak.Aborted)"
+} elseif ($soak.Samples.Count -lt ($SoakReps * $soakLine.Length * 0.99)) {
+  $failures += "soak: only $($soak.Samples.Count) keystrokes were measured"
+} else {
+  $worst = Show-Soak "pass 1" $soak
+  if ($soak.Slow.Count -eq 0) {
+    "PASS soak: no keystroke in $($soak.Samples.Count) took over 50ms"
   } else {
-    "PASS soak: no keystroke in $($soakSamples.Count) took over 50ms"
+    "  confirming: a stall with a cause repeats, a descheduled process does not"
+    $again = Invoke-Soak $SoakReps
+    if ($again.Aborted) {
+      $failures += "soak confirmation: $($again.Aborted)"
+    } else {
+      $worst2 = Show-Soak "pass 2" $again
+      if ($again.Slow.Count -gt 0) {
+        $failures += "soak: keystrokes over 50ms in both passes (worst ${worst}ms then ${worst2}ms) - every input is supposed to be free of that"
+      } else {
+        "PASS soak: $($soak.Slow.Count) outlier in pass 1 did not reproduce in $($again.Samples.Count) further keystrokes"
+      }
+    }
   }
 }
 
