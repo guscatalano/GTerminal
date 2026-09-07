@@ -8,7 +8,10 @@ param(
   # directory, because the default path is often a binary somebody is
   # running - on Windows that file is locked, and rebuilding over it
   # would take their terminal with it.
-  [string]$Exe
+  [string]$Exe,
+  # How many times the soak types its sentence. The default is a couple of
+  # minutes; raise it to leave the thing running for an afternoon.
+  [int]$SoakReps = 100
 )
 $ErrorActionPreference = "Stop"
 $repo = Split-Path $PSScriptRoot -Parent
@@ -570,32 +573,225 @@ if ($frames.Contains("$esc[?1049l")) { "PASS and it hands the screen back on exi
 else { $failures += "tui-restore: the alternate screen was never left" }
 Close-Shell $tui
 
-# ── latency, measured on the default shell ────────────────────────────
-$latSess = Open-Shell "pwsh"
-# ── latency: per-keystroke echo roundtrip, on the default shell ──
-$samples = @()
-for ($i = 0; $i -lt 40; $i++) {
-  $ch = [char](97 + ($i % 26))
-  $sw = [System.Diagnostics.Stopwatch]::StartNew()
-  $w.WriteLine("{""cmd"":""write"",""data"":""$ch""}")
-  $ev = Read-Event -timeoutMs 2000 -spin
-  $sw.Stop()
-  if ($null -eq $ev) { $failures += "latency: keystroke $i got no echo within 2s"; break }
-  $samples += $sw.Elapsed.TotalMilliseconds
-  $null = Drain 30   # swallow any trailing redraw events
+# ── latency ───────────────────────────────────────────────────────────
+#
+# A latency test is only as good as the state it measures in. The first
+# version of this measured single keystrokes at a fresh prompt in a
+# just-opened session, which is the one situation where nothing that has
+# ever gone wrong here can show up: the ring is empty so it never trims,
+# the line is short so the shell repaints almost nothing, and no other
+# session is running so the daemon's one lock is uncontended. It passed
+# throughout a regression that made typing a long line in a session that
+# had been open a while visibly laggy.
+#
+# So: the same measurement, in the four states that matter.
+
+# One keystroke, timed to the first event back. Samples are returned in
+# order so a caller can compare the start of a line against its end
+# rather than only reading the distribution.
+function Measure-Keystrokes {
+  param([int]$count = 40, [string]$text = "")
+  $samples = @()
+  for ($i = 0; $i -lt $count; $i++) {
+    $ch = if ($text) { [string]$text[$i % $text.Length] } else { [string][char](97 + ($i % 26)) }
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $script:w.WriteLine("{""cmd"":""write"",""data"":""$(Esc-Json $ch)""}")
+    $ev = Read-Event -timeoutMs 5000 -spin
+    $sw.Stop()
+    if ($null -eq $ev) { return $null }
+    $samples += $sw.Elapsed.TotalMilliseconds
+    $null = Drain 30   # swallow any trailing redraw events
+  }
+  ,$samples
 }
-if ($samples.Count -ge 30) {
-  $sorted = $samples | Sort-Object
-  $p50 = [math]::Round($sorted[[int]($sorted.Count * 0.5)], 1)
-  $p95 = [math]::Round($sorted[[int]($sorted.Count * 0.95)], 1)
-  $max = [math]::Round($sorted[-1], 1)
-  "latency over $($samples.Count) keystrokes: p50=${p50}ms p95=${p95}ms max=${max}ms"
-  if ($p50 -gt 50) { $failures += "latency: p50 ${p50}ms exceeds 50ms budget" }
-  elseif ($p95 -gt 150) { $failures += "latency: p95 ${p95}ms exceeds 150ms budget" }
-  else { "PASS latency: within budget (p50<50ms, p95<150ms)" }
+
+function Pct {
+  param($samples, [double]$p)
+  $sorted = @($samples | Sort-Object)
+  $i = [int][math]::Min($sorted.Count - 1, [math]::Floor($sorted.Count * $p))
+  [math]::Round($sorted[$i], 1)
+}
+
+# Read events until a gap of $ms with nothing on the wire. Unlike Drain
+# this keeps nothing: waiting out a megabyte of flood by concatenating it
+# into a string is quadratic, and would time the harness, not the daemon.
+function Wait-Quiet {
+  param($ms = 800, $maxMs = 180000)
+  $deadline = [DateTime]::UtcNow.AddMilliseconds($maxMs)
+  while ([DateTime]::UtcNow -lt $deadline) {
+    if ($null -eq (Read-Event -timeoutMs $ms)) { return $true }
+  }
+  $false
+}
+
+# Can the daemon still answer at all? One control request on its own
+# connection, with real timeouts, so a daemon that has wedged is a failure
+# rather than a suite that never finishes.
+function Test-DaemonResponsive {
+  param($timeoutMs = 5000)
+  try {
+    $c = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $port)
+    $st = $c.GetStream()
+    $st.WriteTimeout = $timeoutMs
+    $st.ReadTimeout = $timeoutMs
+    $sw = [System.IO.StreamWriter]::new($st); $sw.NewLine = "`n"; $sw.AutoFlush = $true
+    $sr = [System.IO.StreamReader]::new($st)
+    $sw.WriteLine('{"cmd":"list"}')
+    $line = $sr.ReadLine()
+    $c.Close()
+    return [bool]$line
+  } catch {
+    return $false
+  }
+}
+
+# Print enough to carry the ring past its cap and into the regime where
+# it trims. Everything about scrollback cost only starts there.
+function Fill-Ring {
+  Type-Text ("1..20000 | ForEach-Object { 'x' * 80 }" + "`r")
+  if (-not (Wait-Quiet 1500)) { $failures += "latency: the ring fill never finished" }
+}
+
+function Check-Latency {
+  param($name, $samples, $p50Budget, $p95Budget)
+  if ($null -eq $samples -or $samples.Count -lt 30) {
+    $failures += "latency ${name}: a keystroke got no echo within 5s"
+    return
+  }
+  $p50 = Pct $samples 0.5
+  $p95 = Pct $samples 0.95
+  $max = [math]::Round((@($samples | Sort-Object))[-1], 1)
+  "latency ${name}: p50=${p50}ms p95=${p95}ms max=${max}ms over $($samples.Count) keystrokes"
+  if ($p50 -gt $p50Budget) { $failures += "latency ${name}: p50 ${p50}ms exceeds ${p50Budget}ms budget" }
+  elseif ($p95 -gt $p95Budget) { $failures += "latency ${name}: p95 ${p95}ms exceeds ${p95Budget}ms budget" }
+  else { "PASS latency ${name}: within budget (p50<${p50Budget}ms, p95<${p95Budget}ms)" }
+}
+
+$latSess = Open-Shell "pwsh"
+
+# 1. The original: fresh session, empty prompt. Still worth keeping - it
+#    is the floor everything else is compared against.
+Check-Latency "fresh" (Measure-Keystrokes 40) 50 150
+
+# 2. The same thing once the ring is past its cap. The ring is a buffer
+#    drained from the front; trimming it per chunk instead of in batches
+#    moves half a megabyte for every chunk of output, under the lock a
+#    keystroke needs. Nothing about the fresh case can see that.
+Fill-Ring
+Check-Latency "full ring" (Measure-Keystrokes 40) 50 150
+
+# 3. Along a long line, which is what a person actually notices: PSReadLine
+#    repaints the whole input line on every keypress, so the echo grows
+#    with the line while the keystroke stays one byte. The assertion is a
+#    ratio, not a number - the end of a long line is allowed to cost more
+#    than the start, but not a different order of magnitude, and a ratio
+#    does not need a fast machine to stay honest.
+$sentence = "the quick brown fox jumps over the lazy dog and keeps on running well past the point where any sensible animal would have stopped to rest a while"
+$line = Measure-Keystrokes $sentence.Length $sentence
+if ($null -eq $line -or $line.Count -lt 60) {
+  $failures += "latency long line: a keystroke got no echo within 5s"
+} else {
+  $head = Pct ($line[0..19]) 0.5
+  $tail = Pct ($line[-20..-1]) 0.5
+  $ratio = if ($head -gt 0) { [math]::Round($tail / $head, 2) } else { 0 }
+  "latency long line: first 20 p50=${head}ms, last 20 p50=${tail}ms (x${ratio})"
+  if ($tail -gt 150) { $failures += "latency long line: ${tail}ms at the end of the line exceeds 150ms" }
+  elseif ($ratio -gt 4) { $failures += "latency long line: the end of the line costs ${ratio}x the start" }
+  else { "PASS latency long line: cost does not run away with line length" }
+}
+Type-Text "`u{3}"   # abandon the line rather than run that sentence
+$null = Drain 300
+
+# 4. With another session flooding a client that has stopped reading.
+#
+#    There is one lock for every session in the daemon, and the output
+#    pump used to hold it across the write to the attached client. Once
+#    that client's socket buffer fills the write blocks - with the whole
+#    daemon's lock in hand - and nothing else can be typed into, listed,
+#    created or killed until the client drains. A stalled reader took the
+#    daemon down with it, and no test here could see that because none of
+#    them ever stopped reading.
+#
+#    So this one stops reading: the flooder stays attached and its socket
+#    is deliberately never drained. Everything below is bounded, because
+#    the failure being tested for is a hang, and a test that hangs reports
+#    nothing.
+$flood = Open-Shell "pwsh"
+Type-Text ("1..400000 | ForEach-Object { 'flooding ' + $_ + ' ' + ('.' * 60) }" + "`r")
+Start-Sleep -Milliseconds 2000
+if (-not (Test-DaemonResponsive 5000)) {
+  $failures += "stalled client: the daemon stopped answering while one client was not reading"
+} else {
+  "PASS stalled client: the daemon still answers with a client stalled mid-flood"
+  $typeSess = Open-Shell "pwsh"
+  Check-Latency "stalled neighbour" (Measure-Keystrokes 40) 80 250
+}
+# Let the flooder's socket go before anything tries to kill it: on a build
+# where the pump is blocked writing to it, the kill would block too, and
+# the cleanup would hang instead of the suite reporting.
+$flood.Client.Close()
+Start-Sleep -Milliseconds 300
+
+# ── soak: a long stretch of ordinary typing, every keystroke checked ──
+#
+# Percentiles hide the thing being looked for. A hitch every few seconds is
+# invisible at p95 and is the entire complaint, so this one types a real
+# sentence over and over and asserts on the worst keystroke rather than the
+# median - and when it fails it says which keystroke and how far into the
+# run, because a stall on a schedule is the signature of something on a
+# timer rather than something about typing.
+$soakSess = Open-Shell "pwsh"
+$soakLine = "the quick brown fox jumps over the lazy dog while the status bar counts whatever it counts"
+$soakSamples = New-Object System.Collections.Generic.List[double]
+$soakSlow = New-Object System.Collections.Generic.List[object]
+$soakClock = [System.Diagnostics.Stopwatch]::StartNew()
+$soakAborted = ""
+$k = 0
+for ($rep = 0; $rep -lt $SoakReps -and -not $soakAborted; $rep++) {
+  foreach ($ch in $soakLine.ToCharArray()) {
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $script:w.WriteLine("{""cmd"":""write"",""data"":""$(Esc-Json ([string]$ch))""}")
+    $ev = Read-Event -timeoutMs 5000 -spin
+    $sw.Stop()
+    if ($null -eq $ev) { $soakAborted = "keystroke $k got no echo within 5s"; break }
+    $ms = $sw.Elapsed.TotalMilliseconds
+    $soakSamples.Add($ms)
+    if ($ms -gt 50) {
+      $soakSlow.Add([pscustomobject]@{ At = $k; Ms = [math]::Round($ms, 1); Sec = [math]::Round($soakClock.Elapsed.TotalSeconds, 1) })
+    }
+    $k++
+    # A short quiet gap rather than a fixed drain: 30ms per keystroke would
+    # make this test twenty minutes of sleeping.
+    $null = Read-Event -timeoutMs 4
+  }
+  # Abandon the line rather than run it, and rather than let it grow.
+  $script:w.WriteLine("{""cmd"":""write"",""data"":""\u0003""}")
+  $null = Drain 40
+}
+if ($soakAborted) {
+  $failures += "soak: $soakAborted"
+} else {
+  $p50 = Pct $soakSamples 0.5
+  $p99 = Pct $soakSamples 0.99
+  $worst = [math]::Round(($soakSamples | Measure-Object -Maximum).Maximum, 1)
+  $secs = [math]::Round($soakClock.Elapsed.TotalSeconds, 1)
+  "soak: $($soakSamples.Count) keystrokes over ${secs}s - p50=${p50}ms p99=${p99}ms worst=${worst}ms, $($soakSlow.Count) over 50ms"
+  foreach ($slow in ($soakSlow | Select-Object -First 8)) {
+    "  slow keystroke $($slow.At) at $($slow.Sec)s: $($slow.Ms)ms"
+  }
+  if ($soakSamples.Count -lt ($SoakReps * $soakLine.Length * 0.99)) {
+    $failures += "soak: only $($soakSamples.Count) keystrokes were measured"
+  } elseif ($soakSlow.Count -gt 0) {
+    $failures += "soak: $($soakSlow.Count) of $($soakSamples.Count) keystrokes took over 50ms (worst ${worst}ms) - every input is supposed to be free of that"
+  } else {
+    "PASS soak: no keystroke in $($soakSamples.Count) took over 50ms"
+  }
 }
 
 # ── cleanup ──
+Close-Shell $soakSess
+if ($typeSess) { Close-Shell $typeSess }
+Close-Shell $flood
 Close-Shell $latSess
 Close-Shell $keepAlive   # last one out: the daemon exits with it
 $client.Close()
