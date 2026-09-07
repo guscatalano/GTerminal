@@ -27,6 +27,125 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const RING_MAX: usize = 512 * 1024;
+/// How far the ring is allowed to run past the cap before it is trimmed.
+///
+/// The ring is a Vec drained from the front, so trimming to the cap on
+/// every append memmoves the whole buffer once a session has produced
+/// enough output to fill it: half a megabyte moved for every 8KB chunk
+/// that arrives. That is per-chunk work proportional to the cap rather
+/// than to the chunk, and it happens under the lock a keystroke needs -
+/// which is what turns typing a long line in a session that has been
+/// running a while into something you can feel. PSReadLine repaints the
+/// whole input line on every keypress, so a long line is a large chunk
+/// per keystroke, which is exactly the case that hurts.
+///
+/// Trimming a slack's worth at once makes the cost amortized: one memmove
+/// of RING_MAX per RING_SLACK bytes written, so a byte of output costs
+/// about a byte of copying instead of sixty-four. Nothing observable
+/// changes - every reader takes ring_tail, which is still the last
+/// RING_MAX bytes.
+const RING_SLACK: usize = RING_MAX;
+
+/// Append output to a session's scrollback ring. Returns whether this
+/// append trimmed, which is what tests/ring counts to prove the cost is
+/// amortized rather than per-chunk.
+fn ring_append(ring: &mut Vec<u8>, data: &[u8]) -> bool {
+    ring.extend_from_slice(data);
+    if ring.len() <= RING_MAX + RING_SLACK {
+        return false;
+    }
+    let excess = ring.len() - RING_MAX;
+    ring.drain(..excess);
+    true
+}
+
+/// The part of a ring anyone else may see: its last RING_MAX bytes. The
+/// buffer itself is allowed to sit above the cap between trims, and no
+/// reader should ever learn that.
+fn ring_tail(ring: &[u8]) -> &[u8] {
+    &ring[ring.len().saturating_sub(RING_MAX)..]
+}
+
+#[cfg(test)]
+mod ring_tests {
+    use super::{ring_append, ring_tail, RING_MAX, RING_SLACK};
+
+    /// What regressed: the ring trimmed to the cap on every append, so
+    /// once a session had filled it every chunk memmoved half a megabyte,
+    /// under the lock a keystroke needs. A timing test would only be able
+    /// to say "slower"; counting trims says which shape the cost has, and
+    /// cannot flake on a busy machine.
+    #[test]
+    fn trimming_is_amortized_rather_than_per_chunk() {
+        const CHUNK: usize = 8 * 1024;
+        const TOTAL: usize = 16 * 1024 * 1024;
+        let chunk = vec![b'x'; CHUNK];
+        let mut ring = Vec::new();
+        let mut trims = 0usize;
+        for _ in 0..(TOTAL / CHUNK) {
+            if ring_append(&mut ring, &chunk) {
+                trims += 1;
+            }
+        }
+        let ceiling = TOTAL / RING_SLACK + 2;
+        assert!(
+            trims <= ceiling,
+            "{trims} trims for {TOTAL} bytes; amortized would be at most {ceiling}"
+        );
+        // And the shape, not just the number: per-chunk trimming would be
+        // one for nearly every one of these appends.
+        assert!(
+            trims * 8 < TOTAL / CHUNK,
+            "{trims} trims over {} appends is per-chunk, not amortized",
+            TOTAL / CHUNK
+        );
+    }
+
+    #[test]
+    fn the_buffer_never_runs_further_past_the_cap_than_the_slack() {
+        let chunk = vec![b'x'; 8 * 1024];
+        let mut ring = Vec::new();
+        for _ in 0..4000 {
+            ring_append(&mut ring, &chunk);
+            assert!(
+                ring.len() <= RING_MAX + RING_SLACK,
+                "ring grew to {} bytes, past cap plus slack",
+                ring.len()
+            );
+        }
+        assert!(ring.len() >= RING_MAX, "a ring fed 32MB should be full");
+    }
+
+    /// The slack is an implementation detail of the append. Everything
+    /// that reads a ring must still see the last RING_MAX bytes and
+    /// nothing else, or scrollback and replay quietly change length.
+    #[test]
+    fn a_reader_still_sees_exactly_the_last_cap_bytes() {
+        let mut ring = Vec::new();
+        let mut written: Vec<u8> = Vec::new();
+        let mut next: u8 = 0;
+        for _ in 0..300 {
+            let chunk: Vec<u8> = (0..4096)
+                .map(|_| {
+                    let b = next;
+                    next = next.wrapping_add(1);
+                    b
+                })
+                .collect();
+            ring_append(&mut ring, &chunk);
+            written.extend_from_slice(&chunk);
+        }
+        assert!(written.len() > RING_MAX + RING_SLACK, "test must overflow the ring");
+        assert_eq!(ring_tail(&ring), &written[written.len() - RING_MAX..]);
+    }
+
+    #[test]
+    fn a_ring_under_the_cap_is_all_tail() {
+        let mut ring = Vec::new();
+        assert!(!ring_append(&mut ring, b"hello"), "nothing to trim yet");
+        assert_eq!(ring_tail(&ring), b"hello");
+    }
+}
 const FLUSH_INTERVAL: Duration = Duration::from_secs(3);
 /// Per-session transcript size cap; recording stops (with a notice) beyond it.
 const HISTORY_MAX: u64 = 10 * 1024 * 1024;
@@ -1139,9 +1258,6 @@ struct Session {
     doomed_until: Option<u64>,
     /// Decides what of this session's output belongs in the ring.
     ring_filter: RingFilter,
-    /// Durable history transcript; None when disabled or size-capped.
-    transcript: Option<std::fs::File>,
-    transcript_len: u64,
 }
 
 /// A persisted session whose process is gone (reboot, daemon crash, or a
@@ -1368,6 +1484,34 @@ fn parse_cwd(text: &str) -> Option<String> {
         Some(path.to_string())
     }
 }
+
+/// Nudge this thread a step above normal.
+///
+/// Called on the threads a keystroke actually travels through: the one
+/// carrying input to a pty, and the one carrying the echo back. With
+/// every core busy - a compile, most often - those threads otherwise
+/// queue behind whatever else is runnable, and that wait is visible as
+/// lag while typing. They are I/O bound and asleep almost all the time,
+/// so the boost costs the machine nothing; it only decides who runs
+/// first when a byte arrives.
+///
+/// Thread priority, not process priority, and the distinction is the
+/// whole point: a priority class is inherited by every child a process
+/// creates, so raising the daemon's would raise every shell it starts
+/// and every compiler those shells start - which is exactly the traffic
+/// being outrun here.
+#[cfg(windows)]
+fn raise_thread_priority() {
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_ABOVE_NORMAL,
+    };
+    unsafe {
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+    }
+}
+
+#[cfg(not(windows))]
+fn raise_thread_priority() {}
 
 /// Exe names (without .exe) of every descendant of `root`, e.g. what the
 /// user is running inside a shell. ConPTY plumbing is filtered out.
@@ -1611,7 +1755,7 @@ fn checkpoint_now(sessions: &Sessions, only_dirty: bool) {
                             shell: s.shell.clone(),
                             saw_input: s.saw_input,
                         },
-                        s.ring.clone(),
+                        ring_tail(&s.ring).to_vec(),
                         s.child_pid,
                     ));
                 }
@@ -1668,7 +1812,7 @@ fn end_session(sessions: &Sessions, id: u32) {
                 meta_path(id),
                 serde_json::to_string(&meta).expect("serialize"),
             );
-            let _ = std::fs::write(ring_path(id), &s.ring);
+            let _ = std::fs::write(ring_path(id), ring_tail(&s.ring));
             state.cold.insert(
                 id,
                 ColdSession {
@@ -1829,6 +1973,8 @@ fn exit_if_idle(sessions: &Sessions) {
 }
 
 fn handle_conn(stream: TcpStream, sessions: Sessions) {
+    // The thread a keystroke arrives on - see raise_thread_priority.
+    raise_thread_priority();
     let conn_id = NEXT_CONN.fetch_add(1, Ordering::Relaxed);
     let mut attached_id: Option<u32> = None;
     // The loop must not early-return: an abrupt client death surfaces as a
@@ -2066,7 +2212,7 @@ fn conn_loop(
                         // terminal answer into a shell sitting at its prompt,
                         // which shows up as "random characters in every new
                         // window". See strip_queries.
-                        let mut replay = replay_for(&s.ring, s.undelivered);
+                        let mut replay = replay_for(ring_tail(&s.ring), s.undelivered);
                         s.undelivered = false;
                         // Whatever the last program left switched on, the
                         // window attaching now did not ask for.
@@ -2098,7 +2244,7 @@ fn conn_loop(
                     .unwrap()
                     .live
                     .get(&id)
-                    .map(|s| String::from_utf8_lossy(&s.ring).into_owned());
+                    .map(|s| String::from_utf8_lossy(ring_tail(&s.ring)).into_owned());
                 let data = match live {
                     Some(text) => Some(text),
                     None => std::fs::read(ring_path(id))
@@ -2399,53 +2545,85 @@ fn start_session(
             // what this shell has said since it started.
             undelivered: ring_seed_was_empty,
             ring_filter: RingFilter::default(),
-            transcript,
-            transcript_len,
         },
     );
 
     let sessions = sessions.clone();
     std::thread::spawn(move || {
+        // The thread carrying the echo back - see raise_thread_priority.
+        raise_thread_priority();
+        let mut transcript = transcript;
+        let mut transcript_len = transcript_len;
         let mut buf = [0u8; 8192];
         let mut carry: Vec<u8> = Vec::new();
+        // The attached client's socket, cloned so a chunk can be written
+        // to it with the lock already released.
+        let mut client: Option<(u64, TcpStream)> = None;
         loop {
             let n = match reader.read(&mut buf) {
                 Ok(0) | Err(_) => break,
                 Ok(n) => n,
             };
-            let mut state = sessions.lock().unwrap();
-            let Some(s) = state.live.get_mut(&id) else {
-                break;
-            };
-            let keep = s.ring_filter.keep(&buf[..n]);
-            s.ring.extend_from_slice(&keep);
-            if s.ring.len() > RING_MAX {
-                let excess = s.ring.len() - RING_MAX;
-                s.ring.drain(..excess);
-            }
-            s.dirty = true;
-            if let Some(f) = s.transcript.as_mut() {
-                let _ = f.write_all(&buf[..n]);
-                s.transcript_len += n as u64;
-                if s.transcript_len >= HISTORY_MAX {
-                    let _ = f.write_all(
-                        b"\r\n\x1b[90m[transcript size cap reached - recording stopped]\x1b[0m\r\n",
-                    );
-                    s.transcript = None;
-                }
-            }
+            // Everything that does not need the session happens before the
+            // lock is taken. Decoding, cwd parsing and building the client's
+            // line are all work on this thread's own buffers, and every
+            // microsecond of them used to be a microsecond a keystroke bound
+            // for *any other session* spent waiting: there is one sessions
+            // lock for the whole daemon, and Request::Write needs it too.
             carry.extend_from_slice(&buf[..n]);
-            if let Some(text) = take_valid_utf8(&mut carry) {
-                if let Some(cwd) = parse_cwd(&text) {
+            let text = take_valid_utf8(&mut carry);
+            let cwd = text.as_deref().and_then(parse_cwd);
+            let line = text.map(|t| json!({"ev": "data", "data": t}));
+            {
+                let mut state = sessions.lock().unwrap();
+                let Some(s) = state.live.get_mut(&id) else {
+                    break;
+                };
+                let keep = s.ring_filter.keep(&buf[..n]);
+                ring_append(&mut s.ring, &keep);
+                s.dirty = true;
+                if let Some(cwd) = cwd {
                     s.cwd = cwd;
                     // First prompt has rendered — the shell is ready for input.
                     if let Some(input) = s.pending_input.take() {
                         let _ = s.writer.write_all(&input);
                     }
                 }
-                if let Some((_, w)) = s.attached.as_mut() {
-                    if write_line(w, &json!({"ev": "data", "data": text})).is_err() {
-                        s.attached = None;
+                // Refresh the cached socket only when the client changes:
+                // try_clone is a handle dup, not something to do per chunk.
+                let generation = s.attached.as_ref().map(|(c, _)| *c);
+                if client.as_ref().map(|(c, _)| *c) != generation {
+                    client = match s.attached.as_ref() {
+                        Some((c, sock)) => sock.try_clone().ok().map(|dup| (*c, dup)),
+                        None => None,
+                    };
+                }
+            }
+            // Disk and socket, both with the lock released. A transcript
+            // write is a file write, and the client write can block on a
+            // reader that is behind; holding the daemon's one lock across
+            // either is how a busy session makes an idle one feel slow to
+            // type in.
+            if let Some(f) = transcript.as_mut() {
+                let _ = f.write_all(&buf[..n]);
+                transcript_len += n as u64;
+                if transcript_len >= HISTORY_MAX {
+                    let _ = f.write_all(
+                        b"\r\n\x1b[90m[transcript size cap reached - recording stopped]\x1b[0m\r\n",
+                    );
+                    transcript = None;
+                }
+            }
+            if let (Some((generation, sock)), Some(line)) = (client.as_mut(), line) {
+                if write_line(sock, &line).is_err() {
+                    let dead = *generation;
+                    client = None;
+                    // Only drop the attachment if it is still that one: a
+                    // client may have reattached while this was writing.
+                    if let Some(s) = sessions.lock().unwrap().live.get_mut(&id) {
+                        if matches!(s.attached, Some((c, _)) if c == dead) {
+                            s.attached = None;
+                        }
                     }
                 }
             }
