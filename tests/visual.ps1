@@ -2177,16 +2177,22 @@ if (-not $Only -or $Only -eq "altscreen") {
 }
 
 # == scene: the same full-screen program, on the other renderer =========
-# Everything above runs the WebGL renderer, because the default theme has
-# no background image. A theme with one - which is what the reported
-# machine runs - makes the app dispose WebGL and fall back to the DOM
-# renderer, and that path has never drawn a full-screen program in any
-# test here.
+# A full-screen program over a theme with background art. This is what the
+# machine the report came from actually runs, and it is now the GPU
+# renderer like everything else.
 #
-# It is the difference that fits the report best: a program that takes the
-# screen with ?1049h and then repaints, where the repaints never land. The
-# sequence is not the suspect - it is covered three ways already - but the
-# renderer underneath it was never looked at.
+# It did not used to be. A background made the app dispose WebGL and fall
+# back to the DOM renderer, and this scene was written because that path
+# had never drawn a full-screen program in any test here - a program that
+# takes the screen with ?1049h and then repaints, where the repaints never
+# land, fits a slow renderer better than it fits any sequence, and the
+# sequences were covered three ways already.
+#
+# Backgrounds run on WebGL now, so this scene covers the combination
+# everybody gets. The DOM renderer did not disappear with it - it is still
+# reachable from Settings, for a machine whose driver cannot be trusted
+# with the GPU path - so it gets its own scene below rather than losing
+# the only coverage it ever had.
 if (-not $Only -or $Only -eq "tui-bg") {
   $ctx21 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"theme`":`"bladerunner`"}"
   $h21 = $ctx21.Hwnd
@@ -2204,14 +2210,14 @@ if (-not $Only -or $Only -eq "tui-bg") {
     Start-Sleep -Seconds 4
     $script:bgAfter = Capture-Window $h21
   }
-  # Lower thresholds than the WebGL scene: a background image shows
+  # Lower thresholds than the plain scene: a background image shows
   # through the terminal, so a screen of colour fills moves less of it.
   $e1 = Frame-Diff $bgShell $bgA
-  if ($e1 -gt 0.20) { Pass "a full-screen program takes the screen on the DOM renderer too" }
+  if ($e1 -gt 0.20) { Pass "a full-screen program takes the screen over background art too" }
   else { Fail "tui-bg" ("the screen barely changed when the program started ({0:p0})" -f $e1) }
   $e2 = Frame-Diff $bgA $bgB
   if ($e2 -gt 0.20) { Pass "and each redraw reaches it" }
-  else { Fail "tui-bg" ("frame 2 looks like frame 1 ({0:p0} changed) - this is the reported symptom, on the renderer the report came from" -f $e2) }
+  else { Fail "tui-bg" ("frame 2 looks like frame 1 ({0:p0} changed) - this is the reported symptom" -f $e2) }
   $e3 = Frame-Diff $bgB $bgC
   if ($e3 -gt 0.20) { Pass "and keeps reaching it, frame after frame" }
   else { Fail "tui-bg" ("frame 3 looks like frame 2 ({0:p0} changed)" -f $e3) }
@@ -2230,6 +2236,47 @@ if (-not $Only -or $Only -eq "tui-bg") {
   }
   foreach ($b in $bgShell, $bgA, $bgB, $bgC, $bgAfter) { $b.Dispose() }
   Stop-App $ctx21
+}
+
+# == scene: a full-screen program on the DOM renderer ====================
+#
+# Nothing reaches the DOM renderer by accident any more: it is what a
+# person picks in Settings when the GPU path has let them down. That makes
+# it easy to stop testing without noticing, and it is exactly the renderer
+# the "repaints never land" report was blamed on - so if it is still an
+# option, it has to still draw a full-screen program.
+if (-not $Only -or $Only -eq "tui-dom") {
+  $ctxDom = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"theme`":`"bladerunner`",`"renderer`":`"dom`"}"
+  $hDom = $ctxDom.Hwnd
+  $fixture = Join-Path $repo "tests\fixtures\tui.ps1"
+  Record-Scene "tui-dom" 32 $ctxDom {
+    Run-Cmd 'echo before-the-tui-dom' 2
+    $script:domShell = Capture-Window $hDom
+    Run-Cmd "& '$fixture' -Frames 3 -Ms 2600" 0
+    Start-Sleep -Milliseconds 1400
+    $script:domA = Capture-Window $hDom
+    Start-Sleep -Milliseconds 2600
+    $script:domB = Capture-Window $hDom
+    Start-Sleep -Milliseconds 2600
+    $script:domC = Capture-Window $hDom
+    Start-Sleep -Seconds 4
+    $script:domAfter = Capture-Window $hDom
+  }
+  $d1 = Frame-Diff $domShell $domA
+  if ($d1 -gt 0.20) { Pass "a full-screen program takes the screen on the DOM renderer" }
+  else { Fail "tui-dom" ("the screen barely changed when the program started ({0:p0})" -f $d1) }
+  $d2 = Frame-Diff $domA $domB
+  if ($d2 -gt 0.20) { Pass "and each redraw reaches it there too" }
+  else { Fail "tui-dom" ("frame 2 looks like frame 1 ({0:p0} changed)" -f $d2) }
+  $d3 = Frame-Diff $domB $domC
+  if ($d3 -gt 0.20) { Pass "and keeps reaching it, frame after frame" }
+  else { Fail "tui-dom" ("frame 3 looks like frame 2 ({0:p0} changed)" -f $d3) }
+  $d4 = Frame-Diff $domC $domAfter
+  if ($d4 -gt 0.20) { Pass "and the shell comes back when it exits" }
+  else { Fail "tui-dom" ("the last frame stayed on screen after it exited ({0:p0})" -f $d4) }
+  Write-Host ("  changed: start {0:p0}, frame2 {1:p0}, frame3 {2:p0}, exit {3:p0}" -f $d1, $d2, $d3, $d4) -ForegroundColor DarkGray
+  foreach ($b in $domShell, $domA, $domB, $domC, $domAfter) { $b.Dispose() }
+  Stop-App $ctxDom
 }
 
 # == scene: what this terminal answers when asked about a mode ==========
