@@ -75,6 +75,11 @@ interface Tab {
   icon: HTMLElement;
   shellB: HTMLElement;
   webgl?: WebglAddon;
+  /// When output last changed this terminal's buffer, and when the
+  /// renderer last drew - see the render-stall watch in main().
+  wroteAt?: number;
+  drewAt?: number;
+  stallLogged?: boolean;
   search: SearchAddon;
   blocks: BlockTracker;
 }
@@ -4513,6 +4518,23 @@ async function createTab(
   }
 
   const tab: Tab = { id, term, fit, pane, button, label, icon, shellB, webgl, search, blocks };
+  // The oldest open report about this terminal is that a full-screen
+  // program "gets stuck on old output" - it repaints and the screen keeps
+  // showing the frame before. Every theory about it so far has been a
+  // theory, because nothing in the app could say whether the repaint
+  // reached the renderer at all.
+  //
+  // These two events are the difference. onWriteParsed fires once output
+  // has changed the buffer, onRender once the renderer has drawn. Output
+  // that parsed and never drew is the symptom, stated exactly, and the
+  // watch in main() is what notices.
+  term.onWriteParsed(() => {
+    tab.wroteAt = performance.now();
+  });
+  term.onRender(() => {
+    tab.drewAt = performance.now();
+    tab.stallLogged = false;
+  });
   // Register and drain in one step, before anything else can await.
   //
   // Output produced between create_session and this line goes to `pending`
@@ -5931,6 +5953,12 @@ function logUi(ev: string, fields: Record<string, unknown> = {}) {
     // A logging failure is not the user's problem.
   }
 }
+
+/// How long output can sit parsed-but-undrawn before the window says so.
+///
+/// A frame is 16ms and a busy repaint can miss a few; three quarters of a
+/// second is not a slow frame, it is a screen that has stopped.
+const RENDER_STALL_MS = 750;
 
 const MENU_ARM_MS = 250;
 /// How far from the point a menu opened at a press has to land before it
@@ -9660,6 +9688,34 @@ async function main() {
   new ResizeObserver(() => refreshChrome()).observe(tabbar);
   startFpsMeter();
   applyStatusBar();
+  // Output that reached the buffer and never reached the screen.
+  //
+  // Logged at the default level, not behind "everything": it carries an
+  // id, a duration and which renderer was drawing, and nothing about what
+  // was on screen. It is the app admitting it is not drawing, which is
+  // the same class of thing as a thrown exception - and the one line that
+  // would have turned years of "it gets stuck sometimes" into a fault
+  // with a timestamp.
+  //
+  // Only the visible pane is watched. A background tab not drawing is not
+  // a bug, it is the browser being sensible.
+  window.setInterval(() => {
+    const tab = activeId === null ? undefined : tabs.get(activeId);
+    if (!tab?.wroteAt) return;
+    const since = performance.now() - tab.wroteAt;
+    const drewSinceWrite = (tab.drewAt ?? 0) >= tab.wroteAt;
+    if (drewSinceWrite || since < RENDER_STALL_MS || tab.stallLogged) return;
+    tab.stallLogged = true;
+    logUi("error.render", {
+      id: tab.id,
+      unpaintedMs: Math.round(since),
+      sinceDrewMs: tab.drewAt ? Math.round(performance.now() - tab.drewAt) : null,
+      renderer: tab.webgl ? "webgl" : "dom",
+      alternate: tab.term.buffer.active.type === "alternate",
+      rows: tab.term.rows,
+      cols: tab.term.cols,
+    });
+  }, 1000);
   window.setInterval(updateLiveInfo, 5000);
   window.setInterval(aiAutoTitleTick, 120_000);
 

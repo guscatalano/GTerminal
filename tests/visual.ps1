@@ -2279,6 +2279,69 @@ if (-not $Only -or $Only -eq "tui-dom") {
   Stop-App $ctxDom
 }
 
+# == scene: repaints faster than the eye, checked by the window itself ===
+#
+# The other TUI scenes repaint every 2.6 seconds and ask a screenshot
+# whether the picture changed. That is a gentle cadence - a renderer has
+# an age to catch up - and the report is about programs that repaint
+# constantly: Claude Code, lazygit, vim on a held key.
+#
+# It is also a coarse question. A screenshot can only say "these two
+# pixels differ", so it needs frames far enough apart to photograph, and
+# a repaint that lands one frame late looks exactly like one that lands.
+#
+# The window can now answer the question directly. It knows when output
+# changed the buffer and when the renderer drew, and writes error.render
+# when the first happens without the second - at the default log level,
+# because a screen that has stopped is the app admitting it broke. So
+# this scene repaints eighty times as fast as a person could read and
+# then asks the log, which is a sharper instrument than any picture.
+if (-not $Only -or $Only -eq "tui-fast") {
+  $ctxFast = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"theme`":`"bladerunner`"}"
+  $hFast = $ctxFast.Hwnd
+  $fixture = Join-Path $repo "tests\fixtures\tui.ps1"
+  Record-Scene "tui-fast" 30 $ctxFast {
+    Run-Cmd 'echo before-the-fast-tui' 2
+    $script:fastShell = Capture-Window $hFast
+    Run-Cmd "& '$fixture' -Frames 80 -Ms 150" 0
+    Start-Sleep -Milliseconds 2500
+    $script:fastA = Capture-Window $hFast
+    Start-Sleep -Milliseconds 5000
+    $script:fastB = Capture-Window $hFast
+    Start-Sleep -Seconds 8
+    $script:fastAfter = Capture-Window $hFast
+  }
+  # The screen has to be doing something at all - if the program never
+  # took it, the log below would be quiet for the wrong reason.
+  $f1 = Frame-Diff $fastShell $fastA
+  if ($f1 -gt 0.20) { Pass "a program repainting every 150ms takes the screen" }
+  else { Fail "tui-fast" ("the screen barely changed when the program started ({0:p0})" -f $f1) }
+  $f2 = Frame-Diff $fastA $fastB
+  if ($f2 -gt 0.10) { Pass "and the screen is still moving five seconds in" }
+  else { Fail "tui-fast" ("the picture stopped moving between 2.5s and 7.5s ({0:p0} changed)" -f $f2) }
+  $f3 = Frame-Diff $fastB $fastAfter
+  if ($f3 -gt 0.20) { Pass "and the shell comes back when it exits" }
+  else { Fail "tui-fast" ("the last frame stayed on screen after it exited ({0:p0})" -f $f3) }
+
+  # The sharp question: output that reached the buffer and never reached
+  # the screen. This is the reported fault stated exactly, and the only
+  # assertion here that does not depend on when a screenshot was taken.
+  $fastLog = Join-Path $scratch "GTerminal/ui.log"
+  if (Test-Path $fastLog) {
+    $stalls = @(Get-Content $fastLog | Where-Object { $_ -match '"ev":"error.render"' })
+    if ($stalls.Count -eq 0) { Pass "and the window never had output it failed to draw" }
+    else {
+      Fail "tui-fast" "$($stalls.Count) render stall(s) - output parsed and never drawn"
+      $stalls | Select-Object -First 3 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+    }
+  } else {
+    Write-Host "  note: no ui.log written, so the render watch could not be read" -ForegroundColor DarkYellow
+  }
+  Write-Host ("  changed: start {0:p0}, mid {1:p0}, exit {2:p0}" -f $f1, $f2, $f3) -ForegroundColor DarkGray
+  foreach ($b in $fastShell, $fastA, $fastB, $fastAfter) { $b.Dispose() }
+  Stop-App $ctxFast
+}
+
 # == scene: what this terminal answers when asked about a mode ==========
 # DECRQM is how a program decides whether to use a feature, and a wrong
 # answer is worse than no answer: told yes, it commits to something the
