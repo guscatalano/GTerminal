@@ -692,6 +692,49 @@ if ($driftOut -match "DRIFT=(-?\d+)") {
 }
 Close-Shell $geo
 
+# ── the collapse itself, read back off the screen ─────────────────────
+#
+# The probes above check what the pattern assumes. This one performs it
+# and then reads the row, which is a different question: the sequences
+# can be exactly right and the row still wrong, and a test that only
+# watches bytes go past cannot tell those apart.
+#
+# The fixture writes a prompt, moves up a row, blanks it with a
+# full-width write, and rewrites a short summary over it - then reads the
+# console buffer back and prints what is actually there. A terminal that
+# reports a width it is not rendering leaves the tail of the prompt on
+# the row; one without deferred wrap leaves the row blank and puts the
+# summary below it. Both are visible in the row text, which is why the
+# fixture reads it rather than trusting the write.
+$col = Open-Shell "pwsh"
+$colFixture = Join-Path $repo "tests\fixtures\collapse.ps1"
+Type-Text ("& '$colFixture'" + "`r")
+$colOut = Strip-Ansi (Drain 1500)
+if ($colOut -match "COLLAPSE-ROW=\[([^\]]*)\]") {
+  $rowText = $Matches[1]
+  if ($rowText -eq "BUFFER-UNAVAILABLE") {
+    Write-Host "  note: the shell could not read its own console buffer, so the row could not be checked" -ForegroundColor DarkYellow
+  } elseif ($rowText -eq "Select item 2") {
+    "PASS a collapsed prompt leaves the summary alone on its row"
+  } else {
+    $failures += "collapse: the prompt's row reads '$rowText' rather than 'Select item 2' - the erase was the wrong length, so a redrawn prompt leaves the old one behind"
+  }
+} else {
+  $failures += "collapse: the fixture never reported the row it rewrote"
+}
+if ($colOut -match "COLLAPSE-DRIFT=(-?\d+)") {
+  if ([int]$Matches[1] -eq 0) { "PASS and the summary lands on the row the prompt was on" }
+  else { $failures += "collapse: the full-width erase drifted $($Matches[1]) row(s), so the summary lands below a blank row" }
+}
+# The row above must not have been touched. An erase one character too
+# long wraps into it, which is how a collapse eats the line before it.
+if ($colOut -match "COLLAPSE-ABOVE=\[([^\]]*)\]") {
+  $above = $Matches[1]
+  if ($above -ne "" -and $above -ne "BUFFER-UNAVAILABLE") { "PASS and the line above it survives ('$above')" }
+  elseif ($above -eq "") { $failures += "collapse: the line above the prompt was blanked - the erase wrapped into it" }
+}
+Close-Shell $col
+
 # ── latency ───────────────────────────────────────────────────────────
 #
 # A latency test is only as good as the state it measures in. The first
