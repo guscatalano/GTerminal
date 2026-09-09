@@ -113,7 +113,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "tui-dom", "tui-fast", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "selectright", "selectmax", "pasteboth", "tabkeys", "maxtop", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "tui-dom", "tui-fast", "reboot", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "selectright", "selectmax", "pasteboth", "tabkeys", "maxtop", "tray")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -678,7 +678,12 @@ $outDir = Join-Path $repo "docs\visual"
 New-Item -ItemType Directory -Force $outDir | Out-Null
 
 function Start-App {
-  param([string]$config)
+  # -KeepState launches against whatever is already on disk instead of a
+  # clean slate: the same executable, the same LOCALAPPDATA, the sessions
+  # that were checkpointed before everything was killed. That is what
+  # starting up after a reboot actually is.
+  param([string]$config, [switch]$KeepState)
+  if (-not $KeepState) {
   Remove-Item "$scratch\GTerminal" -Recurse -Force -ErrorAction SilentlyContinue
   # The WebView2 store goes too, so every scene starts from the same UI
   # state. Without this a scene that toggles the sidebar leaves it on for
@@ -687,6 +692,7 @@ function Start-App {
   Remove-Item $env:WEBVIEW2_USER_DATA_FOLDER -Recurse -Force -ErrorAction SilentlyContinue
   New-Item -ItemType Directory -Force "$scratch\GTerminal" | Out-Null
   Set-Content "$scratch\GTerminal\config.json" $config
+  }
   $app = Start-Process -FilePath $exe -PassThru
   $hwnd = [IntPtr]::Zero
   foreach ($i in 1..60) {
@@ -2340,6 +2346,84 @@ if (-not $Only -or $Only -eq "tui-fast") {
   Write-Host ("  changed: start {0:p0}, mid {1:p0}, exit {2:p0}" -f $f1, $f2, $f3) -ForegroundColor DarkGray
   foreach ($b in $fastShell, $fastA, $fastB, $fastAfter) { $b.Dispose() }
   Stop-App $ctxFast
+}
+
+# == scene: a reboot, with a full-screen program running ================
+#
+# The one thing no test here has ever done: kill everything the way a
+# reboot does and start again.
+#
+# It matters most with a full-screen program running, because of what such
+# a program leaves in the ring. Alternate screen on. Cursor hidden.
+# Autowrap off. A scrolling region set to a band in the middle. A program
+# that exits puts all of that back; a program that is killed writes none
+# of the sequences that would - so the ring ends with every mode switched
+# on and nothing switching them off, and restoring the session replays
+# exactly that into a fresh terminal.
+#
+# The symptom is not a glitch during the restore, which would be obvious.
+# It is a terminal that afterwards scrolls a band of itself and leaves the
+# rest still, or refuses to wrap, or has no cursor - long after the
+# program is gone, in a window that was just created, which is the part
+# that makes it impossible to connect to anything.
+#
+# So: run one, kill the app and the daemon together, start again on the
+# same state, and then ask the restored terminal to do the most ordinary
+# thing there is - print more lines than fit.
+if (-not $Only -or $Only -eq "reboot") {
+  $cfgRb = "{$baseCfg,`"default_shell`":`"pwsh`"}"
+  $ctxRb = Start-App $cfgRb
+  $hRb = $ctxRb.Hwnd
+  $fixture = Join-Path $repo "tests\fixtures\tui.ps1"
+  Run-Cmd 'echo before-the-reboot' 2
+  Run-Cmd "& '$fixture' -Frames 400 -Ms 200 -Sloppy" 0
+  # Long enough to be drawing, and past the three-second checkpoint, so
+  # what is on disk includes the modes it switched on.
+  Start-Sleep -Seconds 6
+  $rbDuring = Capture-Window $hRb
+  # The reboot. Both processes, no warning, nothing asked to stand down.
+  Stop-App $ctxRb
+  Start-Sleep -Seconds 2
+
+  $ctxRb2 = Start-App -KeepState
+  $hRb2 = $ctxRb2.Hwnd
+  Record-Scene "reboot" 34 $ctxRb2 {
+    $null = Wait-Settled $hRb2 40
+    $script:rbAfter = Capture-Window $hRb2
+    # More lines than fit on the screen. On a terminal with a leftover
+    # scrolling region only the band moves and the rest stays where it
+    # was, which is the fault this scene exists for.
+    Run-Cmd '1..60 | ForEach-Object { "restored line $_" }' 4
+    $script:rbScrollA = Capture-Window $hRb2
+    Run-Cmd '1..60 | ForEach-Object { "second batch $_" }' 4
+    $script:rbScrollB = Capture-Window $hRb2
+  }
+
+  # It came back at all.
+  if ($U::IsWindowVisible($hRb2)) { Pass "the window comes back after a reboot" }
+  else { Fail "reboot" "no window after restarting" }
+
+  # And it is not still showing the killed program's last frame.
+  $rbChanged = Frame-Diff $rbDuring $rbAfter
+  if ($rbChanged -gt 0.20) { Pass "and does not come back to the dead program's last frame" }
+  else { Fail "reboot" ("the restored window looks like the frame the killed program left ({0:p0} changed)" -f $rbChanged) }
+
+  # The assertion this scene is for: sixty lines of output have to move
+  # the screen. A region left set by the killed program scrolls a band and
+  # leaves the rest, which reads as a terminal that has stopped redrawing.
+  $rbScrolled = Frame-Diff $rbScrollA $rbScrollB
+  if ($rbScrolled -gt 0.30) { Pass "and scrolls the whole screen, not a band of it" }
+  else { Fail "reboot" ("sixty lines of output changed {0:p0} of the screen - a scrolling region the killed program set is still in force" -f $rbScrolled) }
+
+  # Typing has to reach the restored shell, which is a different question
+  # from the screen moving.
+  $rbTyped = Frame-Diff $rbAfter $rbScrollA
+  if ($rbTyped -gt 0.10) { Pass "and takes input into the restored session" }
+  else { Fail "reboot" ("nothing visible happened when the restored session was typed into ({0:p0})" -f $rbTyped) }
+
+  Write-Host ("  changed: after-reboot {0:p0}, typed {1:p0}, scrolled {2:p0}" -f $rbChanged, $rbTyped, $rbScrolled) -ForegroundColor DarkGray
+  foreach ($b in $rbDuring, $rbAfter, $rbScrollA, $rbScrollB) { $b.Dispose() }
+  Stop-App $ctxRb2
 }
 
 # == scene: what this terminal answers when asked about a mode ==========

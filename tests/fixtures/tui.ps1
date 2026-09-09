@@ -13,11 +13,42 @@
 # A real TUI would be a better test and is not available: nothing
 # full-screen ships with Windows, so it would have to be installed, and
 # its output would then depend on its own state rather than on ours.
-param([int]$Frames = 3, [int]$Ms = 2500)
+param(
+  [int]$Frames = 3,
+  [int]$Ms = 2500,
+  # Draw like a program that is about to be killed.
+  #
+  # The normal path resets its scrolling region and shows the cursor again
+  # on every frame, and leaves the alternate screen in a finally - which is
+  # what a program that exits does. A program that is killed does none of
+  # it, and everything it switched on is sitting in the scrollback ring to
+  # be replayed into a fresh terminal when the session is restored. That is
+  # the state a reboot leaves, and there was no way to produce it here.
+  [switch]$Sloppy
+)
 $e = [char]27
 $w = [Math]::Max(20, $Host.UI.RawUI.WindowSize.Width)
 $h = [Math]::Max(5, $Host.UI.RawUI.WindowSize.Height)
 Write-Host -NoNewline "$e[?1049h"      # alternate screen, like every TUI
+if ($Sloppy) {
+  # Set the modes and never put them back. No finally either: this is a
+  # program that gets killed, not one that ends.
+  $mid = [Math]::Max(3, [int]($h / 2))
+  Write-Host -NoNewline "$e[?25l"          # cursor hidden while drawing
+  Write-Host -NoNewline "$e[?7l"           # autowrap off, to draw the last column
+  Write-Host -NoNewline "$e[2;${mid}r"     # a scrolling region, and it stays
+  foreach ($i in 1..$Frames) {
+    $bg = if ($i % 2) { "$e[41m" } else { "$e[44m" }
+    $ch = if ($i % 2) { '#' } else { '=' }
+    $line = $bg + ($ch * ($w - 1)) + "$e[0m"
+    $frame = ""
+    foreach ($row in 1..$h) { $frame += "$e[$row;1H" + $line }
+    $frame += "$e[1;1HSLOPPY-FRAME-$i"
+    Write-Host -NoNewline $frame
+    Start-Sleep -Milliseconds $Ms
+  }
+  return
+}
 try {
   foreach ($i in 1..$Frames) {
     # Alternating fills: a redraw that does not reach the screen leaves

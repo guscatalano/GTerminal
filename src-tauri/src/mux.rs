@@ -395,11 +395,27 @@ impl RingFilter {
 /// shell instead of selecting, so text cannot be selected or copied -
 /// in a brand new window, which is the confusing part, because the
 /// window is new and the mode it inherited is not.
+/// Three of these are not modes at all, and they are the ones a reboot
+/// needs most.
+///
+/// A program that exits normally puts back what it set. A program that is
+/// killed - which is what a reboot is, to everything running in it - puts
+/// back nothing, and whatever it had set is sitting in the scrollback
+/// ring, to be replayed into a fresh terminal when the session is
+/// restored. The replay faithfully re-sets every mode and never reaches
+/// the sequence that would have cleared them, because that sequence was
+/// never written.
+///
+/// So the scrolling region (DECSTBM), autowrap (DECAWM) and origin mode
+/// (DECOM) are reset here too. A leftover region is the worst of them: it
+/// is not a visual glitch but a terminal that scrolls a band of itself and
+/// leaves the rest still, long after the program that asked for it is
+/// gone - and nothing about a restored session suggests why.
 const MODE_RESET_INLINE: &str =
-    "[?1000l[?1002l[?1003l[?1005l[?1006l[?2004l[?1l[?1049l[?47l[?1004l[?9001l[?25h[0m";
+    "[?1000l[?1002l[?1003l[?1005l[?1006l[?2004l[?1l[?1049l[?47l[?1004l[?9001l[?25h[?7h[?6l[r[0m";
 
 const MODE_RESET: &str =
-    "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?2004l\x1b[?1l\x1b[?1049l\x1b[?47l\x1b[?1004l\x1b[?9001l\x1b[?25h\x1b[0m\r\n";
+    "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?2004l\x1b[?1l\x1b[?1049l\x1b[?47l\x1b[?1004l\x1b[?9001l\x1b[?25h\x1b[?7h\x1b[?6l\x1b[r\x1b[0m\r\n";
 
 /// Wraps the user's prompt (after their profile has set it up) so every
 /// prompt also emits OSC 9;9 with the current directory — the same
@@ -1109,6 +1125,53 @@ mod daemon_binary_tests {
             "the copy must be this binary, not some other one"
         );
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
+
+#[cfg(test)]
+mod mode_reset_tests {
+    use super::{MODE_RESET, MODE_RESET_INLINE};
+
+    /// What a restored session has to be handed back clean.
+    ///
+    /// Each of these is something a program switches on and switches off
+    /// again when it exits - and a program killed by a reboot never gets
+    /// to the second half. The ring then holds the half that turns it on,
+    /// and replaying it into a fresh terminal turns it on there.
+    #[test]
+    fn every_mode_a_killed_program_can_leave_behind_is_reset() {
+        for (seq, what) in [
+            ("[?1049l", "the alternate screen, or the restored shell draws onto a screen nobody can scroll"),
+            ("[?47l", "the older alternate screen"),
+            ("[?1000l", "mouse reporting, which turns selecting text into clicks the shell eats"),
+            ("[?1002l", "button-event mouse reporting"),
+            ("[?1003l", "any-event mouse reporting"),
+            ("[?1006l", "SGR mouse encoding"),
+            ("[?2004l", "bracketed paste, which otherwise wraps every paste in markers the shell prints"),
+            ("[?25h", "the cursor, which a TUI hides while it draws"),
+            ("[?7h", "autowrap, which a program turns off to draw in the last column"),
+            ("[?6l", "origin mode, which makes every cursor address relative to a region"),
+            ("[r", "the scrolling region - a terminal that scrolls a band of itself and leaves the rest"),
+            ("[0m", "colours, so the restored prompt is not painted in whatever was last set"),
+        ] {
+            assert!(
+                MODE_RESET.contains(seq),
+                "MODE_RESET does not reset {what} ({seq})"
+            );
+            assert!(
+                MODE_RESET_INLINE.contains(seq),
+                "MODE_RESET_INLINE does not reset {what} ({seq})"
+            );
+        }
+    }
+
+    /// The inline form goes into a replay stream that is already being
+    /// read as text; the other ends a line so the divider after it starts
+    /// on its own row.
+    #[test]
+    fn only_the_line_form_ends_a_line() {
+        assert!(MODE_RESET.ends_with("\r\n"));
+        assert!(!MODE_RESET_INLINE.contains('\n'));
     }
 }
 
