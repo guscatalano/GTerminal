@@ -3279,7 +3279,13 @@ function setActive(id: number) {
   // The arrange overlay belongs to one tab's panes; leaving that tab
   // leaves the mode.
   if (arrangeKey !== undefined && arrangeKey !== key) closeArrange();
+  // Both full-page panels, not just one. Settings closed here and history
+  // did not, so clicking a tab while history was open activated it behind
+  // a page that hides the panes - the tab highlighted, the terminal took
+  // focus, and the screen did not change. Going to a tab means going to
+  // it whichever page you were reading.
   closeSettings();
+  closeHistory();
   // Activating a tab restores whichever pane had focus there; activating
   // a specific pane (from the sidebar, say) focuses that one.
   const focused = id === key ? focusedOf(key) : id;
@@ -5489,6 +5495,11 @@ function openHistory() {
 
 function closeHistory() {
   if (!historyOpen()) return;
+  // A transcript is read inside the history page, so leaving the page
+  // leaves the transcript. Without this the viewer stays open over the
+  // terminal with nothing behind it. Escape still closes them one at a
+  // time, because that branch takes the viewer before it takes the page.
+  closeViewer();
   app.classList.remove("history-on");
   const tab = activeId !== null ? tabs.get(activeId) : undefined;
   if (tab) {
