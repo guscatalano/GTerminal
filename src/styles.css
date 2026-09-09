@@ -1126,10 +1126,34 @@ input.set-control {
   display: none;
 }
 
+/* The search box follows you down the page.
+   Settings is long enough that filtering is how anything gets found, and
+   a search box you have to scroll back up to reach is one you stop using.
+
+   Sticky rather than fixed: the scrolling element is #settings-page, and
+   fixed would take the bar out of that flow and leave it floating over
+   the terminal once settings is closed.
+
+   It is a bar around the input rather than the input itself, because a
+   sticky input would let rows scroll through the margin above it. The
+   padding belongs to something that paints.
+
+   Wash and blur for the same reason the sidebar has them - small text
+   over whatever is behind it - except that here what is behind it is
+   moving, so the blur is doing the work rather than the decoration. */
+.settings-searchbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: 14px 0 10px;
+  background: color-mix(in srgb, var(--bg) var(--chrome-wash, 100%), transparent);
+  backdrop-filter: blur(10px);
+}
+
 #settings-search {
   width: 100%;
   box-sizing: border-box;
-  margin: 14px 0 0;
+  margin: 0;
   background: var(--panel2);
   color: var(--text);
   border: 1px solid var(--border2);
