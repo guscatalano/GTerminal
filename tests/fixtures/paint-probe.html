@@ -1,0 +1,178 @@
+<!doctype html>
+<!--
+  When the buffer changes, does the picture follow?
+
+  Driven by tests/paint.mjs. Everything else stops one layer short of
+  this. redraw.mjs proves a sequence lands in xterm's buffer; collapse.ps1
+  proves it lands in ConPTY's; the visual scenes photograph a real window
+  and can only say that two frames differ. None of them can say that what
+  is in the buffer became pixels, and "the screen keeps showing the frame
+  before" is exactly a failure in that gap.
+
+  What this deliberately does NOT measure is per-frame liveness - whether
+  each of twenty rapid frames landed. That was the first design and it was
+  wrong twice over. xterm draws at most once per animation frame and
+  coalesces whatever arrived in between, so fewer draws than writes is
+  correct behaviour, not a lost frame. And headless Chromium runs on
+  virtual time, where requestAnimationFrame does not fire on any real
+  cadence: the counts come out around nine draws for twenty writes no
+  matter what the terminal does, with the compositor flags forced or not.
+  A number like that describes the harness. Liveness belongs to the
+  tui-fast scene, which drives a real window, and to the error.render
+  watch inside the app.
+
+  What is left is the sharper question anyway. Fill the screen a colour,
+  wait for the picture to become that colour, fill it another, wait again.
+  Polling rather than sampling on a clock, so the cadence cannot matter
+  and only the outcome does: a screen that sticks never arrives, and the
+  wait times out saying what it was still showing.
+-->
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css" />
+<style>
+  body {
+    margin: 0;
+    background: #101014;
+  }
+  #term {
+    width: 700px;
+    height: 260px;
+  }
+  #out {
+    font: 12px monospace;
+    white-space: pre-wrap;
+    color: #000;
+    background: #fff;
+  }
+</style>
+<div id="term"></div>
+<pre id="out">PENDING</pre>
+<script type="module">
+  import { Terminal } from "../../node_modules/@xterm/xterm/lib/xterm.mjs";
+  import { WebglAddon } from "../../node_modules/@xterm/addon-webgl/lib/addon-webgl.mjs";
+
+  const ESC = "\x1b";
+  const COLS = 40;
+  const ROWS = 8;
+  const ALTERNATIONS = 6;
+  const PATIENCE_MS = 4000;
+
+  const useWebgl = new URLSearchParams(location.search).get("renderer") !== "dom";
+  const out = document.getElementById("out");
+  const host = document.getElementById("term");
+
+  // A frame the way a full-screen program draws one: every row filled
+  // edge to edge, addressed by cursor position rather than scrolled. Red
+  // with '#' or blue with '=', so the two are unmistakable as pixels and
+  // as text.
+  function frame(red) {
+    let s = `${ESC}[H`;
+    for (let r = 1; r <= ROWS; r++) {
+      s += `${ESC}[${r};1H${ESC}[${red ? 41 : 44}m${(red ? "#" : "=").repeat(COLS)}${ESC}[0m`;
+    }
+    return s;
+  }
+
+  // What the renderer has actually produced: a colour balance for WebGL,
+  // and text for the DOM renderer, which has no canvas and for which the
+  // rows it builds are the output.
+  function painted() {
+    if (useWebgl) {
+      const canvases = [...host.querySelectorAll("canvas")];
+      if (!canvases.length) return { kind: "none" };
+      const { width, height } = canvases[0];
+      const snap = document.createElement("canvas");
+      snap.width = width;
+      snap.height = height;
+      const ctx = snap.getContext("2d");
+      for (const c of canvases) ctx.drawImage(c, 0, 0);
+      const d = ctx.getImageData(0, 0, width, height).data;
+      let r = 0;
+      let b = 0;
+      for (let i = 0; i < d.length; i += 64) {
+        r += d[i];
+        b += d[i + 2];
+      }
+      return { kind: "pixels", r, b };
+    }
+    const rows = host.querySelector(".xterm-rows");
+    const text = (rows ? rows.textContent : "").replace(/\s+/g, "");
+    return { kind: "text", text };
+  }
+
+  const showsRed = (p) =>
+    p.kind === "pixels" ? p.r > p.b * 2 : p.kind === "text" && p.text.includes("#") && !p.text.includes("=");
+  const showsBlue = (p) =>
+    p.kind === "pixels" ? p.b > p.r * 2 : p.kind === "text" && p.text.includes("=") && !p.text.includes("#");
+
+  // Poll until the screen shows what was just written. This is the whole
+  // instrument: it does not care when the renderer draws, only that it
+  // does.
+  async function waitUntil(predicate) {
+    const started = Date.now();
+    for (;;) {
+      const p = painted();
+      if (predicate(p)) return { ok: true, ms: Date.now() - started };
+      if (Date.now() - started > PATIENCE_MS) {
+        return {
+          ok: false,
+          ms: Date.now() - started,
+          saw: p.kind === "pixels" ? `r=${p.r} b=${p.b}` : `"${(p.text || "").slice(0, 40)}"`,
+        };
+      }
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  }
+
+  (async () => {
+    try {
+      const term = new Terminal({
+        cols: COLS,
+        rows: ROWS,
+        allowProposedApi: true,
+        allowTransparency: true,
+        minimumContrastRatio: 4.5,
+      });
+      term.open(host);
+      if (useWebgl) {
+        // preserveDrawingBuffer only so the frame can be read back; it
+        // changes nothing about whether a frame is drawn.
+        term.loadAddon(new WebglAddon(true));
+      }
+
+      const waits = [];
+      let landed = 0;
+      let missed = 0;
+      let firstMiss = null;
+
+      for (let i = 0; i < ALTERNATIONS; i++) {
+        for (const red of [true, false]) {
+          await new Promise((resolve) => term.write(frame(red), resolve));
+          const r = await waitUntil(red ? showsRed : showsBlue);
+          waits.push(r.ms);
+          if (r.ok) {
+            landed++;
+          } else {
+            missed++;
+            if (!firstMiss) {
+              firstMiss = { frame: waits.length, wanted: red ? "red" : "blue", saw: r.saw };
+            }
+          }
+        }
+      }
+
+      out.textContent =
+        "RESULTS " +
+        JSON.stringify({
+          renderer: useWebgl ? "webgl" : "dom",
+          frames: landed + missed,
+          landed,
+          missed,
+          firstMiss,
+          slowestMs: Math.max(...waits),
+        });
+    } catch (e) {
+      out.textContent = "RESULTS-ERROR " + String(e);
+    }
+  })();
+</script>
