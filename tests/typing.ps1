@@ -158,6 +158,30 @@ function Raw-Data {
   $text
 }
 
+# Read until the output says what was asked, or give up loudly.
+#
+# Drain waits for a gap in the traffic, which is a guess about how long a
+# shell takes to answer dressed up as a measurement. It holds on a quiet
+# desktop and fails on a loaded CI runner - which is exactly what it did,
+# on a probe that had passed every local run: "the shell never reported
+# its size", because the answer arrived 200ms after the drain gave up.
+#
+# Waiting for the pattern costs nothing when the answer is quick and does
+# not lie when it is slow. The accumulated text comes back either way, so
+# a real failure can still show what did arrive.
+function Read-Until {
+  param([string] $pattern, [int] $timeoutMs = 20000)
+  $deadline = [DateTime]::UtcNow.AddMilliseconds($timeoutMs)
+  $acc = ""
+  while ([DateTime]::UtcNow -lt $deadline) {
+    $line = Read-Event -timeoutMs 300
+    if ($null -ne $line) { $acc += $line + "`n" }
+    $text = Strip-Ansi $acc
+    if ($text -match $pattern) { return $text }
+  }
+  Strip-Ansi $acc
+}
+
 function Strip-Ansi {
   param($jsonLines)
   # Pull the data payloads out of the NDJSON events, then strip VT sequences.
@@ -655,7 +679,7 @@ $geo = Open-Shell "pwsh"
 # The echo of what is typed contains the source, and the result contains a
 # number, so a digit-matching pattern can only find the answer.
 Type-Text ('"GEOM=" + [Console]::BufferWidth + "x" + [Console]::WindowHeight' + "`r")
-$geoOut = Strip-Ansi (Drain 900)
+$geoOut = Read-Until "GEOM=\d+x\d+"
 if ($geoOut -match "GEOM=(\d+)x(\d+)") {
   $gw = [int]$Matches[1]
   if ($gw -eq 120) { "PASS a console program sees the width the session was created with ($gw)" }
@@ -669,7 +693,7 @@ if ($geoOut -match "GEOM=(\d+)x(\d+)") {
 $script:w.WriteLine('{"cmd":"resize","cols":100,"rows":28}')
 Start-Sleep -Milliseconds 600
 Type-Text ('"GEOM2=" + [Console]::BufferWidth' + "`r")
-$geoOut2 = Strip-Ansi (Drain 900)
+$geoOut2 = Read-Until "GEOM2=\d+"
 if ($geoOut2 -match "GEOM2=(\d+)") {
   $gw2 = [int]$Matches[1]
   if ($gw2 -eq 100) { "PASS and sees the new width after a resize ($gw2)" }
@@ -682,7 +706,7 @@ if ($geoOut2 -match "GEOM2=(\d+)") {
 # makes without checking.
 $probe = '$t=[Console]::CursorTop; [Console]::CursorTop=$t-1; [Console]::CursorLeft=0; [Console]::Write('' '' * [Console]::BufferWidth); "DRIFT=" + ([Console]::CursorTop-($t-1))'
 Type-Text ($probe + "`r")
-$driftOut = Strip-Ansi (Drain 900)
+$driftOut = Read-Until "DRIFT=-?\d+"
 if ($driftOut -match "DRIFT=(-?\d+)") {
   $drift = [int]$Matches[1]
   if ($drift -eq 0) { "PASS a full-width write leaves the cursor on the same row (deferred wrap)" }
@@ -709,7 +733,7 @@ Close-Shell $geo
 $col = Open-Shell "pwsh"
 $colFixture = Join-Path $repo "tests\fixtures\collapse.ps1"
 Type-Text ("& '$colFixture'" + "`r")
-$colOut = Strip-Ansi (Drain 1500)
+$colOut = Read-Until "COLLAPSE-DONE"
 if ($colOut -match "COLLAPSE-ROW=\[([^\]]*)\]") {
   $rowText = $Matches[1]
   if ($rowText -eq "BUFFER-UNAVAILABLE") {
