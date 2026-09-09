@@ -1,0 +1,143 @@
+<!doctype html>
+<!--
+  What this terminal does with the sequences a redrawing program uses.
+
+  Driven by tests/redraw.mjs, which loads it in headless Edge and reads
+  the results out of the DOM. Every case writes a short sequence into a
+  terminal built with the same options main.ts builds one with, then
+  reads the buffer back as text - so the assertion is about the rows that
+  ended up on screen, not about the bytes that went in.
+
+  That distinction is the whole point. A test that watches bytes go past
+  proves a sequence was relayed; it cannot tell a terminal that acted on
+  it from one that ignored it. Every case here is something a picker, a
+  progress bar, vim, lazygit or an agent TUI does on every frame.
+
+  Cases live here and expectations live in the test, deliberately: this
+  file says what a program draws, and the test says what has to be on the
+  screen afterwards.
+-->
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css" />
+<style>
+  body {
+    margin: 0;
+    background: #101014;
+  }
+  #term {
+    width: 700px;
+    height: 260px;
+  }
+  #out {
+    font: 12px monospace;
+    white-space: pre-wrap;
+    color: #000;
+    background: #fff;
+  }
+</style>
+<div id="term"></div>
+<pre id="out">PENDING</pre>
+<script type="module">
+  import { Terminal } from "../../node_modules/@xterm/xterm/lib/xterm.mjs";
+
+  const ESC = "\x1b";
+
+  // Each case: what a program writes, on a terminal 40 wide and 8 tall.
+  const CASES = [
+    // Erase-in-line, the single most common redraw primitive: a status
+    // line or a prompt rewriting itself in place.
+    { name: "erase to end of line", data: `ABCDEFGH${ESC}[5G${ESC}[K` },
+    { name: "erase whole line", data: `ABCDEFGH${ESC}[2K` },
+    { name: "erase to start of line", data: `ABCDEFGH${ESC}[5G${ESC}[1K` },
+
+    // Erase-in-display, which is how a full-screen program takes over.
+    { name: "clear screen and home", data: `AAA\r\nBBB${ESC}[H${ESC}[2J` },
+    { name: "erase below the cursor", data: `AAA\r\nBBB\r\nCCC${ESC}[2;1H${ESC}[J` },
+
+    // Cursor addressing: a whole-viewport repaint is CUP plus text, over
+    // and over, and it is what every frame of a TUI is made of.
+    { name: "cursor addressing places text", data: `${ESC}[3;5HX` },
+    { name: "column addressing", data: `ABCDEFGH${ESC}[3GZ` },
+
+    // Line editing, used by list views that scroll by one row.
+    { name: "insert a line", data: `A\r\nB\r\nC${ESC}[2;1H${ESC}[L` },
+    { name: "delete a line", data: `A\r\nB\r\nC${ESC}[2;1H${ESC}[M` },
+    { name: "insert characters", data: `ABCD${ESC}[1;2H${ESC}[2@` },
+    { name: "delete characters", data: `ABCD${ESC}[1;2H${ESC}[2P` },
+
+    // A scrolling region, which is how a program keeps a header and a
+    // footer still while the middle moves. A region left set is how a
+    // terminal ends up scrolling only part of itself.
+    {
+      name: "a scroll region leaves the header alone",
+      data: `${ESC}[HHEADER\r\n${ESC}[2;4r${ESC}[2;1HL1\r\nL2\r\nL3\r\nL4${ESC}[r`,
+    },
+
+    // Save and restore, used to draw somewhere else and come back.
+    { name: "save and restore the cursor", data: `AB${ESC}7${ESC}[5;10HZZ${ESC}8CD` },
+
+    // Wrap behaviour. Deferred wrap is what makes a full-width write
+    // stay on its row, which is the assumption every collapse-in-place
+    // redraw makes; autowrap off is what a program sets when it draws to
+    // the last column on purpose.
+    { name: "deferred wrap holds the row", data: `${"x".repeat(40)}Z` },
+    { name: "autowrap off truncates", data: `${ESC}[?7l${"y".repeat(45)}${ESC}[?7h` },
+
+    // Synchronised output: a modern TUI wraps a frame in it so the
+    // terminal shows the whole frame or none of it. A terminal that
+    // swallows the content between the markers loses the frame.
+    {
+      name: "synchronised output still draws",
+      data: `${ESC}[?2026h${ESC}[HFRAME-A${ESC}[2;1HROW-TWO${ESC}[?2026l`,
+    },
+
+    // Wide characters have to advance the cursor by two cells, or every
+    // subsequent column in the frame is off by one per character.
+    { name: "wide characters advance two cells", data: `日本 X` },
+
+    // Attributes must not leak out of the region they were set for.
+    { name: "attributes reset", data: `${ESC}[31mRED${ESC}[0m PLAIN` },
+  ];
+
+  const out = document.getElementById("out");
+  const host = document.getElementById("term");
+
+  function rowsOf(term) {
+    const buf = term.buffer.active;
+    const rows = [];
+    for (let i = 0; i < term.rows; i++) {
+      rows.push((buf.getLine(i)?.translateToString(true) ?? "").replace(/\s+$/, ""));
+    }
+    // Trailing blank rows carry no information and make the payload big.
+    while (rows.length && rows[rows.length - 1] === "") rows.pop();
+    return rows;
+  }
+
+  (async () => {
+    const results = [];
+    try {
+      for (const c of CASES) {
+        const term = new Terminal({
+          cols: 40,
+          rows: 8,
+          // The options main.ts uses that can change what lands in the
+          // buffer, rather than only how it looks.
+          allowProposedApi: true,
+          allowTransparency: true,
+          minimumContrastRatio: 4.5,
+          scrollback: 100,
+        });
+        const div = document.createElement("div");
+        host.appendChild(div);
+        term.open(div);
+        await new Promise((resolve) => term.write(c.data, resolve));
+        results.push({ name: c.name, rows: rowsOf(term), cursorX: term.buffer.active.cursorX, cursorY: term.buffer.active.cursorY });
+        term.dispose();
+        div.remove();
+      }
+      out.textContent = "RESULTS " + JSON.stringify(results);
+    } catch (e) {
+      out.textContent = "RESULTS-ERROR " + String(e);
+    }
+  })();
+</script>
