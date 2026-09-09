@@ -633,6 +633,65 @@ if ($frames.Contains("$esc[?1049l")) { "PASS and it hands the screen back on exi
 else { $failures += "tui-restore: the alternate screen was never left" }
 Close-Shell $tui
 
+# ── the geometry a console program is handed ──────────────────────────
+#
+# Every picker that collapses its own prompt does the same thing: move the
+# cursor up a row, blank that row by writing exactly BufferWidth spaces,
+# then rewrite a shorter summary over it. Two halves of that are this
+# terminal's to get right.
+#
+# The width it reports has to be the width being rendered. A pty that was
+# never resized - or was resized without the shell being told - reports a
+# stale number, and every erase after that is the wrong length: too short
+# leaves the tail of the old line on screen, too long wraps and eats the
+# line above. The resize test above only proves output survives a resize;
+# nothing here had ever asked the shell what size it thought it was.
+#
+# And a write of exactly BufferWidth characters from column 0 has to leave
+# the cursor on the row it started on. That is deferred end-of-line wrap,
+# and a terminal without it puts the replacement one row low and leaves a
+# blank row where the prompt was.
+$geo = Open-Shell "pwsh"
+# The echo of what is typed contains the source, and the result contains a
+# number, so a digit-matching pattern can only find the answer.
+Type-Text ('"GEOM=" + [Console]::BufferWidth + "x" + [Console]::WindowHeight' + "`r")
+$geoOut = Strip-Ansi (Drain 900)
+if ($geoOut -match "GEOM=(\d+)x(\d+)") {
+  $gw = [int]$Matches[1]
+  if ($gw -eq 120) { "PASS a console program sees the width the session was created with ($gw)" }
+  else { $failures += "geometry: the session was created at 120 columns and the shell sees $gw - every in-place redraw erases the wrong length" }
+} else {
+  $failures += "geometry: the shell never reported its size"
+}
+
+# And after a resize, which is the case a pane split or a dragged window
+# produces constantly.
+$script:w.WriteLine('{"cmd":"resize","cols":100,"rows":28}')
+Start-Sleep -Milliseconds 600
+Type-Text ('"GEOM2=" + [Console]::BufferWidth' + "`r")
+$geoOut2 = Strip-Ansi (Drain 900)
+if ($geoOut2 -match "GEOM2=(\d+)") {
+  $gw2 = [int]$Matches[1]
+  if ($gw2 -eq 100) { "PASS and sees the new width after a resize ($gw2)" }
+  else { $failures += "geometry: resized to 100 columns and the shell still sees $gw2" }
+} else {
+  $failures += "geometry: the shell never reported its size after a resize"
+}
+
+# Deferred end-of-line wrap: the assumption every collapse-in-place redraw
+# makes without checking.
+$probe = '$t=[Console]::CursorTop; [Console]::CursorTop=$t-1; [Console]::CursorLeft=0; [Console]::Write('' '' * [Console]::BufferWidth); "DRIFT=" + ([Console]::CursorTop-($t-1))'
+Type-Text ($probe + "`r")
+$driftOut = Strip-Ansi (Drain 900)
+if ($driftOut -match "DRIFT=(-?\d+)") {
+  $drift = [int]$Matches[1]
+  if ($drift -eq 0) { "PASS a full-width write leaves the cursor on the same row (deferred wrap)" }
+  else { $failures += "geometry: a full-width write moved the cursor $drift row(s) - an in-place redraw lands a row low and leaves a blank row behind" }
+} else {
+  $failures += "geometry: the wrap probe reported nothing"
+}
+Close-Shell $geo
+
 # ── latency ───────────────────────────────────────────────────────────
 #
 # A latency test is only as good as the state it measures in. The first
