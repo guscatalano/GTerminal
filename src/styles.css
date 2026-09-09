@@ -1162,10 +1162,14 @@ input.set-control {
   padding: 6px 10px;
 }
 
+/* Same bar, same reason: history is a long list and its search is how you
+   get to a transcript from last week. It reuses .settings-searchbar the
+   way this page already reuses .settings-inner and .settings-h1 - the
+   spacing lives on the bar, so both inputs sit flush inside it. */
 #history-search {
   width: 100%;
   box-sizing: border-box;
-  margin: 0 0 14px;
+  margin: 0;
   background: var(--panel2);
   color: var(--text);
   border: 1px solid var(--border2);
