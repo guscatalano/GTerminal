@@ -138,6 +138,9 @@ $sig = @'
 [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
 [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+[DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
+[DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags);
 [DllImport("user32.dll")] public static extern short VkKeyScan(char ch);
 [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
 [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, UIntPtr e);
@@ -164,6 +167,7 @@ $U = (Add-Type -MemberDefinition $sig -Name Vis -Namespace GTerm -PassThru) |
 # the terminal being used rather than just being resized.
 function Key {
   param([byte]$vk, [byte[]]$mods = @(), $holdMs = 25)
+  $null = Ensure-Foreground $script:inputTarget
   foreach ($m in $mods) { $U::keybd_event($m, 0, 0, [UIntPtr]::Zero) }
   $U::keybd_event($vk, 0, 0, [UIntPtr]::Zero)
   Start-Sleep -Milliseconds $holdMs
@@ -173,6 +177,7 @@ function Key {
 }
 function Send-Text {
   param([string]$text, $perKeyMs = 40)
+  $null = Ensure-Foreground $script:inputTarget
   foreach ($ch in $text.ToCharArray()) {
     $scan = $U::VkKeyScan($ch)
     if ($scan -eq -1) { continue }
@@ -203,12 +208,67 @@ function Release-Modifiers {
 # SetForegroundWindow they go nowhere and the scene records an untouched
 # prompt. A click in the middle of the terminal is what actually puts
 # focus where the keys are read.
+# Make sure the window will actually receive what is about to be sent.
+#
+# keybd_event and mouse_event do not address a window. Keys go wherever
+# focus is; a click goes to whatever is under the cursor. Every scene here
+# assumed the app was in front and none of them checked, so anything that
+# took the foreground - an installer finishing, a notification, another
+# scene's window closing slowly - turned the next scene's input into
+# nothing, and the scene reported what it measured afterwards: a drag that
+# highlighted nothing, a click that changed nothing, a clipboard that
+# still held the sentinel. Five scenes failed that way in one run while
+# their neighbours passed.
+#
+# Setting the foreground can fail outright: Windows refuses it when the
+# calling process does not own the foreground. The refusal is silent, so
+# this checks rather than trusts, retries, and says so when it cannot -
+# which turns "the app is broken" back into "the input never arrived".
+function Ensure-Foreground {
+  param($hwnd, [int]$tries = 5)
+  if (-not $hwnd -or $hwnd -eq [IntPtr]::Zero) { return $true }
+  # A hidden window is not a focus problem. The tray scene deliberately
+  # puts the window away and then summons it with a global hotkey, which
+  # reaches the app whatever is in front - fighting for the foreground
+  # there would cost a second per keystroke and find nothing wrong.
+  if (-not $U::IsWindowVisible($hwnd)) { return $true }
+  for ($i = 1; $i -le $tries; $i++) {
+    if ($U::GetForegroundWindow() -eq $hwnd) { return $true }
+    [void]$U::SetForegroundWindow($hwnd)
+    Start-Sleep -Milliseconds (60 * $i)
+  }
+  if ($U::GetForegroundWindow() -ne $hwnd) {
+    Write-Host "  note: could not bring the window to the front - input may not land" -ForegroundColor DarkYellow
+    return $false
+  }
+  $true
+}
+
+# The window scenes are driving. Set when one is started, so the keyboard
+# helpers - which are given a key and no window - can check the same thing
+# the mouse helpers do.
+$script:inputTarget = [IntPtr]::Zero
+
+# And that the cursor went where it was asked. SetCursorPos returns false
+# when something else owns the cursor, and a click at the old position is
+# a click on the wrong thing.
+function Move-Cursor {
+  param([int]$sx, [int]$sy)
+  for ($i = 1; $i -le 3; $i++) {
+    if ($U::SetCursorPos($sx, $sy)) { return $true }
+    Start-Sleep -Milliseconds 80
+  }
+  Write-Host "  note: the cursor could not be moved to $sx,$sy" -ForegroundColor DarkYellow
+  $false
+}
+
 # A click at a point inside the window, in window coordinates.
 function Drag {
   param($hwnd, $x1, $y1, $x2, $y2)
+  $null = Ensure-Foreground $hwnd
   $r = New-Object 'GTerm.Vis+RECT'
   [void]$U::GetWindowRect($hwnd, [ref]$r)
-  [void]$U::SetCursorPos(($r.L + $x1), ($r.T + $y1))
+  $null = Move-Cursor ($r.L + $x1) ($r.T + $y1)
   Start-Sleep -Milliseconds 120
   $U::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
   # Moved in steps: one jump to the end looks like a click to a terminal
@@ -576,9 +636,10 @@ function Right-Click {
 
 function Click {
   param($hwnd, $x, $y)
+  $null = Ensure-Foreground $hwnd
   $r = New-Object 'GTerm.Vis+RECT'
   [void]$U::GetWindowRect($hwnd, [ref]$r)
-  [void]$U::SetCursorPos(($r.L + $x), ($r.T + $y))
+  $null = Move-Cursor ($r.L + $x) ($r.T + $y)
   Start-Sleep -Milliseconds 120
   $U::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
   Start-Sleep -Milliseconds 50
@@ -727,6 +788,7 @@ function Start-App {
   Set-Content $pidFile -Value $ours
   # Pin the size and record a canvas to match, so the busiest state is
   # captured 1:1. Terminal text does not survive being scaled down.
+  $script:inputTarget = $hwnd
   [void]$U::SetWindowPos($hwnd, [IntPtr]::Zero, 100, 60, $RECW, $RECH, 0x0004)
   Start-Sleep -Seconds 5
   Focus-Pane $hwnd
@@ -816,6 +878,7 @@ function Start-AppSeeded {
   if ($hwnd -eq [IntPtr]::Zero) { throw "the window never appeared" }
   $pids = @($app.Id, $seed.Daemon.Id)
   Set-Content $pidFile -Value $pids
+  $script:inputTarget = $hwnd
   [void]$U::SetWindowPos($hwnd, [IntPtr]::Zero, 100, 60, $RECW, $RECH, 0x0004)
   Start-Sleep -Seconds 2
   [void]$U::SetForegroundWindow($hwnd)
