@@ -2447,7 +2447,15 @@ if (-not $Only -or $Only -eq "reboot") {
     # A scrolling region left set by the killed program would confine
     # sixty lines to a band of the screen.
     Key 0x54 @([byte]$VK_CTRL, [byte]$VK_SHIFT)   # Ctrl+Shift+T
-    Start-Sleep -Seconds 5
+    # Wait for a shell to exist before asking anything about how it
+    # draws. The first version pressed the key, slept, and then blamed a
+    # scrolling region when sixty lines moved 3% of the screen - which is
+    # also exactly what it looks like when the keystroke never landed and
+    # the output went into the read-only preview instead. An assertion
+    # about drawing has to know it has something that draws.
+    $script:rbLive = Wait-Until {
+      @(Daemon-Sessions | Where-Object { $_.alive -and $_.attached }).Count -ge 1
+    } 30 "a live shell in the restored window"
     Run-Cmd '1..60 | ForEach-Object { "restored line $_" }' 4
     $script:rbScrollA = Capture-Window $hRb2
     Run-Cmd '1..60 | ForEach-Object { "second batch $_" }' 4
@@ -2475,9 +2483,13 @@ if (-not $Only -or $Only -eq "reboot") {
   # sixty lines of output have to move the screen. A region left set by
   # the killed program and replayed into this terminal would confine them
   # to a band and leave the rest still.
-  $rbScrolled = Frame-Diff $rbScrollA $rbScrollB
-  if ($rbScrolled -gt 0.30) { Pass "and a new shell scrolls the whole screen, not a band of it" }
-  else { Fail "reboot" ("sixty lines of output changed {0:p0} of the screen - a scrolling region the killed program set is still in force" -f $rbScrolled) }
+  if (-not $rbLive) {
+    Fail "reboot" "no live shell appeared after Ctrl+Shift+T - the keystroke did not land, so nothing below it was tested"
+  } else {
+    $rbScrolled = Frame-Diff $rbScrollA $rbScrollB
+    if ($rbScrolled -gt 0.30) { Pass "and a new shell scrolls the whole screen, not a band of it" }
+    else { Fail "reboot" ("sixty lines of output changed {0:p0} of the screen - a scrolling region the killed program set is still in force" -f $rbScrolled) }
+  }
 
   Write-Host ("  changed: after-reboot {0:p0}, into-preview {1:p0}, scrolled {2:p0}" -f $rbChanged, $rbIntoPreview, $rbScrolled) -ForegroundColor DarkGray
   foreach ($b in $rbDuring, $rbAfter, $rbTypedInto, $rbScrollA, $rbScrollB) { $b.Dispose() }
