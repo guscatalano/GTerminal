@@ -49,6 +49,11 @@ const OFF_UI_THREAD = new Set([
   "retire_daemon",
   "restart_daemon",
   "open_logs_folder",
+  // Asks Windows for an elevated window: a shell call that does not
+  // return until the user has answered a UAC prompt.
+  "open_elevated_window",
+  // Reads and deletes a file at startup.
+  "take_handoff",
   "open_folder",
   "create_shortcut",
 ]);

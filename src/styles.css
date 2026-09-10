@@ -2744,3 +2744,23 @@ input.set-control {
   margin-left: 10px;
   vertical-align: middle;
 }
+
+/* An elevated window has to be recognisable at a glance. A badge and an
+   accent rather than one or the other: a colour is no use to somebody who
+   cannot see it, and a word on its own is easy to stop noticing after the
+   third time. */
+.admin-badge {
+  flex: none;
+  align-self: center;
+  margin: 0 6px 0 2px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--danger);
+  color: #fff;
+  font: 600 10px "Segoe UI", sans-serif;
+  letter-spacing: 0.08em;
+}
+
+#app.elevated #tabbar-row {
+  box-shadow: inset 0 2px 0 var(--danger);
+}

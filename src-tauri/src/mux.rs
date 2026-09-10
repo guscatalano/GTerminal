@@ -1389,13 +1389,44 @@ pub fn with_state_dir_in(script: &str, dir: &str) -> String {
 
 fn state_dir() -> PathBuf {
     let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".into());
-    PathBuf::from(base).join(state_dir_name(env!("GTERMINAL_CHANNEL")))
+    PathBuf::from(base).join(state_dir_name(runtime_channel()))
+}
+
+/// The channel this *process* is running as.
+///
+/// The build's channel is fixed at compile time, which is right for a
+/// side-by-side install. It is not enough for an elevated window: that is
+/// the same binary, launched again through UAC, and it must not land on
+/// the state directory the unelevated one is already using - two daemons
+/// sharing a port file means the second overwrites it and the first is
+/// unreachable, taking somebody's running shells with it.
+///
+/// So `--channel <name>` overrides it for the life of the process. Absent
+/// or empty, nothing changes and the compiled-in channel stands, which is
+/// what every existing install does.
+pub fn runtime_channel() -> &'static str {
+    static CHANNEL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    CHANNEL
+        .get_or_init(|| {
+            let mut args = std::env::args();
+            while let Some(a) = args.next() {
+                if a == "--channel" {
+                    if let Some(v) = args.next() {
+                        if !v.trim().is_empty() {
+                            return v.trim().to_string();
+                        }
+                    }
+                }
+            }
+            env!("GTERMINAL_CHANNEL").to_string()
+        })
+        .as_str()
 }
 
 /// Which build this is: "" for the one that ships to the Store, "dev" for
 /// the installer built to try things out without waiting on certification.
 pub fn channel() -> &'static str {
-    env!("GTERMINAL_CHANNEL")
+    runtime_channel()
 }
 
 /// The state directory, for callers outside this module (the window
@@ -1403,6 +1434,22 @@ pub fn channel() -> &'static str {
 pub fn state_dir_path() -> PathBuf {
     state_dir()
 }
+
+/// Where a *different* channel keeps its state. Needed to set one up
+/// before launching into it - the elevated window gets this build's
+/// settings copied across, so it does not come up looking like a fresh
+/// install of a terminal you have already made your own.
+pub fn state_dir_for(channel: &str) -> PathBuf {
+    let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".into());
+    PathBuf::from(base).join(state_dir_name(channel))
+}
+
+/// The channel an elevated window runs as.
+///
+/// Not a nicety: two processes on one state directory means two daemons
+/// on one port file, and the second to write it makes the first
+/// unreachable - with somebody's shells still inside it.
+pub const ELEVATED_CHANNEL: &str = "elevated";
 
 fn port_file() -> PathBuf {
     state_dir().join("daemon.port")
@@ -2817,10 +2864,17 @@ pub mod client {
         let exe = daemon_binary()?;
         // Breakaway lets the daemon survive `tauri dev` job cleanup; fall
         // back for environments whose job object forbids breakaway.
+        // The channel goes with it. A window running as one channel and a
+        // daemon running as another would each be correct on their own and
+        // could not find each other.
+        let chan = super::runtime_channel().to_string();
         let spawn = |flags: u32| {
-            Command::new(&exe)
-                .arg("--daemon")
-                .creation_flags(flags)
+            let mut cmd = Command::new(&exe);
+            cmd.arg("--daemon");
+            if !chan.is_empty() {
+                cmd.arg("--channel").arg(&chan);
+            }
+            cmd.creation_flags(flags)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())

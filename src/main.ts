@@ -165,6 +165,10 @@ interface CmdStatusItem {
 interface LaunchInfo {
   args: string[];
   exe: string;
+  /// "" for the ordinary build, "elevated" for a window opened through
+  /// UAC. Shown in the title bar: an administrator shell that looks like
+  /// any other is a hazard rather than a convenience.
+  channel: string;
 }
 let launchInfo: LaunchInfo | null = null;
 
@@ -4322,6 +4326,64 @@ function openClipViewer(id: number, term: Terminal) {
   document.body.appendChild(ov);
 }
 
+/// The other end of "reopen elevated": whatever the window that asked for
+/// this one left behind.
+///
+/// A shell in the same folder, with the old output above a line saying
+/// where it came from - the same shape as a restored session, because it
+/// is the same situation. What is above the line is a recording; what is
+/// below it is a new shell that happens to be elevated.
+///
+/// The recording is written with the mode cleanup for the reason every
+/// replay here needs it: it ends wherever the last program stopped, and a
+/// program still running when its window was left behind wrote none of
+/// the sequences that put the terminal back.
+async function takeHandoff() {
+  const handoff = await invoke<{ cwd?: string; replay?: string } | null>("take_handoff").catch(
+    () => null
+  );
+  if (!handoff) return;
+  const id = await createTab(undefined, undefined, handoff.cwd || undefined);
+  if (id === undefined) return;
+  const tab = tabs.get(id);
+  if (!tab || !handoff.replay) return;
+  const where = handoff.cwd ? ` · ${handoff.cwd}` : "";
+  tab.term.write(
+    handoff.replay +
+      VIEWER_MODE_RESET +
+      `\r\n\x1b[90m── carried over from the window that opened this one${where} ──\x1b[0m\r\n`
+  );
+}
+
+/// Open a window running as administrator, carrying what can be carried.
+///
+/// A separate window rather than a tab in this one, and that is a
+/// security decision rather than a limitation: an elevated tab's session
+/// would have to live in an elevated daemon, driven from here over a
+/// socket with no authentication on it. Anything else on the machine
+/// could then run commands as administrator. See open_elevated_window in
+/// lib.rs.
+///
+/// What travels is the directory and the scrollback. The shell itself
+/// cannot - a process does not change integrity level - and the command
+/// history needs no help, being the same user's file on both sides.
+async function openElevated(id?: number) {
+    const cwd = id === undefined ? undefined : lastInfo.get(id)?.cwd;
+    // The recording, best-effort: a window that opens without the
+    // scrollback is worth more than one that does not open.
+    const replay =
+      id === undefined
+        ? undefined
+        : await invoke<string>("peek_session", { id }).catch(() => undefined);
+    await invoke("open_elevated_window", { cwd: cwd ?? null, replay: replay ?? null }).catch(
+      (e) => {
+        // Declining the prompt is an answer, not a failure.
+        const why = String(e);
+        if (!why.includes("declined")) logUi("error", { message: `elevate: ${why}` });
+      }
+    );
+}
+
 /// Open a session and give it a pane. Without `splitFrom` that pane
 /// becomes a new tab; with it the caller is splitting an existing tab and
 /// places the pane in that tab's tree instead. Returns the session id.
@@ -4797,6 +4859,11 @@ async function createTab(
           items.push({ label: `Paste: ${clipPreview(t)}`, action: () => writePaste(t) });
         }
       }
+      items.push("sep");
+      items.push({
+        label: "Reopen elevated…",
+        action: () => void openElevated(id),
+      });
       items.push("sep", { label: "Clipboard history…", action: () => openClipViewer(id, term) });
       items.push({
         label: "Select all",
@@ -9365,6 +9432,19 @@ async function main() {
   const boot = showRestoreProgress();
   boot.say("Starting…");
   launchInfo = await invoke<LaunchInfo>("launch_info").catch(() => null);
+  // An elevated window says so, in the one strip that is always visible.
+  // There is no title bar to put it in - the window is frameless - so the
+  // tab row carries a badge and an accent. Both, because a colour alone is
+  // no use to somebody who cannot see it, and a word alone is easy to
+  // stop noticing.
+  if (launchInfo?.channel === "elevated") {
+    app.classList.add("elevated");
+    const badge = document.createElement("div");
+    badge.className = "admin-badge";
+    badge.textContent = "ADMIN";
+    badge.title = "This window is running as administrator. Everything opened here is too.";
+    document.getElementById("tabbar-row")?.prepend(badge);
+  }
   await listen<{ id: number; data: string }>("pty-output", (event) => {
     const tab = tabs.get(event.payload.id);
     if (tab) {
@@ -9418,6 +9498,11 @@ async function main() {
         items.push({ label: t.name, action: () => createTab(undefined, t.shell, t.cwd, t.title) });
       }
     }
+    items.push("sep");
+    items.push({
+      label: "New elevated window…",
+      action: () => void openElevated(),
+    });
     items.push("sep");
     items.push(
       ...SHELL_CHOICES.filter(([v]) => v !== "auto").map(([v, label]): CtxItem => ({
@@ -9830,6 +9915,7 @@ async function main() {
   // `--workspace <name>` (e.g. from a shortcut) opens every template the
   // named workspace lists, on top of whatever sessions were adopted.
   await openWorkspaceFromArgs(launchInfo?.args ?? []);
+  await takeHandoff();
   if (tabCount() === 0) await createTab();
   refreshChrome();
   // Last, and never blocking: the window works, one thing in it may not.

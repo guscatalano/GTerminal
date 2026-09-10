@@ -156,6 +156,138 @@ fn attach_session(
     send_to(&state, id, Request::Resize { cols, rows })
 }
 
+/// Open a second window running as administrator.
+///
+/// A separate window, and deliberately not an elevated tab in this one.
+/// An elevated shell needs an elevated process to create its pty, so the
+/// tab's session would have to live in an elevated daemon - and this
+/// window would drive it over a localhost socket that has no
+/// authentication of any kind. Anything else running on the machine could
+/// connect to it and run commands as administrator. Windows Terminal
+/// reached the same conclusion and ships elevated profiles that open
+/// their own window.
+///
+/// So: the same binary, launched again through UAC, into its own channel.
+/// That last part is required rather than tidy - sharing a state
+/// directory means sharing a port file, and the second daemon to write it
+/// leaves the first unreachable with live shells inside it.
+///
+/// The settings come across on the way, because a window that is already
+/// harder to trust should not also be one you do not recognise.
+#[tauri::command(async)]
+fn open_elevated_window(cwd: Option<String>, replay: Option<String>) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let target = mux::state_dir_for(mux::ELEVATED_CHANNEL);
+    let _ = std::fs::create_dir_all(&target);
+    let config = target.join("config.json");
+    if !config.exists() {
+        let mine = mux::state_dir_path().join("config.json");
+        if mine.exists() {
+            let _ = std::fs::copy(&mine, &config);
+        }
+    }
+    // What can be carried across, which is less than it sounds and more
+    // than nothing.
+    //
+    // The process cannot come: a medium-integrity shell does not become
+    // an elevated one, and nothing about Windows would let it. What
+    // survives is where it was and what it printed - a directory and a
+    // recording - plus PSReadLine's history, which needs no help because
+    // it is the same user's file either way.
+    //
+    // Not the last command, deliberately. Seeding text into an elevated
+    // prompt on behalf of a process that is not elevated is the shape of
+    // the thing this whole design avoids, and "it was only typed, not
+    // run" stops being true the moment somebody presses Enter out of
+    // habit.
+    if cwd.is_some() || replay.is_some() {
+        let handoff = serde_json::json!({
+            "cwd": cwd,
+            "replay": replay,
+            "at_ms": std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+        });
+        let _ = std::fs::write(
+            target.join("handoff.json"),
+            serde_json::to_string(&handoff).unwrap_or_default(),
+        );
+    }
+    elevate(&exe, &format!("--channel {}", mux::ELEVATED_CHANNEL))
+}
+
+/// Whatever the window that asked for this one left behind, once.
+///
+/// Read and deleted in the same breath: a handoff is for the launch it
+/// belongs to, and one left lying about would reappear as somebody's
+/// scrollback the next time an elevated window opened for any reason.
+///
+/// Stale ones are dropped rather than shown. The file is written by a
+/// process that is not elevated, so the only things taken from it are a
+/// directory to start in and text to print - never anything to run.
+#[tauri::command(async)]
+fn take_handoff() -> Option<serde_json::Value> {
+    let path = mux::state_dir_path().join("handoff.json");
+    let text = std::fs::read_to_string(&path).ok()?;
+    let _ = std::fs::remove_file(&path);
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let at = value.get("at_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    // Five minutes is longer than a UAC prompt and shorter than a habit.
+    if now.saturating_sub(at) > 5 * 60 * 1000 {
+        return None;
+    }
+    Some(value)
+}
+
+#[cfg(windows)]
+fn elevate(exe: &std::path::Path, args: &str) -> Result<(), String> {
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+    let verb = wide("runas");
+    let file = wide(&exe.to_string_lossy());
+    let params = wide(args);
+    // ShellExecuteW is what "Run as administrator" is: the shell asks the
+    // elevation service, which prompts and starts the process. It cannot
+    // pass handles or an environment, which is exactly why an elevated
+    // *tab* is not on the table - a pseudoconsole cannot be handed across
+    // that boundary.
+    let rc = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            verb.as_ptr(),
+            file.as_ptr(),
+            params.as_ptr(),
+            std::ptr::null(),
+            SW_SHOWNORMAL as i32,
+        )
+    };
+    // Anything at or below 32 is an error code rather than a handle, and
+    // 5 is the one that matters: the prompt was declined, which is a
+    // choice and not a fault.
+    let code = rc as isize;
+    if code > 32 {
+        Ok(())
+    } else if code == 5 {
+        Err("elevation was declined".into())
+    } else {
+        Err(format!("could not start an elevated window (code {code})"))
+    }
+}
+
+#[cfg(not(windows))]
+fn elevate(_exe: &std::path::Path, _args: &str) -> Result<(), String> {
+    Err("elevation is a Windows idea".into())
+}
+
 /// Open the logs folder without going through the opener plugin.
 ///
 /// The plugin is the first choice and usually works. This is the fallback
@@ -755,6 +887,11 @@ fn history_read(stem: String) -> Result<String, String> {
 struct LaunchInfo {
     args: Vec<String>,
     exe: String,
+    /// Which channel this window is running as: empty for the ordinary
+    /// build, "elevated" for one opened through UAC. The window says so
+    /// out loud, because an administrator shell that looks like any
+    /// other is a hazard rather than a convenience.
+    channel: String,
 }
 
 /// CLI args + exe path, so the frontend can honor launch flags like
@@ -766,6 +903,7 @@ fn launch_info() -> LaunchInfo {
         exe: std::env::current_exe()
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default(),
+        channel: mux::channel().to_string(),
     }
 }
 
@@ -1383,6 +1521,8 @@ pub fn run() {
             retire_daemon,
             logs_path,
             open_logs_folder,
+            open_elevated_window,
+            take_handoff,
             open_folder,
             log_ui,
             summon_toggle,
