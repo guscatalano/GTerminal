@@ -5258,7 +5258,14 @@ async function showEndedPreview(id: number) {
   const text = await invoke<string>("peek_session", { id }).catch(() => null);
   // The tab may have been closed while the daemon was answering.
   if (!previewing.has(id) || !tabs.has(id)) return;
-  if (text) tab.term.write(text);
+  // With the mode cleanup, for the same reason the transcript viewer has
+  // it. This is a recording of a shell that ended, and a shell that ended
+  // because the machine went down never wrote the sequences that put its
+  // modes back. Without it the preview is drawn into a terminal left in
+  // whatever the last program was using - the alternate screen, a
+  // scrolling region, no cursor - and that preview is exactly what is on
+  // screen straight after a reboot.
+  if (text) tab.term.write(text + VIEWER_MODE_RESET);
   const bar = document.createElement("div");
   bar.className = "preview-bar";
   const note = document.createElement("span");
@@ -5461,10 +5468,14 @@ interface HistoryEntry {
   bytes: number;
 }
 
-// Same escape-mode cleanup the daemon uses for resurrection replays: a
-// transcript can contain a TUI's mouse/altscreen mode enables.
+// The same cleanup the daemon applies to a resurrection replay, because
+// it is the same job: recorded output can contain a TUI's mode enables
+// and - if the program was killed rather than exited - none of the
+// disables. Kept in step with mux.rs by tests/modereset.mjs, which exists
+// because this is a copy of that constant, and copies drift: it sat three
+// sequences behind for as long as those three existed.
 const VIEWER_MODE_RESET =
-  "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?2004l\x1b[?1l\x1b[?1049l\x1b[?47l\x1b[?1004l\x1b[?9001l\x1b[?25h\x1b[0m\r\n";
+  "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?2004l\x1b[?1l\x1b[?1049l\x1b[?47l\x1b[?1004l\x1b[?9001l\x1b[?25h\x1b[?7h\x1b[?6l\x1b[r\x1b[0m\r\n";
 
 function stripAnsiText(s: string): string {
   return s
