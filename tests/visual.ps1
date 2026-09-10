@@ -1221,10 +1221,24 @@ if (-not $Only -or $Only -eq "restore-again") {
   $first = Start-AppSeeded $seed
   $againPressed = Press-OnDialog $first.Hwnd $VK_RETURN
   if (-not $againPressed) { Fail "restore-again" "the restore question never took a keypress on the first run" }
-  Start-Sleep -Seconds 14
-  $tookAll = @(Daemon-Sessions | Where-Object { $seed.Ids -contains $_.id -and $_.attached })
-  if ($tookAll.Count -eq 5) { Pass "first run restores all five" }
-  else { Fail "restore-again" "first run attached $($tookAll.Count) of 5" }
+  # Wait for the five to attach rather than for fourteen seconds.
+  #
+  # Fourteen was a number that held on this desk and failed twice in a row
+  # on a nightly, reporting "first run attached 0 of 5" - which reads as
+  # restore being broken when what happened is that five cold shells took
+  # longer than fourteen seconds to start on a busy runner. The scene
+  # above this one already waits for the condition; this one was written
+  # with a sleep and never revisited.
+  #
+  # Sixty seconds is not a guess in the same way: nothing here takes that
+  # long when it works, so the only thing it can add is patience for a
+  # runner that deserves it.
+  $tookAll = Wait-Until {
+    @(Daemon-Sessions | Where-Object { $seed.Ids -contains $_.id -and $_.attached }).Count -ge 5
+  } 60 "five sessions attaching on the first run"
+  $tookCount = @(Daemon-Sessions | Where-Object { $seed.Ids -contains $_.id -and $_.attached }).Count
+  if ($tookAll) { Pass "first run restores all five" }
+  else { Fail "restore-again" "first run attached $tookCount of 5 within 60s" }
   Stop-App $first
   Start-Sleep -Seconds 3
 
@@ -1232,16 +1246,28 @@ if (-not $Only -or $Only -eq "restore-again") {
   $ctx5 = Start-AppSeeded $seed
   $hw5 = $ctx5.Hwnd
   Record-Scene "restore-again" 26 $ctx5 {
-    Start-Sleep -Seconds 4
+    # The dialog has to be up and still before anything is clicked at a
+    # coordinate. Four seconds was the old guess, and a click that lands
+    # before the dialog exists hits the terminal - after which "nothing
+    # was restored" is true and proves nothing, which is a worse failure
+    # than a red one because it is green.
+    $script:againBefore = Wait-Settled $hw5 45
     Click $hw5 798 556             # None
     Start-Sleep -Seconds 2
     Click $hw5 895 556             # Restore 0
     Start-Sleep -Seconds 10
+    $script:againAfter = Capture-Window $hw5
   }
+  # The clicks have to have done something, or the assertion below is
+  # about a dialog nobody dismissed.
+  $againMoved = Frame-Diff $againBefore $againAfter
+  if ($againMoved -gt 0.05) { Pass "the second run's question took the clicks" }
+  else { Fail "restore-again" ("the screen did not change when the question was answered ({0:p0}) - the clicks may have missed it, and what follows would prove nothing" -f $againMoved) }
   $now5 = Daemon-Sessions
   $again = @($now5 | Where-Object { $seed.Ids -contains $_.id -and $_.attached })
   if ($again.Count -eq 0) { Pass "declining on a second run still restores nothing" }
   else { Fail "restore-again" "$($again.Count) of 5 came back from the saved layout" }
+  foreach ($b in $againBefore, $againAfter) { if ($b) { $b.Dispose() } }
   Stop-App $ctx5
 }
 
