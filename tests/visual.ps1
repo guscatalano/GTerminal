@@ -2338,8 +2338,20 @@ if (-not $Only -or $Only -eq "tui-fast") {
     Run-Cmd "& '$fixture' -Frames 80 -Ms 150" 0
     Start-Sleep -Milliseconds 2500
     $script:fastA = Capture-Window $hFast
-    Start-Sleep -Milliseconds 5000
-    $script:fastB = Capture-Window $hFast
+    # Six looks spread across five seconds, not two five seconds apart.
+    #
+    # The fixture alternates between two pictures, so any pair of captures
+    # can land on the same one and read as a frozen screen. That is not a
+    # hypothetical: this scene passed a nightly and failed the next run at
+    # exactly 0% changed, on a terminal that was repainting perfectly.
+    # Asking six times and requiring one difference makes the alternation
+    # period irrelevant instead of hoping it does not divide the gap.
+    $script:fastLooks = @()
+    foreach ($i in 1..6) {
+      Start-Sleep -Milliseconds 850
+      $script:fastLooks += Capture-Window $hFast
+    }
+    $script:fastB = $script:fastLooks[-1]
     Start-Sleep -Seconds 8
     $script:fastAfter = Capture-Window $hFast
   }
@@ -2348,9 +2360,15 @@ if (-not $Only -or $Only -eq "tui-fast") {
   $f1 = Frame-Diff $fastShell $fastA
   if ($f1 -gt 0.20) { Pass "a program repainting every 150ms takes the screen" }
   else { Fail "tui-fast" ("the screen barely changed when the program started ({0:p0})" -f $f1) }
-  $f2 = Frame-Diff $fastA $fastB
+  $f2 = 0.0
+  $prev = $fastA
+  foreach ($look in $fastLooks) {
+    $d = Frame-Diff $prev $look
+    if ($d -gt $f2) { $f2 = $d }
+    $prev = $look
+  }
   if ($f2 -gt 0.10) { Pass "and the screen is still moving five seconds in" }
-  else { Fail "tui-fast" ("the picture stopped moving between 2.5s and 7.5s ({0:p0} changed)" -f $f2) }
+  else { Fail "tui-fast" ("the picture never changed across six looks over five seconds (most any pair moved: {0:p0})" -f $f2) }
   $f3 = Frame-Diff $fastB $fastAfter
   if ($f3 -gt 0.20) { Pass "and the shell comes back when it exits" }
   else { Fail "tui-fast" ("the last frame stayed on screen after it exited ({0:p0})" -f $f3) }
@@ -2370,7 +2388,8 @@ if (-not $Only -or $Only -eq "tui-fast") {
     Write-Host "  note: no ui.log written, so the render watch could not be read" -ForegroundColor DarkYellow
   }
   Write-Host ("  changed: start {0:p0}, mid {1:p0}, exit {2:p0}" -f $f1, $f2, $f3) -ForegroundColor DarkGray
-  foreach ($b in $fastShell, $fastA, $fastB, $fastAfter) { $b.Dispose() }
+  foreach ($b in $fastShell, $fastA, $fastAfter) { $b.Dispose() }
+  foreach ($b in $fastLooks) { $b.Dispose() }
   Stop-App $ctxFast
 }
 
@@ -2416,9 +2435,19 @@ if (-not $Only -or $Only -eq "reboot") {
   Record-Scene "reboot" 34 $ctxRb2 {
     $null = Wait-Settled $hRb2 40
     $script:rbAfter = Capture-Window $hRb2
-    # More lines than fit on the screen. On a terminal with a leftover
-    # scrolling region only the band moves and the rest stays where it
-    # was, which is the fault this scene exists for.
+    # The shell died with the machine, so this comes back as a preview of
+    # what it printed - read-only, with a button to start a shell in its
+    # folder. Typing into it is supposed to do nothing, and the first
+    # version of this scene asserted the opposite and called the app
+    # broken for behaving as designed.
+    Run-Cmd '1..60 | ForEach-Object { "into the preview $_" }' 4
+    $script:rbTypedInto = Capture-Window $hRb2
+    # A live shell in the same window, to ask the question this scene is
+    # actually for: after a reboot, does the terminal still draw normally?
+    # A scrolling region left set by the killed program would confine
+    # sixty lines to a band of the screen.
+    Key 0x54 @([byte]$VK_CTRL, [byte]$VK_SHIFT)   # Ctrl+Shift+T
+    Start-Sleep -Seconds 5
     Run-Cmd '1..60 | ForEach-Object { "restored line $_" }' 4
     $script:rbScrollA = Capture-Window $hRb2
     Run-Cmd '1..60 | ForEach-Object { "second batch $_" }' 4
@@ -2434,21 +2463,24 @@ if (-not $Only -or $Only -eq "reboot") {
   if ($rbChanged -gt 0.20) { Pass "and does not come back to the dead program's last frame" }
   else { Fail "reboot" ("the restored window looks like the frame the killed program left ({0:p0} changed)" -f $rbChanged) }
 
-  # The assertion this scene is for: sixty lines of output have to move
-  # the screen. A region left set by the killed program scrolls a band and
-  # leaves the rest, which reads as a terminal that has stopped redrawing.
+  # A shell that died with the machine comes back as a recording, not a
+  # session, and a recording does not take input. Asserted because it is
+  # the design and because the alternative - a preview that silently
+  # swallows what you type into it and looks live - is worse.
+  $rbIntoPreview = Frame-Diff $rbAfter $rbTypedInto
+  if ($rbIntoPreview -lt 0.10) { Pass "and comes back as a preview that does not take input" }
+  else { Fail "reboot" ("typing into the preview of an ended shell changed {0:p0} of the screen" -f $rbIntoPreview) }
+
+  # The assertion this scene is for: in a live shell in that same window,
+  # sixty lines of output have to move the screen. A region left set by
+  # the killed program and replayed into this terminal would confine them
+  # to a band and leave the rest still.
   $rbScrolled = Frame-Diff $rbScrollA $rbScrollB
-  if ($rbScrolled -gt 0.30) { Pass "and scrolls the whole screen, not a band of it" }
+  if ($rbScrolled -gt 0.30) { Pass "and a new shell scrolls the whole screen, not a band of it" }
   else { Fail "reboot" ("sixty lines of output changed {0:p0} of the screen - a scrolling region the killed program set is still in force" -f $rbScrolled) }
 
-  # Typing has to reach the restored shell, which is a different question
-  # from the screen moving.
-  $rbTyped = Frame-Diff $rbAfter $rbScrollA
-  if ($rbTyped -gt 0.10) { Pass "and takes input into the restored session" }
-  else { Fail "reboot" ("nothing visible happened when the restored session was typed into ({0:p0})" -f $rbTyped) }
-
-  Write-Host ("  changed: after-reboot {0:p0}, typed {1:p0}, scrolled {2:p0}" -f $rbChanged, $rbTyped, $rbScrolled) -ForegroundColor DarkGray
-  foreach ($b in $rbDuring, $rbAfter, $rbScrollA, $rbScrollB) { $b.Dispose() }
+  Write-Host ("  changed: after-reboot {0:p0}, into-preview {1:p0}, scrolled {2:p0}" -f $rbChanged, $rbIntoPreview, $rbScrolled) -ForegroundColor DarkGray
+  foreach ($b in $rbDuring, $rbAfter, $rbTypedInto, $rbScrollA, $rbScrollB) { $b.Dispose() }
   Stop-App $ctxRb2
 }
 
