@@ -90,26 +90,26 @@ for (const renderer of ["webgl", "dom"]) {
     // what it was still showing instead.
     check(`${renderer}: every buffer change reached the screen`, r.missed === 0, detail);
   } else {
-    // Reported, not asserted, and the difference is deliberate.
+    // Reported, not asserted - and now known to be the harness.
     //
-    // The DOM renderer misses frames here - typically five of twelve,
-    // sitting on the previous fill for the full four seconds - while
-    // WebGL lands all twelve in the same run, same page, same clock.
-    // That is a real differential and it matches the oldest report about
-    // this terminal: the machine it came from ran a theme with background
-    // art, which forced the DOM renderer until backgrounds moved to the
-    // GPU, and the symptom was a full-screen program stuck on old output.
+    // The DOM renderer misses frames here, typically five of twelve,
+    // sitting on the previous fill for the full four seconds, while WebGL
+    // lands all twelve in the same run, same page, same clock. That
+    // differential looked like the oldest report about this terminal, and
+    // it was written up as the likely cause of it.
     //
-    // It is not asserted because this harness cannot separate "the DOM
-    // renderer drops frames" from "the DOM renderer needs more animation
-    // frames than virtual time hands out". Both renderers draw on rAF, so
-    // WebGL passing is evidence against the second - but evidence is not
-    // proof, and a suite that fails the build on a maybe is how a real
-    // signal gets a threshold quietly raised until it means nothing.
+    // It was not. tui-dom drives the same fixture through a real window
+    // with a real compositor, and the DOM renderer passes it: 73% of the
+    // screen changing on the first frame and 72% on each redraw after,
+    // which is what WebGL scores on the same scene. The misses here are
+    // virtual time starving requestAnimationFrame, which is exactly the
+    // reason this was never asserted on, and the reason a differential
+    // between two things measured in the same broken clock is still not
+    // evidence about either of them.
     //
-    // The tui-dom visual scene drives a real window with a real
-    // compositor and can settle it. When it does, this becomes an
-    // assertion or this comment becomes wrong, and either is progress.
+    // Kept, because a change in the number is still worth seeing, and
+    // because the day it starts missing on WebGL too - which is asserted
+    // - this line is what says whether that is new or normal.
     if (r.missed > 0) {
       console.log(`NOTE ${renderer}: ${r.missed} of ${r.frames} buffer changes did not reach the screen`);
       console.log(`     ${detail}`);
