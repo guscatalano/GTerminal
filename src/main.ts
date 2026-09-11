@@ -3548,10 +3548,41 @@ function blockText(tab: Tab, b: Block, withCommand: boolean): string {
   return out.join("\n").replace(/\s+$/, "");
 }
 
+/// Put text on the clipboard, and refuse to let a momentary refusal look
+/// like a copy that happened.
+///
+/// Windows opens the clipboard exclusively: one process at a time, and
+/// OpenClipboard fails outright while anything else holds it. That
+/// "anything else" is ordinary - a clipboard manager, Office, an RDP
+/// session, another window of this app shutting down - and it lasts
+/// milliseconds.
+///
+/// Every call site used to swallow the failure, which is the worst shape
+/// this can fail in: the menu closes, the selection stays highlighted,
+/// nothing says a word, and the paste five minutes later is somebody
+/// else's text. Found by a suite that runs forty-one app instances back
+/// to back and copies in several of them - which is not a strange
+/// machine, only a busy one.
+///
+/// Five tries across about a fifth of a second, then the log says so:
+/// a size and a source, never what was copied.
+async function copyToClipboard(text: string, source = "unknown"): Promise<boolean> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      await clipWrite(text);
+      return true;
+    } catch {
+      await new Promise((r) => window.setTimeout(r, 40));
+    }
+  }
+  logUi("error.clipboard", { source, ...describeText(text) });
+  return false;
+}
+
 function copyText(text: string) {
   if (!text) return;
   pushClip(text);
-  clipWrite(text).catch(() => {});
+  void copyToClipboard(text, "block");
 }
 
 // ── restoring sessions at startup ───────────────────────────────────────
@@ -4093,7 +4124,7 @@ function makeShortcutHandler(getId: () => number) {
         const sel = tab?.term.getSelection();
         if (sel) {
           pushClip(sel);
-          clipWrite(sel).catch(() => {});
+          void copyToClipboard(sel, "keyboard");
         }
         return false;
       }
@@ -4307,7 +4338,7 @@ function openClipViewer(id: number, term: Terminal) {
       }),
       mkBtn("Copy", () => {
         pushClip(text);
-        clipWrite(text).catch(() => {});
+        void copyToClipboard(text, "clipboard-history");
       }),
       mkBtn("✕", () => {
         const i = clipHist.indexOf(text);
@@ -4784,7 +4815,7 @@ async function createTab(
       const sel = term.getSelection() || selAtRightClick;
       if (sel) {
         pushClip(sel);
-        clipWrite(sel).catch(() => {});
+        void copyToClipboard(sel, "right-click-copy");
         term.clearSelection();
       } else {
         void paste();
@@ -4813,7 +4844,7 @@ async function createTab(
           label: "Copy",
           action: () => {
             pushClip(sel);
-            clipWrite(sel).catch(() => {});
+            void copyToClipboard(sel, "menu");
             // The selection stays. Copying is not a reason to lose sight
             // of what you copied, and it leaves the second copy — or a
             // wider drag from the same anchor — one gesture away.
@@ -8151,7 +8182,7 @@ function buildSettingsPage() {
       copy.title = "Copies a command line for a shortcut that opens this workspace";
       copy.addEventListener("click", () => {
         const exe = launchInfo?.exe || "gterminal.exe";
-        void clipWrite(`"${exe}" --workspace "${w.name}"`);
+        void copyToClipboard(`"${exe}" --workspace "${w.name}"`, "shortcut");
         copy.textContent = "Copied!";
         window.setTimeout(() => (copy.textContent = "Copy cmd"), 1200);
       });
