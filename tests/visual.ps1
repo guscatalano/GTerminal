@@ -1428,14 +1428,21 @@ if (-not $Only -or $Only -eq "restore-again") {
     # was restored" is true and proves nothing, which is a worse failure
     # than a red one because it is green.
     $script:againBefore = Wait-Settled $hw5 45
-    Click $hw5 798 556             # None
+    # Click-Effective, not Click: these are two coordinates on a dialog,
+    # and the second one's meaning depends on the first having worked -
+    # "None" then "Restore 0" becomes "Restore 5" if the first misses.
+    # Retrying until the screen answers is the difference between testing
+    # the app and testing where a button happened to be.
+    $script:againNone = Click-Effective $hw5 798 556      # None
     Start-Sleep -Seconds 2
-    Click $hw5 895 556             # Restore 0
+    $script:againGo = Click-Effective $hw5 895 556        # Restore 0
     Start-Sleep -Seconds 10
     $script:againAfter = Capture-Window $hw5
   }
   # The clicks have to have done something, or the assertion below is
   # about a dialog nobody dismissed.
+  if (-not $againNone) { Fail "restore-again" "the None button never took - nothing below it was tested" }
+  if (-not $againGo) { Fail "restore-again" "the Restore button never took - nothing below it was tested" }
   $againMoved = Frame-Diff $againBefore $againAfter
   if ($againMoved -gt 0.05) { Pass "the second run's question took the clicks" }
   else { Fail "restore-again" ("the screen did not change when the question was answered ({0:p0}) - the clicks may have missed it, and what follows would prove nothing" -f $againMoved) }
@@ -2632,6 +2639,14 @@ if (-not $Only -or $Only -eq "reboot") {
     $script:rbLive = Wait-Until {
       @(Daemon-Sessions | Where-Object { $_.alive -and $_.attached }).Count -ge 1
     } 30 "a live shell in the restored window"
+    # And that input reaches *that* shell. The guard above proves a live
+    # session exists; it does not prove the new tab is the one being typed
+    # into, and the preview it replaced ignores input by design. A marker
+    # first, so "sixty lines moved 3% of the screen" can only mean the
+    # drawing and never the focus.
+    $script:rbBeforeMark = Capture-Window $hRb2
+    Run-Cmd 'echo REBOOT-TYPING-REACHES-HERE' 3
+    $script:rbAfterMark = Capture-Window $hRb2
     Run-Cmd '1..60 | ForEach-Object { "restored line $_" }' 4
     $script:rbScrollA = Capture-Window $hRb2
     Run-Cmd '1..60 | ForEach-Object { "second batch $_" }' 4
@@ -2659,8 +2674,11 @@ if (-not $Only -or $Only -eq "reboot") {
   # sixty lines of output have to move the screen. A region left set by
   # the killed program and replayed into this terminal would confine them
   # to a band and leave the rest still.
+  $rbTypingLands = Frame-Diff $rbBeforeMark $rbAfterMark
   if (-not $rbLive) {
     Fail "reboot" "no live shell appeared after Ctrl+Shift+T - the keystroke did not land, so nothing below it was tested"
+  } elseif ($rbTypingLands -lt 0.01) {
+    Fail "reboot" ("typing did not reach the new shell ({0:p1} of the screen changed for a one-line echo) - the tab exists but is not where input is going, so nothing below it is about drawing" -f $rbTypingLands)
   } else {
     $rbScrolled = Frame-Diff $rbScrollA $rbScrollB
     if ($rbScrolled -gt 0.30) { Pass "and a new shell scrolls the whole screen, not a band of it" }
@@ -2668,7 +2686,8 @@ if (-not $Only -or $Only -eq "reboot") {
   }
 
   Write-Host ("  changed: after-reboot {0:p0}, into-preview {1:p0}, scrolled {2:p0}" -f $rbChanged, $rbIntoPreview, $rbScrolled) -ForegroundColor DarkGray
-  foreach ($b in $rbDuring, $rbAfter, $rbTypedInto, $rbScrollA, $rbScrollB) { $b.Dispose() }
+  Write-Host ("  a one-line echo into the new shell moved {0:p1} of the screen" -f $rbTypingLands) -ForegroundColor DarkGray
+  foreach ($b in $rbDuring, $rbAfter, $rbTypedInto, $rbBeforeMark, $rbAfterMark, $rbScrollA, $rbScrollB) { $b.Dispose() }
   Stop-App $ctxRb2
 }
 
