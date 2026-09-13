@@ -5831,27 +5831,7 @@ function renameTabAnywhere(id: number) {
 
 function showTabContextMenu(x: number, y: number, id: number) {
   const current = groupState.assign[id];
-  const items: CtxItem[] = [
-    {
-      // Another one of these, where this one is: the same shell, in the
-      // same folder, with the same name - which the tab bar then numbers,
-      // the way two tabs of anything already get told apart.
-      //
-      // A new shell, not a copy of this one's state: a process cannot be
-      // duplicated, and the folder is the part people actually mean when
-      // they ask for the same tab again.
-      //
-      // On a split tab this duplicates the pane that has focus rather than
-      // the arrangement. Copying a layout is a different feature and is
-      // not what the word means anywhere else.
-      label: "Duplicate tab",
-      action: () => {
-        const info = lastInfo.get(id);
-        void createTab(undefined, info?.shell, info?.cwd, customTitles[id]);
-      },
-    },
-    { label: "Rename tab", action: () => renameTabAnywhere(id) },
-  ];
+  const items: CtxItem[] = [{ label: "Rename tab", action: () => renameTabAnywhere(id) }];
   items.push({ label: "Suggest title…", action: () => suggestTitles(id) });
   // Moving a tab to another window. A drag would be the obvious gesture
   // and is not available: two webviews share no drag context, so nothing
@@ -5901,6 +5881,28 @@ function showTabContextMenu(x: number, y: number, id: number) {
   }
   items.push(
     "sep",
+    {
+      // Another one of these, where this one is: the same shell, in the
+      // same folder, with the same name - which the tab bar then numbers,
+      // the way two tabs of anything already get told apart.
+      //
+      // A new shell, not a copy of this one's state: a process cannot be
+      // duplicated, and the folder is the part people actually mean when
+      // they ask for the same tab again.
+      //
+      // On a split tab this duplicates the pane that has focus rather than
+      // the arrangement. Copying a layout is a different feature and is
+      // not what the word means anywhere else.
+      //
+      // Grouped with hide, close and kill rather than with renaming: those
+      // are the items that act on the tab's existence, and this is the one
+      // of them that adds. Read down and the consequence only grows.
+      label: "Duplicate tab",
+      action: () => {
+        const info = lastInfo.get(id);
+        void createTab(undefined, info?.shell, info?.cwd, customTitles[id]);
+      },
+    },
     { label: "Hide tab", action: () => hideTab(id) },
     { label: "Close tab", action: () => closeTab(id), confirm: true },
     { label: "Kill session", action: () => killAndClose(id), confirm: true }
