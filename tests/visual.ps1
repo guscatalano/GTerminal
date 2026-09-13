@@ -138,6 +138,7 @@ $sig = @'
 [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
 [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+[DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vk);
 [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
 [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags);
 [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h, System.Text.StringBuilder b, int n);
@@ -194,6 +195,34 @@ function Run-Cmd { param([string]$text, $settle = 2) Send-Text $text; Key 0x0D; 
 # Ctrl+Alt+Shift+F8 and matches no registered hotkey at all. The symptom
 # is a summon that works alone and fails after other scenes, which reads
 # as flakiness in the app rather than in the keyboard state.
+# Put the mouse buttons back up, and say if they were not.
+#
+# Release-Modifiers exists because one missed key-up leaves a modifier
+# logically held for the rest of the session. The mouse has exactly the
+# same problem and nothing was doing it - mouse_event state is global to
+# the desktop, not to the process that sent it, so a drag interrupted
+# anywhere leaves the button down for every scene that follows. A
+# LEFTDOWN while the button is already down does nothing, so the drag
+# after it selects nothing, three times, four seconds apart.
+#
+# Which is the shape of what is happening: copy and cliphist drag early
+# and pass, and the three selection scenes late in the run do not.
+function Release-Pointer {
+  $down = @()
+  foreach ($vk in 0x01, 0x02, 0x04) {
+    if (($U::GetAsyncKeyState($vk) -band 0x8000) -ne 0) { $down += $vk }
+  }
+  if ($down.Count) {
+    Write-Host ("  note: mouse button(s) {0} were still down at scene start" -f (($down | ForEach-Object { "0x{0:x2}" -f $_ }) -join " ")) -ForegroundColor DarkYellow
+  }
+  # Sent regardless: asking is cheap and the answer is not always honest
+  # across desktops.
+  $U::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)   # LEFTUP
+  $U::mouse_event(0x0010, 0, 0, 0, [UIntPtr]::Zero)   # RIGHTUP
+  $U::mouse_event(0x0040, 0, 0, 0, [UIntPtr]::Zero)   # MIDDLEUP
+  Start-Sleep -Milliseconds 120
+}
+
 function Release-Modifiers {
   foreach ($vk in 0x10, 0x11, 0x12, 0x5B, 0x5C, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5) {
     $U::keybd_event([byte]$vk, 0, 2, [UIntPtr]::Zero)
@@ -937,6 +966,12 @@ function Record-Scene {
   # would be tens of megabytes, since it stores every frame whole.
   node (Join-Path $repo "tools\make-gif.mjs") $frames (Join-Path $outDir "$name.gif") --scale=0.5 --every=2
   Remove-Item $frames -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# A scene inherits the desktop's input state from whatever ran before it.
+if ($Only) {
+  Release-Pointer
+  Release-Modifiers
 }
 
 $baseCfg = '"grace_minutes":5,"prediction":"off","summon_hotkey":"Control+Alt+F9","close_action":"hide","bell":"none"'
