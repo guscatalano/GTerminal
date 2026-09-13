@@ -265,10 +265,16 @@ function Note-HitTest {
   [void]$U::GetClassName($root, $cls, 256)
   $ttl = New-Object System.Text.StringBuilder 256
   [void]$U::GetWindowText($root, $ttl, 256)
-  $pid = 0
-  [void]$U::GetWindowThreadProcessId($root, [ref]$pid)
-  $name = try { (Get-Process -Id $pid -ErrorAction Stop).ProcessName } catch { "?" }
-  Write-Host ("  hit-test: $what at $sx,$sy landed on {0} [{1}] pid $pid ({2}), not the window under test" -f $ttl.ToString(), $cls.ToString(), $name) -ForegroundColor DarkYellow
+  # Not $pid. That is a read-only automatic variable holding this
+  # process's own id, and assigning to it throws - which is what this
+  # instrument did the first time a click actually landed on another
+  # window. The scene it was meant to explain died with a PowerShell
+  # error instead of a report, so the one thing the instrument existed
+  # for is the one case it could not survive.
+  $ownerPid = 0
+  [void]$U::GetWindowThreadProcessId($root, [ref]$ownerPid)
+  $name = try { (Get-Process -Id $ownerPid -ErrorAction Stop).ProcessName } catch { "?" }
+  Write-Host ("  hit-test: $what at $sx,$sy landed on {0} [{1}] pid $ownerPid ({2}), not the window under test" -f $ttl.ToString(), $cls.ToString(), $name) -ForegroundColor DarkYellow
 }
 
 # A click at a point inside the window, in window coordinates.
