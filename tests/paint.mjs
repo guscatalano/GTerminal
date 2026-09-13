@@ -47,6 +47,12 @@ function probe(renderer) {
     [
       "--headless=new",
       "--no-sandbox",
+      // Its own profile directory. Four suites here drive headless Edge,
+      // and without this they share one - where a second instance can
+      // attach to the first, or find it locked, and exit having rendered
+      // nothing. webgl.mjs passes alone and failed in the batch exactly
+      // once, which is the shape that has cost this project four days.
+      `--user-data-dir=${join(tmpdir(), "gterm-headless-" + basename(fixture) + "-" + process.pid)}`,
       "--allow-file-access-from-files",
       "--virtual-time-budget=90000",
       "--dump-dom",

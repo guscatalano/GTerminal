@@ -19,7 +19,8 @@
 import { execFileSync } from "child_process";
 import { existsSync } from "fs";
 import { fileURLToPath, pathToFileURL } from "url";
-import { dirname, join } from "path";
+import { dirname, join, basename } from "path";
+import { tmpdir } from "os";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "redraw-probe.html");
@@ -45,6 +46,12 @@ const dom = execFileSync(
   [
     "--headless=new",
     "--no-sandbox",
+    // Its own profile directory. Four suites here drive headless Edge, and
+    // without this they share one - where a second instance can attach to
+    // the first, or find it locked, and exit having rendered nothing.
+    // webgl.mjs passes alone and failed in the batch exactly once, which
+    // is the shape that has cost this project four days.
+    `--user-data-dir=${join(tmpdir(), "gterm-headless-" + basename(fixture) + "-" + process.pid)}`,
     // ES modules over file:// are a cross-origin load to Chromium.
     "--allow-file-access-from-files",
     "--virtual-time-budget=15000",
