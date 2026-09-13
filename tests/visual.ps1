@@ -138,6 +138,10 @@ $sig = @'
 [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
 [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+[DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
+[DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags);
+[DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h, System.Text.StringBuilder b, int n);
+[DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder b, int n);
 [DllImport("user32.dll")] public static extern short VkKeyScan(char ch);
 [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
 [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, UIntPtr e);
@@ -203,12 +207,48 @@ function Release-Modifiers {
 # SetForegroundWindow they go nowhere and the scene records an untouched
 # prompt. A click in the middle of the terminal is what actually puts
 # focus where the keys are read.
+# Which window is actually under a screen point, and is it ours?
+#
+# mouse_event does not address a window. It clicks wherever the cursor is,
+# and the click goes to whatever is topmost there - which is a different
+# question from which window has the foreground. A window can be perfectly
+# focused while something else sits above it at the point being clicked,
+# and then every click lands somewhere else and the scene reports that
+# nothing happened.
+#
+# This reports rather than corrects, on purpose. The last attempt at this
+# fixed a cause that turned out not to exist and broke a scene doing it,
+# so this run is for finding out what is actually under the cursor when a
+# drag selects nothing.
+function Note-HitTest {
+  param($hwnd, [int]$sx, [int]$sy, [string]$what)
+  $pt = New-Object 'GTerm.Vis+POINT'
+  $pt.X = $sx
+  $pt.Y = $sy
+  $hit = $U::WindowFromPoint($pt)
+  if ($hit -eq [IntPtr]::Zero) {
+    Write-Host "  hit-test: nothing at all is at $sx,$sy ($what)" -ForegroundColor DarkYellow
+    return
+  }
+  $root = $U::GetAncestor($hit, 2)   # GA_ROOT
+  if ($root -eq $hwnd) { return }
+  $cls = New-Object System.Text.StringBuilder 256
+  [void]$U::GetClassName($root, $cls, 256)
+  $ttl = New-Object System.Text.StringBuilder 256
+  [void]$U::GetWindowText($root, $ttl, 256)
+  $pid = 0
+  [void]$U::GetWindowThreadProcessId($root, [ref]$pid)
+  $name = try { (Get-Process -Id $pid -ErrorAction Stop).ProcessName } catch { "?" }
+  Write-Host ("  hit-test: $what at $sx,$sy landed on {0} [{1}] pid $pid ({2}), not the window under test" -f $ttl.ToString(), $cls.ToString(), $name) -ForegroundColor DarkYellow
+}
+
 # A click at a point inside the window, in window coordinates.
 function Drag {
   param($hwnd, $x1, $y1, $x2, $y2)
   $r = New-Object 'GTerm.Vis+RECT'
   [void]$U::GetWindowRect($hwnd, [ref]$r)
   [void]$U::SetCursorPos(($r.L + $x1), ($r.T + $y1))
+  Note-HitTest $hwnd ($r.L + $x1) ($r.T + $y1) "drag start"
   Start-Sleep -Milliseconds 120
   $U::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
   # Moved in steps: one jump to the end looks like a click to a terminal
@@ -579,6 +619,7 @@ function Click {
   $r = New-Object 'GTerm.Vis+RECT'
   [void]$U::GetWindowRect($hwnd, [ref]$r)
   [void]$U::SetCursorPos(($r.L + $x), ($r.T + $y))
+  Note-HitTest $hwnd ($r.L + $x) ($r.T + $y) "click"
   Start-Sleep -Milliseconds 120
   $U::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
   Start-Sleep -Milliseconds 50
