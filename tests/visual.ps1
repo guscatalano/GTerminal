@@ -346,6 +346,47 @@ function Press-OnDialog {
   $moved -gt $floor
 }
 
+# Drag, then wait for the highlight to appear, and drag again if it does
+# not. Returns whether it ever took.
+#
+# The same shape as Click-Effective, for the same reason and found the
+# same way: a drag that selects nothing is indistinguishable from a drag
+# the app has not finished reacting to, and these scenes drag, sleep a
+# fixed second, and photograph.
+#
+# Which is fine alone and not in company. selectright passes every time as
+# the only scene running and fails in a full suite, with the input landing
+# on the right window - measured, not assumed: foreground, cursor position
+# and hit-test all come back correct. What is left is that the app had not
+# painted the selection yet when the shutter went, because the machine is
+# busy running forty other scenes.
+#
+# So this waits for the picture to change rather than for a number of
+# milliseconds to pass. A selection that never appears still fails, and
+# now it fails for a reason that is true.
+function Drag-Effective {
+  param($hwnd, $x1, $y1, $x2, $y2, [int]$tries = 3, [double]$floor = 0.004,
+        [int]$timeoutMs = 4000, [int]$fromY = 0, [int]$toY = 0)
+  for ($i = 1; $i -le $tries; $i++) {
+    $before = if ($toY -gt 0) { Capture-Window $hwnd } else { Capture-Window $hwnd }
+    Drag $hwnd $x1 $y1 $x2 $y2
+    $deadline = (Get-Date).AddMilliseconds($timeoutMs)
+    while ((Get-Date) -lt $deadline) {
+      Start-Sleep -Milliseconds 200
+      $now = Capture-Window $hwnd
+      $moved = if ($toY -gt 0) { Frame-Diff $before $now -FromY $fromY -ToY $toY } else { Frame-Diff $before $now }
+      $now.Dispose()
+      if ($moved -gt $floor) {
+        $before.Dispose()
+        return $true
+      }
+    }
+    $before.Dispose()
+    Write-Host "  note: the drag highlighted nothing on try $i" -ForegroundColor DarkYellow
+  }
+  $false
+}
+
 function Click-Effective {
   # Clicks, then checks the screen changed, and clicks again if it did
   # not. Returns whether it ever took.
@@ -3095,7 +3136,7 @@ if (-not $Only -or $Only -eq "selectionlives") {
   Record-Scene "selectionlives" 45 $ctx30 {
     Run-Cmd 'echo SELECTME-97531' 3
     # Drag across the line the shell just printed.
-    Drag ($h30) 20 62 320 62
+    $script:sel30 = Drag-Effective ($h30) 20 62 320 62 -FromY 50 -ToY 80
     Start-Sleep -Seconds 1
     $script:justSelected = Capture-Window $h30
     # Long enough for the status bar to refresh many times and for its
@@ -3144,8 +3185,7 @@ if (-not $Only -or $Only -eq "selectright") {
   Set-Clipboard -Value "clipboard-before-selectright"
   Record-Scene "selectright" 40 $ctx31 {
     Run-Cmd 'echo KEEPME-24680' 3
-    Drag ($h31) 20 62 560 62
-    Start-Sleep -Seconds 1
+    $script:sel31a = Drag-Effective ($h31) 20 62 560 62 -FromY 50 -ToY 80
     $script:selShown = Capture-Window $h31
     # Away from it first, which is what the copy scene does.
     Right-Click ($h31) 600 300
@@ -3155,8 +3195,7 @@ if (-not $Only -or $Only -eq "selectright") {
     Start-Sleep -Seconds 1
     # And on top of it, which is where a hand goes when the thing it
     # wants to copy is right there.
-    Drag ($h31) 20 62 560 62
-    Start-Sleep -Seconds 1
+    $script:sel31b = Drag-Effective ($h31) 20 62 560 62 -FromY 50 -ToY 80
     $script:selShown2 = Capture-Window $h31
     Right-Click ($h31) 150 62
     Start-Sleep -Seconds 2
@@ -3175,6 +3214,9 @@ if (-not $Only -or $Only -eq "selectright") {
   $awayGone = Frame-Diff $selShown $selAfterAway -FromY 50 -ToY 80
   $onGone = Frame-Diff $selShown2 $selAfterOn -FromY 50 -ToY 80
   Write-Host ("  the selected line changed: {0:p1} on a right-click away from it, {1:p1} on one over it" -f $awayGone, $onGone) -ForegroundColor DarkGray
+  if (-not $sel31a -or -not $sel31b) {
+    Fail "selectright" "the drag never produced a highlight - nothing below it is about right-clicking"
+  }
   if ($awayGone -lt 0.15) { Pass "the highlight survives a right-click away from it" }
   else { Fail "selectright" ("the highlight vanished when the menu opened elsewhere ({0:p0} of the line changed)" -f $awayGone) }
   if ($onGone -lt 0.15) { Pass "and a right-click on top of it" }
@@ -3344,7 +3386,7 @@ if (-not $Only -or $Only -eq "selectmax") {
     $script:maxBare = Capture-Window $hS
     # A block covering the first several lines, so which line the marker
     # landed on does not matter.
-    Drag $hS 30 45 760 210
+    $script:selMaxTook = Drag-Effective $hS 30 45 760 210
     Start-Sleep -Seconds 1
     $script:maxSel = Capture-Window $hS
     # On top of the selection, which is where a hand goes when the thing
