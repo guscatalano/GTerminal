@@ -451,8 +451,23 @@ function Click-Effective {
     Start-Sleep -Milliseconds $settleMs
     $after = Capture-Window $hwnd
     $moved = Frame-Diff $before $after -IgnoreBottom 40
+    if ($moved -gt $floor) {
+      $before.Dispose(); $after.Dispose()
+      $script:LastClickTries = $i
+      return $true
+    }
+    # Keep the picture on the last try, for the same reason the drag does:
+    # a coordinate that no longer hits anything and a control that ignores
+    # a click look identical in a number, and one screenshot separated
+    # five scenes' worth of theories from the truth.
+    if ($i -eq $tries) {
+      $dump = Join-Path $outDir "click-failed"
+      New-Item -ItemType Directory -Force $dump | Out-Null
+      $stamp = (Get-Date).ToString("HHmmss")
+      $after.Save((Join-Path $dump "$stamp-at-$x-$y.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+      Write-Host "  a click at $x,$y changed nothing - frame saved to $dump" -ForegroundColor DarkGray
+    }
     $before.Dispose(); $after.Dispose()
-    if ($moved -gt $floor) { $script:LastClickTries = $i; return $true }
   }
   $script:LastClickTries = $tries
   $false
@@ -2647,6 +2662,12 @@ if (-not $Only -or $Only -eq "reboot") {
     $script:rbBeforeMark = Capture-Window $hRb2
     Run-Cmd 'echo REBOOT-TYPING-REACHES-HERE' 3
     $script:rbAfterMark = Capture-Window $hRb2
+    if ((Frame-Diff $script:rbBeforeMark $script:rbAfterMark) -lt 0.01) {
+      $dump = Join-Path $outDir "reboot-frames"
+      New-Item -ItemType Directory -Force $dump | Out-Null
+      $script:rbAfterMark.Save((Join-Path $dump "no-typing.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+      Write-Host "  the new shell took no typing - frame saved to $dump" -ForegroundColor DarkGray
+    }
     Run-Cmd '1..60 | ForEach-Object { "restored line $_" }' 4
     $script:rbScrollA = Capture-Window $hRb2
     Run-Cmd '1..60 | ForEach-Object { "second batch $_" }' 4
