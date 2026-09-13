@@ -100,5 +100,8 @@ jobs:
           path: |
             docs/visual/*.avi
             docs/visual/*.gif
+            # Stills a scene kept because it could not explain a failure in
+            # words. Small, and only present when something went wrong.
+            docs/visual/**/*.png
             docs/visual/*-frames/*.png
           if-no-files-found: warn

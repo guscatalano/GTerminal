@@ -410,6 +410,23 @@ function Drag-Effective {
         return $true
       }
     }
+    # Keep the picture on the last try. Five theories have now been
+    # eliminated by instruments that all look at the OS - foreground,
+    # cursor, hit-test, timing, button state - and every one of them came
+    # back clean while the drag still did nothing. None of them can see
+    # what the window is showing. An overlay of the app's own - a menu
+    # left open, a dialog, the settings page - would pass every check made
+    # so far and swallow a drag, and the only way to find that is to look.
+    if ($i -eq $tries) {
+      $dump = Join-Path $outDir "drag-failed"
+      New-Item -ItemType Directory -Force $dump | Out-Null
+      $stamp = (Get-Date).ToString("HHmmss")
+      $before.Save((Join-Path $dump "$stamp-before.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+      $last = Capture-Window $hwnd
+      $last.Save((Join-Path $dump "$stamp-after.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+      $last.Dispose()
+      Write-Host "  frames saved to $dump" -ForegroundColor DarkGray
+    }
     $before.Dispose()
     Write-Host "  note: the drag highlighted nothing on try $i" -ForegroundColor DarkYellow
   }
