@@ -805,6 +805,46 @@ $RECW = 1280; $RECH = 800
 $outDir = Join-Path $repo "docs\visual"
 New-Item -ItemType Directory -Force $outDir | Out-Null
 
+# Clear the UI state a scene inherits, and refuse to be quiet about it.
+#
+# The sidebar is remembered in localStorage, which lives in the WebView2
+# user data folder. Scenes place clicks and drags by coordinate, so a
+# sidebar left open moves the terminal 228 pixels to the right and every
+# one of those coordinates lands somewhere else: a drag aimed at the first
+# line of output starts inside the sidebar and selects nothing, and "the
+# middle of tab one" is no longer a tab.
+#
+# Start-App has always deleted that folder for exactly this reason. It
+# deleted it with -ErrorAction SilentlyContinue, and the delete fails
+# while anything still holds the files - which something does, because
+# WebView2 runs in child processes of its own that outlive the app being
+# killed. So the folder survived, the sidebar stayed open, and four scenes
+# failed for a reason none of them could see. It took five instruments and
+# a screenshot to find, and every one of those instruments was looking at
+# the wrong layer.
+#
+# Now: kill what is holding it, verify the folder is gone, and say so
+# loudly if it is not, because every coordinate below depends on it.
+function Clear-WebviewStore {
+  $path = $env:WEBVIEW2_USER_DATA_FOLDER
+  if (-not $path) { return }
+  for ($i = 1; $i -le 4; $i++) {
+    Remove-Item $path -Recurse -Force -ErrorAction SilentlyContinue
+    if (-not (Test-Path $path)) { return }
+    # Only processes pointed at this scratch folder - by command line, not
+    # by name. Nothing here may touch a webview somebody else is using.
+    $holders = @(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" -ErrorAction SilentlyContinue |
+      Where-Object { $_.CommandLine -and $_.CommandLine -like "*$path*" })
+    foreach ($h in $holders) {
+      Stop-Process -Id $h.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Milliseconds (400 * $i)
+  }
+  if (Test-Path $path) {
+    Write-Host "  note: the WebView2 store could not be cleared - this scene inherits the last one's sidebar, and every coordinate in it is suspect" -ForegroundColor Yellow
+  }
+}
+
 function Start-App {
   # -KeepState launches against whatever is already on disk instead of a
   # clean slate: the same executable, the same LOCALAPPDATA, the sessions
@@ -816,8 +856,9 @@ function Start-App {
   # The WebView2 store goes too, so every scene starts from the same UI
   # state. Without this a scene that toggles the sidebar leaves it on for
   # the next run, and a coordinate that worked yesterday clicks into the
-  # terminal today.
-  Remove-Item $env:WEBVIEW2_USER_DATA_FOLDER -Recurse -Force -ErrorAction SilentlyContinue
+  # terminal today. See Clear-WebviewStore: deleting it is not the same as
+  # it being gone.
+  Clear-WebviewStore
   New-Item -ItemType Directory -Force "$scratch\GTerminal" | Out-Null
   Set-Content "$scratch\GTerminal\config.json" $config
   }
@@ -886,7 +927,8 @@ function Daemon-Sessions {
 function Seed-Daemon {
   param([int]$count, [string]$config, [switch]$Typed)
   Remove-Item "$scratch\GTerminal" -Recurse -Force -ErrorAction SilentlyContinue
-  Remove-Item $env:WEBVIEW2_USER_DATA_FOLDER -Recurse -Force -ErrorAction SilentlyContinue
+  # Seeded scenes place coordinates too, so they need the same guarantee.
+  Clear-WebviewStore
   New-Item -ItemType Directory -Force "$scratch\GTerminal" | Out-Null
   Set-Content "$scratch\GTerminal\config.json" $config
   $d = Start-Process -FilePath $exe -ArgumentList "--daemon" -WindowStyle Hidden -PassThru
