@@ -716,6 +716,53 @@ if ($driftOut -match "DRIFT=(-?\d+)") {
 }
 Close-Shell $geo
 
+# ── a script that paints the terminal and walks away ──────────────────
+#
+# Reported as "a PowerShell script seemed to paint the entire terminal
+# blue", with `color` needed to escape it, and the reporter could not tell
+# whether it was meant to happen.
+#
+# It is meant to happen, in the sense that every terminal since the VT100
+# does it: a background set with SGR applies to everything written after
+# it, and an erase fills with the background in force rather than the
+# default. tests/colors.mjs pins that from the rendering side. This half
+# is about the shell - whether a script leaves that state behind, and
+# whether it can be got out of, which is the part somebody hits at a
+# prompt that has turned blue.
+$paint = Open-Shell "pwsh"
+$paintFixture = Join-Path $repo "tests\fixtures\paint.ps1"
+
+Type-Text ("& '$paintFixture' -Mode sgr" + "`r")
+$paintOut = Read-Until "PAINT-DONE"
+if ($paintOut -match "PAINT-BG=\[([^\]]*)\]") {
+  $bg = $Matches[1]
+  if ($bg -eq "UNAVAILABLE") {
+    Write-Host "  note: the shell could not read its own buffer, so the painting could not be checked" -ForegroundColor DarkYellow
+  } elseif ($bg -eq "DarkBlue") {
+    "PASS a script's unreset background is really left on the screen ($bg)"
+  } else {
+    $failures += "paint: a script set a blue background and the row it wrote reads $bg - if this stops being true the reported fault cannot happen, which is worth knowing"
+  }
+} else {
+  $failures += "paint: the fixture never reported what it painted"
+}
+
+# And that it can be escaped. This is what `color` does for cmd and what
+# a well-behaved script does for itself.
+Type-Text ("& '$paintFixture' -Mode reset" + "`r")
+$paintOut2 = Read-Until "PAINT-DONE"
+if ($paintOut2 -match "PAINT-BG=\[([^\]]*)\]") {
+  $bg2 = $Matches[1]
+  if ($bg2 -eq "UNAVAILABLE") {
+    Write-Host "  note: the shell could not read its own buffer after the reset" -ForegroundColor DarkYellow
+  } elseif ($bg2 -eq "DarkBlue") {
+    $failures += "paint: a reset did not put the background back - it still reads $bg2, so nothing a user types can undo it"
+  } else {
+    "PASS and a reset puts it back ($bg2)"
+  }
+}
+Close-Shell $paint
+
 # ── the collapse itself, read back off the screen ─────────────────────
 #
 # The probes above check what the pattern assumes. This one performs it

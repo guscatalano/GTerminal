@@ -1,0 +1,132 @@
+<!doctype html>
+<!--
+  What a program's colours do to the screen, and how long they last.
+
+  Driven by tests/colors.mjs. Reported from real use: a PowerShell script
+  "seemed to paint the entire terminal blue", and it took `color` - which
+  resets the console's default attributes - to get out of it. That is the
+  signature of a background left set rather than of coloured text, and the
+  two look nothing alike once you know which you are looking at.
+
+  redraw.mjs reads the buffer back as text, which cannot see any of this:
+  a blue screen and a black one hold exactly the same characters. So these
+  cases read the cell attributes instead - what colour a cell's background
+  is, and whether it is the default or one somebody chose.
+-->
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css" />
+<style>
+  body {
+    margin: 0;
+    background: #101014;
+  }
+  #term {
+    width: 620px;
+    height: 220px;
+  }
+  #out {
+    font: 12px monospace;
+    white-space: pre-wrap;
+    color: #000;
+    background: #fff;
+  }
+</style>
+<div id="term"></div>
+<pre id="out">PENDING</pre>
+<script type="module">
+  import { Terminal } from "../../node_modules/@xterm/xterm/lib/xterm.mjs";
+
+  const E = "\x1b";
+
+  // Each case writes what a program writes, then names the cells to look
+  // at. "blue" here is SGR 44, the background a script sets and forgets.
+  const CASES = [
+    {
+      name: "a background applies to the text after it",
+      data: `${E}[44mblue`,
+      cells: [[0, 0], [0, 3]],
+    },
+    {
+      name: "and keeps applying on the next line",
+      data: `${E}[44mblue\r\nstill`,
+      cells: [[1, 0], [1, 4]],
+    },
+    {
+      name: "and to a line erased while it is set",
+      // Background-colour-erase: an erase paints with the background in
+      // force, which is what turns a whole screen blue in one sequence.
+      data: `${E}[44m${E}[2J`,
+      cells: [[0, 0], [5, 30], [9, 60]],
+    },
+    {
+      name: "and to the rest of a line erased with EL",
+      data: `abc${E}[44m${E}[K`,
+      cells: [[0, 10], [0, 40]],
+    },
+    {
+      name: "a reset before the erase leaves the screen default",
+      data: `${E}[44m${E}[0m${E}[2J`,
+      cells: [[0, 0], [5, 30], [9, 60]],
+      wantDefault: true,
+    },
+    {
+      name: "SGR 49 puts the background back on its own",
+      data: `${E}[44mblue${E}[49m plain`,
+      cells: [[0, 6], [0, 9]],
+      wantDefault: true,
+    },
+    {
+      name: "a full reset ends it, which is what color does",
+      // `color` in cmd resets the console's default attributes; from the
+      // terminal's side the effect is this.
+      data: `${E}[44m${E}[2J${E}[0m${E}[2J`,
+      cells: [[0, 0], [5, 30], [9, 60]],
+      wantDefault: true,
+    },
+    {
+      name: "text colour alone leaves the background alone",
+      data: `${E}[34mblue text`,
+      cells: [[0, 0], [0, 5]],
+      wantDefault: true,
+    },
+  ];
+
+  const out = document.getElementById("out");
+  const host = document.getElementById("term");
+
+  (async () => {
+    try {
+      const results = [];
+      for (const c of CASES) {
+        const term = new Terminal({
+          cols: 80,
+          rows: 10,
+          allowProposedApi: true,
+          allowTransparency: true,
+          minimumContrastRatio: 4.5,
+        });
+        const div = document.createElement("div");
+        host.appendChild(div);
+        term.open(div);
+        await new Promise((resolve) => term.write(c.data, resolve));
+        const buf = term.buffer.active;
+        const seen = c.cells.map(([y, x]) => {
+          const cell = buf.getLine(y)?.getCell(x);
+          if (!cell) return { at: `${y},${x}`, missing: true };
+          return {
+            at: `${y},${x}`,
+            bg: cell.getBgColor(),
+            isDefault: cell.isBgDefault(),
+            isPalette: cell.isBgPalette(),
+          };
+        });
+        results.push({ name: c.name, cells: seen });
+        term.dispose();
+        div.remove();
+      }
+      out.textContent = "RESULTS " + JSON.stringify(results);
+    } catch (e) {
+      out.textContent = "RESULTS-ERROR " + String(e);
+    }
+  })();
+</script>
