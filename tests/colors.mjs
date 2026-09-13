@@ -43,6 +43,11 @@ if (!edge) {
   process.exit(0);
 }
 
+// A directory per launch, not per suite. Two of these suites start
+// Edge twice, and the second found the first's profile still locked -
+// which is why naming it after the fixture and the pid fixed nothing.
+let launches = 0;
+
 let failed = 0;
 function check(name, ok, detail = "") {
   console.log(`${ok ? "PASS" : "FAIL"} ${name}${ok ? "" : `: ${detail}`}`);
@@ -59,7 +64,7 @@ const dom = execFileSync(
     // the first, or find it locked, and exit having rendered nothing.
     // webgl.mjs passes alone and failed in the batch exactly once, which
     // is the shape that has cost this project four days.
-    `--user-data-dir=${join(tmpdir(), "gterm-headless-" + basename(fixture) + "-" + process.pid)}`,
+    `--user-data-dir=${join(tmpdir(), "gterm-headless-" + basename(fixture) + "-" + process.pid + "-" + (launches++))}`,
     "--allow-file-access-from-files",
     "--virtual-time-budget=20000",
     "--dump-dom",

@@ -16,7 +16,8 @@
 import { execFileSync } from "child_process";
 import { existsSync } from "fs";
 import { fileURLToPath, pathToFileURL } from "url";
-import { dirname, join } from "path";
+import { dirname, join, basename } from "path";
+import { tmpdir } from "os";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "webgl-probe.html");
@@ -31,6 +32,11 @@ if (!edge) {
   console.log("SKIP webgl: no Edge found — this needs the same engine the app renders in");
   process.exit(0);
 }
+
+// A directory per launch, not per suite. Two of these suites start
+// Edge twice, and the second found the first's profile still locked -
+// which is why naming it after the fixture and the pid fixed nothing.
+let launches = 0;
 
 let failed = 0;
 function check(name, ok, detail = "") {
@@ -51,7 +57,7 @@ function probe(transparent) {
       // attach to the first, or find it locked, and exit having rendered
       // nothing. webgl.mjs passes alone and failed in the batch exactly
       // once, which is the shape that has cost this project four days.
-      `--user-data-dir=${join(tmpdir(), "gterm-headless-" + basename(fixture) + "-" + process.pid)}`,
+      `--user-data-dir=${join(tmpdir(), "gterm-headless-" + basename(fixture) + "-" + process.pid + "-" + (launches++))}`,
       // ES modules over file:// are a cross-origin load to Chromium, and
       // without this the fixture never runs at all - it just reports
       // "pending", which looks like a renderer that drew nothing.
