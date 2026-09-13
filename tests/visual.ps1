@@ -1443,6 +1443,12 @@ if (-not $Only -or $Only -eq "restore-again") {
     # was restored" is true and proves nothing, which is a worse failure
     # than a red one because it is green.
     $script:againBefore = Wait-Settled $hw5 45
+    # There has to be something to answer. The screenshot of the "None
+    # button never took" failure showed a plain prompt and one tab: the
+    # second run had nothing to restore, so no question appeared, and two
+    # clicks at a dialog's coordinates hit the terminal. That is worth
+    # saying as itself rather than as a button that did not work.
+    $script:againAsks = @(Daemon-Sessions | Where-Object { $seed.Ids -contains $_.id }).Count
     # Click-Effective, not Click: these are two coordinates on a dialog,
     # and the second one's meaning depends on the first having worked -
     # "None" then "Restore 0" becomes "Restore 5" if the first misses.
@@ -1456,6 +1462,9 @@ if (-not $Only -or $Only -eq "restore-again") {
   }
   # The clicks have to have done something, or the assertion below is
   # about a dialog nobody dismissed.
+  if ($againAsks -lt 3) {
+    Fail "restore-again" "the second run had $againAsks restorable sessions, so no question was asked - the clicks below went into the terminal and nothing here was tested"
+  }
   if (-not $againNone) { Fail "restore-again" "the None button never took - nothing below it was tested" }
   if (-not $againGo) { Fail "restore-again" "the Restore button never took - nothing below it was tested" }
   $againMoved = Frame-Diff $againBefore $againAfter
@@ -2698,12 +2707,29 @@ if (-not $Only -or $Only -eq "reboot") {
   $rbTypingLands = Frame-Diff $rbBeforeMark $rbAfterMark
   if (-not $rbLive) {
     Fail "reboot" "no live shell appeared after Ctrl+Shift+T - the keystroke did not land, so nothing below it was tested"
-  } elseif ($rbTypingLands -lt 0.01) {
+  } elseif ($rbTypingLands -lt 0.003) {
     Fail "reboot" ("typing did not reach the new shell ({0:p1} of the screen changed for a one-line echo) - the tab exists but is not where input is going, so nothing below it is about drawing" -f $rbTypingLands)
   } else {
-    $rbScrolled = Frame-Diff $rbScrollA $rbScrollB
-    if ($rbScrolled -gt 0.30) { Pass "and a new shell scrolls the whole screen, not a band of it" }
-    else { Fail "reboot" ("sixty lines of output changed {0:p0} of the screen - a scrolling region the killed program set is still in force" -f $rbScrolled) }
+    # Bands, not the whole frame, and a threshold that suits text.
+    #
+    # This asked for 30% of the screen to change and never got it, and the
+    # message blamed a scrolling region for three runs. Two screens full of
+    # similar monospace text differ by a few percent of pixels - the other
+    # TUI scenes reach 73% because they paint solid colour, which text
+    # never does. The screenshot of a "failed" one-line echo showed the
+    # echo sitting there perfectly, at 0.8%.
+    #
+    # What the scene actually wants to know is whether the whole screen
+    # scrolls or only a band of it, and that is two questions about two
+    # bands rather than one about the total.
+    $rbTop = Frame-Diff $rbScrollA $rbScrollB -FromY 60 -ToY 240
+    $rbBottom = Frame-Diff $rbScrollA $rbScrollB -FromY 520 -ToY 700
+    Write-Host ("  sixty more lines changed {0:p1} of the top band and {1:p1} of the bottom" -f $rbTop, $rbBottom) -ForegroundColor DarkGray
+    if ($rbTop -gt 0.01 -and $rbBottom -gt 0.01) {
+      Pass "and a new shell scrolls the whole screen, not a band of it"
+    } else {
+      Fail "reboot" ("output moved {0:p1} of the top of the screen and {1:p1} of the bottom - a region left set by the killed program scrolls one and leaves the other" -f $rbTop, $rbBottom)
+    }
   }
 
   Write-Host ("  changed: after-reboot {0:p0}, into-preview {1:p0}, scrolled {2:p0}" -f $rbChanged, $rbIntoPreview, $rbScrolled) -ForegroundColor DarkGray
