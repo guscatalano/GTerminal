@@ -1407,7 +1407,14 @@ if (-not $Only -or $Only -eq "restore-zero") {
 # and a first-run test would never see it.
 if (-not $Only -or $Only -eq "restore-again") {
   $cfg = "{$baseCfg,`"restore_prompt`":true,`"restore_prompt_at`":3}"
-  $seed = Seed-Daemon 5 $cfg
+  # -Typed, because this scene kills the daemon between its two runs and
+  # a session nobody ever typed into is discarded when a daemon restarts -
+  # deliberately, so husks do not pile up. Without it the second run has
+  # nothing to restore, no question is asked, and two clicks aimed at a
+  # dialog land in the terminal. The first run passed throughout, because
+  # it talks to the daemon that is still holding the sessions in memory;
+  # only the restart applies the rule.
+  $seed = Seed-Daemon 5 $cfg -Typed
   # First run: take them all, which is what writes the order and layouts.
   $first = Start-AppSeeded $seed
   $againPressed = Press-OnDialog $first.Hwnd $VK_RETURN
