@@ -275,6 +275,27 @@ function Note-HitTest {
   [void]$U::GetWindowThreadProcessId($root, [ref]$ownerPid)
   $name = try { (Get-Process -Id $ownerPid -ErrorAction Stop).ProcessName } catch { "?" }
   Write-Host ("  hit-test: $what at $sx,$sy landed on {0} [{1}] pid $ownerPid ({2}), not the window under test" -f $ttl.ToString(), $cls.ToString(), $name) -ForegroundColor DarkYellow
+  # And then the part that says which window it is, because the first
+  # report of this named a window with the same title, the same class and
+  # the same process as the one under test - which narrows nothing. A
+  # second window of our own app, a leftover instance from the scene
+  # before, and a handle that stopped being the one we pinned all read
+  # identically until the rectangles are on the page next to each other.
+  $ours = New-Object 'GTerm.Vis+RECT'
+  [void]$U::GetWindowRect($hwnd, [ref]$ours)
+  $theirs = New-Object 'GTerm.Vis+RECT'
+  [void]$U::GetWindowRect($root, [ref]$theirs)
+  $mine = 0
+  [void]$U::GetWindowThreadProcessId($hwnd, [ref]$mine)
+  Write-Host ("           under test: hwnd {0} pid {1} at {2},{3} {4}x{5}" -f $hwnd, $mine, $ours.L, $ours.T, ($ours.R - $ours.L), ($ours.B - $ours.T)) -ForegroundColor DarkYellow
+  Write-Host ("           hit:        hwnd {0} pid {1} at {2},{3} {4}x{5}" -f $root, $ownerPid, $theirs.L, $theirs.T, ($theirs.R - $theirs.L), ($theirs.B - $theirs.T)) -ForegroundColor DarkYellow
+  foreach ($w in @(App-Windows $ownerPid)) {
+    $wr = New-Object 'GTerm.Vis+RECT'
+    [void]$U::GetWindowRect($w, [ref]$wr)
+    $wt = New-Object System.Text.StringBuilder 256
+    [void]$U::GetWindowText($w, $wt, 256)
+    Write-Host ("           pid ${ownerPid} also has: hwnd {0} at {1},{2} {3}x{4} `"{5}`"" -f $w, $wr.L, $wr.T, ($wr.R - $wr.L), ($wr.B - $wr.T), $wt.ToString()) -ForegroundColor DarkYellow
+  }
 }
 
 # A click at a point inside the window, in window coordinates.
