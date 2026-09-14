@@ -41,6 +41,15 @@
         box-sizing: border-box;
       }
 
+      /* The user agent's rule for this is `[hidden] { display: none }`,
+         which loses to any class that sets display - and the bar, the
+         composer and the gate all do. Without this the read-only notice
+         and the composer shared the bottom bar, each squeezed to half of
+         it, which is exactly what the first screenshot showed. */
+      [hidden] {
+        display: none !important;
+      }
+
       html,
       body {
         height: 100%;
@@ -265,10 +274,26 @@
         -webkit-overflow-scrolling: touch;
       }
 
-      .scroll pre {
-        margin: 0;
-        white-space: pre-wrap;
-        word-break: break-word;
+      /* The terminal renders at the session's own width and the page
+         pans, rather than reflowing or shrinking to fit.
+
+         Reflowing is out because the output was written for that width:
+         a repaint that addresses column 100 means something else in a
+         narrower terminal. Scaling to fit was tried and is worse - 120
+         columns squeezed into a phone is about three pixels a character,
+         which is not small text, it is a grey smear. So: readable text,
+         and a sideways scroll for the lines that need it. The prompt and
+         the start of every line, which is what anyone reads first, are
+         at the left where they can be seen without moving anything.
+
+         inline-block so the element takes the terminal's width instead
+         of the container's. */
+      #term {
+        display: inline-block;
+      }
+
+      #term .xterm {
+        padding: 0;
       }
 
       .empty {
@@ -440,7 +465,7 @@
 
       <div class="screen">
         <div class="scroll" id="screen" tabindex="0" role="region" aria-label="Session output">
-          <pre id="out"></pre>
+          <div id="term"></div>
           <div class="empty" id="empty" hidden></div>
         </div>
       </div>
@@ -548,182 +573,108 @@
       }
 
       // ── drawing terminal output ────────────────────────────────────
-      // A deliberately small subset: colours, bold, line breaks, carriage
-      // returns and backspace. Everything else in the stream is stepped
-      // over rather than honoured.
+      // xterm.js, the same engine the desktop window renders with, served
+      // out of this binary so a phone needs nothing from the network.
       //
-      // This is not a terminal emulator and must not grow into one — the
-      // real one is xterm.js in the desktop window. What a phone is for is
-      // reading what happened and typing a line, and a full-screen program
-      // (vim, htop) is exactly what the ring already declines to keep. A
-      // half-built emulator would paint those wrong and look broken; a
-      // deliberately small one paints what it has and looks like what it
-      // is.
-      const PALETTE = {
-        30: "#5b6673", 31: "#ff6b6b", 32: "#4fd6a8", 33: "#f0a44a",
-        34: "#6fb3d9", 35: "#b48ce0", 36: "#63c9c9", 37: "#d9e3ec",
-        90: "#67788a", 91: "#ff8f8f", 92: "#7ee6c4", 93: "#ffc47a",
-        94: "#93c9e8", 95: "#c9a8ec", 96: "#8adada", 97: "#ffffff",
+      // The first version of this page had a small hand-written ANSI
+      // reader that appended text as it arrived, on the reasoning that a
+      // phone is for reading what happened rather than for running vim.
+      // That reasoning is wrong about what a shell sends. PSReadLine
+      // repaints the line you are typing with absolute cursor moves, and
+      // draws its prediction in dim text that it then overwrites - so
+      // appending shows every intermediate frame and every suggestion as
+      // if the shell had printed them. Reported, accurately, as "it's
+      // showing stuff that doesn't exist and it doesn't show what's on
+      // the shell".
+      //
+      // The only thing that renders a terminal is a terminal.
+      const THEME = {
+        background: "#0a0e13",
+        foreground: "#d9e3ec",
+        cursor: "#f0a44a",
+        selectionBackground: "rgba(240, 164, 74, 0.28)",
+        black: "#1a2530",
+        red: "#ff6b6b",
+        green: "#4fd6a8",
+        yellow: "#f0a44a",
+        blue: "#6fb3d9",
+        magenta: "#b48ce0",
+        cyan: "#63c9c9",
+        white: "#d9e3ec",
+        brightBlack: "#67788a",
+        brightRed: "#ff8f8f",
+        brightGreen: "#7ee6c4",
+        brightYellow: "#ffc47a",
+        brightBlue: "#93c9e8",
+        brightMagenta: "#c9a8ec",
+        brightCyan: "#8adada",
+        brightWhite: "#ffffff",
       };
-      // Anything past this falls off the top. A phone re-parsing a
-      // megabyte of markup twice a second is a phone that gets hot.
-      const MAX_LINES = 800;
 
-      const term = {
-        lines: [[]],
-        fg: null,
-        bold: false,
-        carry: "",
-      };
+      // Fetched with the token like everything else, and awaited before
+      // anything tries to draw.
+      function loadEngine() {
+        return new Promise((resolve, reject) => {
+          const css = document.createElement("link");
+          css.rel = "stylesheet";
+          css.href = "/xterm.css?t=" + encodeURIComponent(token);
+          document.head.appendChild(css);
+          const js = document.createElement("script");
+          js.src = "/xterm.js?t=" + encodeURIComponent(token);
+          js.onload = () => resolve();
+          js.onerror = () => reject(new Error("the terminal engine did not load"));
+          document.head.appendChild(js);
+        });
+      }
+
+      let term = null;
+      let termCols = 0;
+
+      /// A terminal at the session's geometry, rebuilt when that changes.
+      ///
+      /// Rebuilt rather than resized: resizing tells xterm to reflow what
+      /// it holds, and what it holds was drawn for the old width. The
+      /// stream re-sends the whole scrollback on connect, so starting
+      /// clean costs nothing.
+      function ensureTerm(cols, rows) {
+        const want = cols > 0 ? cols : 80;
+        if (term && termCols === want) return term;
+        if (term) {
+          term.dispose();
+          $("term").textContent = "";
+        }
+        termCols = want;
+        term = new Terminal({
+          cols: want,
+          rows: Math.max(rows > 0 ? rows : 24, 24),
+          fontSize: 13,
+          fontFamily:
+            'ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace',
+          theme: THEME,
+          scrollback: 4000,
+          cursorBlink: false,
+          disableStdin: true,
+          allowProposedApi: true,
+        });
+        term.open($("term"));
+        return term;
+      }
+
+      // Turning the phone does not change the terminal - its size comes
+      // from the session - but it does change what is on screen, and the
+      // newest line is the one to keep.
+      window.addEventListener("orientationchange", () => toBottom());
 
       function reset() {
-        term.lines = [[]];
-        term.fg = null;
-        term.bold = false;
-        term.carry = "";
-      }
-
-      function push(text) {
-        if (!text) return;
-        const line = term.lines[term.lines.length - 1];
-        const last = line[line.length - 1];
-        if (last && last.c === term.fg && last.b === term.bold) last.t += text;
-        else line.push({ t: text, c: term.fg, b: term.bold });
-      }
-
-      function sgr(params) {
-        for (const raw of params.split(";")) {
-          const n = raw === "" ? 0 : Number(raw);
-          if (n === 0) {
-            term.fg = null;
-            term.bold = false;
-          } else if (n === 1) term.bold = true;
-          else if (n === 22) term.bold = false;
-          else if (n === 39) term.fg = null;
-          else if (PALETTE[n]) term.fg = PALETTE[n];
-        }
+        if (term) term.reset();
       }
 
       function write(chunk) {
-        let s = term.carry + chunk;
-        term.carry = "";
-        let plain = "";
-        let i = 0;
-        const flush = () => {
-          push(plain);
-          plain = "";
-        };
-        while (i < s.length) {
-          const ch = s[i];
-          if (ch === "\x1b") {
-            flush();
-            if (i + 1 >= s.length) {
-              term.carry = s.slice(i);
-              break;
-            }
-            const kind = s[i + 1];
-            if (kind === "[") {
-              let j = i + 2;
-              while (j < s.length && !(s[j] >= "@" && s[j] <= "~")) j++;
-              if (j >= s.length) {
-                term.carry = s.slice(i);
-                break;
-              }
-              const final = s[j];
-              const params = s.slice(i + 2, j).replace(/^[?>!]/, "");
-              if (final === "m") sgr(params);
-              else if (final === "J" && (params === "2" || params === "3")) reset();
-              else if (final === "K" && (params === "" || params === "0")) {
-                // Erase to end of line. The cursor is always at the end
-                // of what we have drawn, so there is nothing after it.
-              }
-              i = j + 1;
-              continue;
-            }
-            if (kind === "]") {
-              // OSC — window titles, the prompt hooks, the OSC 133 marks.
-              // Ended by BEL or by ESC \.
-              let j = i + 2;
-              while (j < s.length && s[j] !== "\x07" && !(s[j] === "\x1b" && s[j + 1] === "\\")) j++;
-              if (j >= s.length) {
-                term.carry = s.slice(i);
-                break;
-              }
-              i = s[j] === "\x07" ? j + 1 : j + 2;
-              continue;
-            }
-            if (kind === "(" || kind === ")" || kind === "#") {
-              if (i + 2 >= s.length) {
-                term.carry = s.slice(i);
-                break;
-              }
-              i += 3;
-              continue;
-            }
-            i += 2;
-            continue;
-          }
-          if (ch === "\n") {
-            flush();
-            term.lines.push([]);
-            i++;
-            continue;
-          }
-          if (ch === "\r") {
-            // A carriage return with no newline is a program redrawing
-            // the line it is on — a progress bar, or PSReadLine repainting
-            // what you typed. Replacing the line is the right answer for
-            // both; keeping it would show every frame of the animation.
-            flush();
-            term.lines[term.lines.length - 1] = [];
-            i++;
-            continue;
-          }
-          if (ch === "\b") {
-            flush();
-            const line = term.lines[term.lines.length - 1];
-            const last = line[line.length - 1];
-            if (last) {
-              last.t = last.t.slice(0, -1);
-              if (!last.t) line.pop();
-            }
-            i++;
-            continue;
-          }
-          if (ch === "\t") {
-            plain += "        ";
-            i++;
-            continue;
-          }
-          if (ch < " " && ch !== " ") {
-            i++;
-            continue;
-          }
-          plain += ch;
-          i++;
-        }
-        flush();
-        if (term.lines.length > MAX_LINES) term.lines.splice(0, term.lines.length - MAX_LINES);
+        if (term) term.write(chunk);
       }
 
-      function esc(s) {
-        return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      }
-
-      function paint() {
-        const html = term.lines
-          .map((line) =>
-            line
-              .map((sp) => {
-                const style =
-                  (sp.c ? "color:" + sp.c + ";" : "") + (sp.b ? "font-weight:600;" : "");
-                return style ? '<span style="' + style + '">' + esc(sp.t) + "</span>" : esc(sp.t);
-              })
-              .join("")
-          )
-          .join("\n");
-        $("out").innerHTML = html;
-      }
+      // The engine repaints itself; there is nothing for the page to do.
+      function paint() {}
 
       // ── the session strip ──────────────────────────────────────────
       let sessions = [];
@@ -785,14 +736,17 @@
           location.host + " · " + sessions.length + (sessions.length === 1 ? " session" : " sessions");
       }
 
+      // Scrolling belongs to the terminal now, not to the div around it.
+      // "At the bottom" is the engine's own idea of it: the viewport
+      // sitting on the last line of the buffer.
       function atBottom() {
-        const el = $("screen");
-        return el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+        if (!term) return true;
+        const b = term.buffer.active;
+        return b.viewportY >= b.baseY;
       }
 
       function toBottom() {
-        const el = $("screen");
-        el.scrollTop = el.scrollHeight;
+        if (term) term.scrollToBottom();
       }
 
       // ── the stream ─────────────────────────────────────────────────
@@ -838,6 +792,11 @@
         source.addEventListener("replace", (e) => {
           const payload = JSON.parse(e.data);
           if (payload.id !== activeId) return;
+          // The width the output was written at, from the session
+          // itself. A cold session has no pty and reports zero, which
+          // ensureTerm reads as "use the usual 80".
+          const s = sessions.find((x) => x.id === activeId);
+          ensureTerm(s ? s.cols || 0 : 0, s ? s.rows || 0 : 0);
           reset();
           write(payload.text || "");
           paint();
@@ -957,9 +916,23 @@
 
       // ── go ─────────────────────────────────────────────────────────
       $("hostname").textContent = location.hostname;
-      void refreshMode();
-      setInterval(refreshMode, 15000);
-      open();
+      // Nothing starts until the engine is here: the first thing the
+      // stream does is hand over a whole scrollback, and there would be
+      // nothing to give it to.
+      loadEngine().then(
+        () => {
+          ensureTerm(80, 24);
+          void refreshMode();
+          setInterval(refreshMode, 15000);
+          open();
+        },
+        (err) => {
+          $("empty").hidden = false;
+          $("empty").textContent =
+            "The terminal engine did not load, so there is nothing here that could draw a shell. " +
+            String(err.message || err);
+        }
+      );
     </script>
   </body>
 </html>

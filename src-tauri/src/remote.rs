@@ -45,6 +45,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// and the token is in config.json.
 const PAGE: &str = include_str!("remote.html");
 
+/// The terminal engine, put in OUT_DIR by build.rs from the same
+/// node_modules the desktop window is built from - so the phone and the
+/// window are never two different terminals reading one byte stream.
+const ENGINE_JS: &str = include_str!(concat!(env!("OUT_DIR"), "/xterm.js"));
+const ENGINE_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/xterm.css"));
+
 /// The port nothing was already using on the machines this was tried on.
 /// Changeable in settings, because "nothing was using it here" is not a
 /// promise about anyone else's machine.
@@ -324,6 +330,10 @@ pub enum Route {
     Stream,
     /// Type into a session.
     Input,
+    /// The terminal engine the page renders with, carried in the binary.
+    Engine,
+    /// Its stylesheet.
+    EngineCss,
     NotFound,
 }
 
@@ -340,6 +350,8 @@ pub fn route(method: &str, path: &str) -> Route {
         ("GET", "/api/peek") => Route::Peek,
         ("GET", "/api/stream") => Route::Stream,
         ("POST", "/api/input") => Route::Input,
+        ("GET", "/xterm.js") => Route::Engine,
+        ("GET", "/xterm.css") => Route::EngineCss,
         _ => Route::NotFound,
     }
 }
@@ -424,8 +436,8 @@ fn read_request(reader: &mut BufReader<TcpStream>) -> Option<Req> {
 const COMMON_HEADERS: &str = "Cache-Control: no-store\r\n\
      X-Content-Type-Options: nosniff\r\n\
      Referrer-Policy: no-referrer\r\n\
-     Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; \
-     script-src 'unsafe-inline'; img-src data:; connect-src 'self'; form-action 'none'; \
+     Content-Security-Policy: default-src 'none'; style-src 'self' 'unsafe-inline'; \
+     script-src 'self' 'unsafe-inline'; img-src data:; connect-src 'self'; form-action 'none'; \
      frame-ancestors 'none'\r\n";
 
 fn respond(out: &mut TcpStream, status: &str, content_type: &str, body: &str) {
@@ -562,6 +574,11 @@ fn serve(stream: TcpStream, ctx: Arc<Ctx>) {
         }
         Route::Stream => stream_session(&mut out, &req, &ctx),
         Route::Input => handle_input(&mut out, &req),
+        // Behind the token like everything else. There is nothing secret
+        // in a copy of xterm.js, but a route that answers without one is
+        // a route that says the server is here.
+        Route::Engine => respond(&mut out, "200 OK", "application/javascript; charset=utf-8", ENGINE_JS),
+        Route::EngineCss => respond(&mut out, "200 OK", "text/css; charset=utf-8", ENGINE_CSS),
         Route::NotFound => respond(&mut out, "404 Not Found", "text/plain; charset=utf-8", "no\n"),
     }
 }

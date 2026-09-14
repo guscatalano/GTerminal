@@ -605,6 +605,13 @@ pub struct SessionInfo {
     pub cwd: String,
     /// Shell profile this session runs ("auto"/"pwsh"/"powershell"/"cmd").
     pub shell: String,
+    /// The pty's size. Anything rendering this session's output without
+    /// owning it needs the width it was written at; zero means a cold
+    /// session, whose pty is gone.
+    #[serde(default)]
+    pub cols: u16,
+    #[serde(default)]
+    pub rows: u16,
 }
 
 /// The "oops I screwed up" window: killed sessions keep their process
@@ -1317,6 +1324,13 @@ struct Session {
     created_ms: u64,
     cwd: String,
     shell: String,
+    /// The size the pty is at. The pty knows it and will not say, and a
+    /// second reader of this session's output - the phone view - has to
+    /// render at the width the output was written for. A repaint that
+    /// positions the cursor at column 100 means something different in a
+    /// terminal 40 columns wide.
+    cols: u16,
+    rows: u16,
     dirty: bool,
     /// Typed into the shell once its first prompt renders (writing earlier
     /// gets dropped while ConPTY is still initializing).
@@ -2153,6 +2167,8 @@ fn conn_loop(
                                 running: Vec::new(),
                                 cwd: s.cwd.clone(),
                                 shell: s.shell.clone(),
+                                cols: s.cols,
+                                rows: s.rows,
                             },
                             s.child_pid,
                         )
@@ -2168,6 +2184,8 @@ fn conn_loop(
                                 running: s.running.clone(),
                                 cwd: s.cwd.clone(),
                                 shell: s.shell.clone(),
+                                cols: 0,
+                                rows: 0,
                             },
                             None,
                         )
@@ -2452,6 +2470,14 @@ fn conn_loop(
                             pixel_width: 0,
                             pixel_height: 0,
                         });
+                        // Recorded only when it was a size worth having,
+                        // for the same reason the resize itself is passed
+                        // through unclamped: a minimized window reporting
+                        // zero must not tell a phone to render nothing.
+                        if cols > 0 && rows > 0 {
+                            s.cols = cols;
+                            s.rows = rows;
+                        }
                     }
                 }
             }
@@ -2715,6 +2741,8 @@ fn start_session(
             created_ms,
             cwd,
             shell: shell.to_string(),
+            cols,
+            rows,
             dirty: true,
             pending_input: None,
             doomed_until: None,

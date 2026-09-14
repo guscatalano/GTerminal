@@ -47,5 +47,31 @@ fn main() {
     // the unexpected-cfg lint firing on the daemon's mid-run profile flush.
     println!("cargo:rustc-check-cfg=cfg(coverage)");
 
+    // The phone view renders with the same terminal engine as the
+    // desktop window, and gets it from the same place: node_modules.
+    //
+    // It has to be a real emulator. The first version of that page had a
+    // small hand-written ANSI reader that appended text as it arrived,
+    // and a shell is not an append-only stream - PSReadLine repaints the
+    // line you are typing with absolute cursor moves, and draws its
+    // prediction in dim text it then overwrites. Appending all of that
+    // shows every intermediate frame and every suggestion as if they
+    // were output: "it shows stuff that doesn't exist and it doesn't
+    // show what's on the shell", which is exactly what it was doing.
+    //
+    // Copied into OUT_DIR rather than read at run time, so the binary
+    // carries it and a phone needs nothing from the network.
+    let out = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
+    for (from, to) in [
+        ("../node_modules/@xterm/xterm/lib/xterm.js", "xterm.js"),
+        ("../node_modules/@xterm/xterm/css/xterm.css", "xterm.css"),
+    ] {
+        println!("cargo:rerun-if-changed={from}");
+        let body = std::fs::read(from).unwrap_or_else(|e| {
+            panic!("{from} is missing ({e}) - run `npm ci` before building; the remote page is served out of it")
+        });
+        std::fs::write(out.join(to), body).expect("write the terminal engine into OUT_DIR");
+    }
+
     tauri_build::build()
 }

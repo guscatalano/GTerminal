@@ -18,6 +18,7 @@ import {
   remoteUrl,
   statusLine,
 } from "../src/remote.ts";
+import { readFileSync } from "fs";
 
 let failed = 0;
 function check(name, got, want) {
@@ -149,6 +150,36 @@ check(
   statusLine({ remote_enabled: true }, { running: false }),
   "Turned on, but not listening yet."
 );
+
+
+// ── what draws the shell ───────────────────────────────────────────────
+// The page's first renderer was a small hand-written ANSI reader that
+// appended text as it arrived. It reads a shell wrong in a way that is
+// not subtle: PSReadLine repaints the line being typed with absolute
+// cursor moves and draws its prediction in dim text it then overwrites,
+// so appending shows every intermediate frame and every suggestion as if
+// the shell had printed them - "it's showing stuff that doesn't exist
+// and it doesn't show what's on the shell".
+//
+// These are shape checks on the page, not behaviour tests. They exist so
+// that the fix cannot be quietly undone by someone deciding a small
+// parser would be lighter than shipping an engine.
+const page = readFileSync(new URL("../src-tauri/src/remote.html", import.meta.url), "utf8");
+const server = readFileSync(new URL("../src-tauri/src/remote.rs", import.meta.url), "utf8");
+
+check("the page renders with a real terminal", /new Terminal\(/.test(page), true);
+check("which it loads from this server", page.includes('"/xterm.js?t="'), true);
+check("and the server has a route to serve it", server.includes('("GET", "/xterm.js") => Route::Engine'), true);
+check("behind the same token as everything else", /Route::Engine => respond/.test(server), true);
+check(
+  "no hand-rolled SGR table is left to drift from it",
+  /const PALETTE = \{[\s\S]*?30:/.test(page),
+  false
+);
+// hidden has to hide. The bar sets display on a class, which outranks
+// the user agent's [hidden] rule - so the read-only notice and the
+// composer were both drawn, each squeezed into half the bottom bar.
+check("hidden actually hides", /\[hidden\]\s*\{\s*display:\s*none\s*!important/.test(page), true);
 
 if (failed) {
   console.log(`${failed} remote test(s) failed`);
