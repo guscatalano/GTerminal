@@ -309,6 +309,13 @@ struct RingFilter {
 /// was not a mode change, and holding more of it would be a slow leak.
 const PENDING_MAX: usize = 64;
 
+/// How much of a full-screen program's drawing is held so that somebody
+/// joining mid-program can be shown the screen. Two hundred kilobytes is
+/// a few dozen repaints of a large terminal - enough to have caught a
+/// whole frame, small enough that a session holding one costs nothing
+/// worth measuring.
+const ALT_SCREEN_MAX: usize = 200 * 1024;
+
 impl RingFilter {
     /// The part of this chunk that belongs in the scrollback.
     fn keep(&mut self, chunk: &[u8]) -> Vec<u8> {
@@ -561,6 +568,19 @@ pub enum Request {
     /// which the remote server reports as what it is rather than
     /// swallowing.
     Send { id: u32, data: String },
+    /// Receive a session's output without taking it.
+    ///
+    /// Attach *moves* a session: the newest attacher wins and whoever
+    /// had it is told it was taken. That is right for windows, which is
+    /// what it was written for, and wrong for anything that only wants
+    /// to watch - looking at a session from a phone must not take it out
+    /// of the window on the desk.
+    ///
+    /// Everything the pty produces goes to an observer, including what
+    /// the ring refuses to keep: a full-screen program's repaints are
+    /// not scrollback, but they are exactly what somebody watching wants
+    /// to see. Advertised in `can`, like `send`.
+    Observe { id: u32 },
     Resize { cols: u16, rows: u16 },
     Detach,
     /// Stand down: checkpoint everything and exit.
@@ -1321,6 +1341,24 @@ struct Session {
     child_pid: Option<u32>,
     ring: Vec<u8>,
     attached: Option<(u64, TcpStream)>,
+    /// Connections that receive this session's output without owning it.
+    ///
+    /// Attaching *moves* a session - the newest attacher wins and the
+    /// old one is told it was taken - which is right for windows and
+    /// wrong for anything that only wants to watch. The phone view is
+    /// the first such thing: looking at a session from a phone must not
+    /// take it out of the window on the desk.
+    observers: Vec<(u64, TcpStream)>,
+    /// What has been drawn on the alternate screen since it was entered.
+    ///
+    /// The ring deliberately holds none of it: a full-screen program
+    /// repaints thousands of times and none of those frames is
+    /// scrollback anybody wants. But a watcher that joins while such a
+    /// program is running would otherwise see nothing at all until the
+    /// next repaint, which is how "I launched Claude Code and it didn't
+    /// render" happens. Replaying this reconstructs the screen, because
+    /// it is every byte the program has drawn since it took over.
+    alt: Vec<u8>,
     created_ms: u64,
     cwd: String,
     shell: String,
@@ -2120,11 +2158,20 @@ fn handle_conn(stream: TcpStream, sessions: Sessions) {
     // The loop must not early-return: an abrupt client death surfaces as a
     // read/write error, and the detach cleanup below has to run regardless.
     let _ = conn_loop(stream, &sessions, conn_id, &mut attached_id);
-    if let Some(id) = attached_id {
-        if let Some(s) = sessions.lock().unwrap().live.get_mut(&id) {
-            if matches!(s.attached, Some((cid, _)) if cid == conn_id) {
-                s.attached = None;
+    {
+        let mut state = sessions.lock().unwrap();
+        if let Some(id) = attached_id {
+            if let Some(s) = state.live.get_mut(&id) {
+                if matches!(s.attached, Some((cid, _)) if cid == conn_id) {
+                    s.attached = None;
+                }
             }
+        }
+        // Watchers are not tracked per connection the way an attachment
+        // is - a connection could be watching any session - so every
+        // session is swept. There are tens of these, not thousands.
+        for s in state.live.values_mut() {
+            s.observers.retain(|(c, _)| *c != conn_id);
         }
     }
 }
@@ -2223,7 +2270,7 @@ fn conn_loop(
                         //
                         // Additive: a daemon older than this omits it, and
                         // an absent list means "assume nothing".
-                        "can": ["shutdown", "send"],
+                        "can": ["shutdown", "send", "observe"],
                     }),
                 )?;
             }
@@ -2437,6 +2484,30 @@ fn conn_loop(
                         &mut out,
                         &json!({"ok": false, "error": "no live shell in that session"}),
                     )?;
+                }
+            }
+            Request::Observe { id } => {
+                // The scrollback first, then everything after it, on one
+                // connection - so nothing that arrives between the two can
+                // fall down the gap between a peek and a subscribe.
+                let mut state = sessions.lock().unwrap();
+                match state.live.get_mut(&id) {
+                    Some(s) => {
+                        let mut history = String::from_utf8_lossy(ring_tail(&s.ring)).into_owned();
+                        // And the screen a full-screen program is holding
+                        // right now, which the ring is not keeping.
+                        history.push_str(&String::from_utf8_lossy(&s.alt));
+                        let dup = out.try_clone()?;
+                        s.observers.retain(|(c, _)| *c != conn_id);
+                        s.observers.push((conn_id, dup));
+                        drop(state);
+                        write_line(&mut out, &json!({"ok": true}))?;
+                        write_line(&mut out, &json!({"ev": "data", "data": history}))?;
+                    }
+                    None => {
+                        drop(state);
+                        write_line(&mut out, &json!({"ok": false, "error": "no such session"}))?;
+                    }
                 }
             }
             Request::Resize { cols, rows } => {
@@ -2743,6 +2814,8 @@ fn start_session(
             shell: shell.to_string(),
             cols,
             rows,
+            observers: Vec::new(),
+            alt: Vec::new(),
             dirty: true,
             pending_input: None,
             doomed_until: None,
@@ -2768,6 +2841,11 @@ fn start_session(
         // The attached client's socket, cloned so a chunk can be written
         // to it with the lock already released.
         let mut client: Option<(u64, TcpStream)> = None;
+        // And the sockets of anything watching without owning it. Kept
+        // in step with the session's list rather than re-cloned per
+        // chunk: try_clone is a handle dup, and this loop runs for every
+        // 8KB a busy build produces.
+        let mut watchers: Vec<(u64, TcpStream)> = Vec::new();
         loop {
             let n = match reader.read(&mut buf) {
                 Ok(0) | Err(_) => break,
@@ -2783,13 +2861,30 @@ fn start_session(
             let text = take_valid_utf8(&mut carry);
             let cwd = text.as_deref().and_then(parse_cwd);
             let line = text.map(|t| json!({"ev": "data", "data": t}));
+            let observed = line.clone();
             {
                 let mut state = sessions.lock().unwrap();
                 let Some(s) = state.live.get_mut(&id) else {
                     break;
                 };
+                let was_alt = s.ring_filter.in_alt;
                 let keep = s.ring_filter.keep(&buf[..n]);
                 ring_append(&mut s.ring, &keep);
+                // What the alternate screen is showing, for whoever joins
+                // in the middle of a full-screen program. Cleared on the
+                // way in and on the way out, so it is never a stale screen
+                // from an hour ago - and cleared rather than trimmed when
+                // it grows past the cap, because dropping the front of a
+                // repaint stream leaves a screen half drawn from two
+                // different moments. The next repaint fills it again.
+                if s.ring_filter.in_alt {
+                    if !was_alt || s.alt.len() + n > ALT_SCREEN_MAX {
+                        s.alt.clear();
+                    }
+                    s.alt.extend_from_slice(&buf[..n]);
+                } else if was_alt {
+                    s.alt.clear();
+                }
                 s.dirty = true;
                 if let Some(cwd) = cwd {
                     s.cwd = cwd;
@@ -2806,6 +2901,15 @@ fn start_session(
                         Some((c, sock)) => sock.try_clone().ok().map(|dup| (*c, dup)),
                         None => None,
                     };
+                }
+                let want: Vec<u64> = s.observers.iter().map(|(c, _)| *c).collect();
+                let have: Vec<u64> = watchers.iter().map(|(c, _)| *c).collect();
+                if want != have {
+                    watchers = s
+                        .observers
+                        .iter()
+                        .filter_map(|(c, sock)| sock.try_clone().ok().map(|dup| (*c, dup)))
+                        .collect();
                 }
             }
             // The client write, with the lock released: it can block on a
@@ -2833,6 +2937,25 @@ fn start_session(
             // loop never waits for.
             if let Some(tx) = transcript_tx.as_ref() {
                 let _ = tx.send(buf[..n].to_vec());
+            }
+            // And anything watching. Same line, written after the
+            // attached client and outside the lock for the same reason:
+            // a phone on a slow tunnel must not be able to stall the
+            // window on the desk. One that cannot be written to has gone
+            // away and is dropped.
+            if let Some(line) = observed.as_ref() {
+                let mut dead: Vec<u64> = Vec::new();
+                for (c, sock) in watchers.iter_mut() {
+                    if write_line(sock, line).is_err() {
+                        dead.push(*c);
+                    }
+                }
+                if !dead.is_empty() {
+                    if let Some(s) = sessions.lock().unwrap().live.get_mut(&id) {
+                        s.observers.retain(|(c, _)| !dead.contains(c));
+                    }
+                    watchers.retain(|(c, _)| !dead.contains(c));
+                }
             }
         }
         // PTY stream ended (master dropped or conhost died): tear down the

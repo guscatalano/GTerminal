@@ -61,6 +61,20 @@ means "assume nothing".
   under the person at the keyboard. Unlike `write`, it answers: the
   caller is over a network and has to be able to tell "typed into a
   shell" from "went nowhere".
+- **`observe`** — receive a session's output without taking it. The
+  connection is sent everything the session has (its scrollback, plus
+  whatever a full-screen program is currently holding on the alternate
+  screen) and then every chunk as it arrives, in the same
+  `{"ev":"data"}` shape `attach` uses. It does not touch the
+  attachment, so a phone watching a session cannot take it out of the
+  window on the desk.
+
+  The reason it cannot be built on `peek` is the ring. The ring
+  deliberately keeps nothing that a program drew after it took over the
+  screen — thousands of repaints are not scrollback — so a watcher
+  polling `peek` sees nothing at all while any full-screen program is
+  running. An observer is fed the pty directly and sees the repaints
+  too.
 
 A daemon too old for either answers `{"ok":false,"error":"bad request"}`
 and keeps the connection, which is the behaviour this whole document is
@@ -101,6 +115,22 @@ Daemon, `send` (`tests/lifecycle.ps1`):
     bug, which is why both are checked.
 14. A `send` to a session that does not exist is refused rather than
     silently discarded.
+
+Daemon, `observe` (`tests/lifecycle.ps1`):
+
+15. `list` advertises `observe` in its `can` array.
+16. A session can be watched, and the window that had it still has it
+    afterwards — the whole point of the verb being separate from
+    `attach`.
+17. Ordinary output reaches the watcher.
+18. So does what a program draws on the alternate screen. This is the
+    case the feature exists for: it was reported as an agent TUI
+    rendering nothing in the phone view, and a watcher built on `peek`
+    cannot ever pass it.
+19. The ring, for contrast, still holds the ordinary output and still
+    refuses to keep the repaints. If that ever flips, the ring has
+    stopped being scrollback.
+20. Watching a session that does not exist is refused.
 
 Frontend (`tests/daemon.mjs`), against `src/daemon.ts`:
 

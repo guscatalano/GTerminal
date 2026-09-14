@@ -1266,6 +1266,90 @@ if (-not $sendNowhere.ok) { Pass "sending to a session that is not there is refu
 else { Fail "send" "a send to a nonexistent session reported success" }
 $sendWin.Client.Close()
 
+# ════ observe: watching a session without taking it ════
+#
+# The phone view reads a session that a window on the desk is using, and
+# neither of those may cost the other anything. Attach is the wrong verb
+# for it - attach *moves* a session, the newest attacher wins and the old
+# one is told it was taken - so `observe` exists to watch one instead.
+#
+# The half worth testing hardest is the full-screen program. The ring
+# deliberately keeps nothing a program drew after it took over the screen,
+# because thousands of repaints are not scrollback; a watcher reading the
+# ring therefore sees nothing at all while such a program runs, which is
+# how "I launched Claude Code and it didn't render in the web" happened.
+# An observer is fed the pty directly and must see it.
+$obsPort = Start-Daemon
+$obsList = Request2 $obsPort '{"cmd":"list"}'
+if ($obsList.can -contains "observe") { Pass "the daemon advertises observe in its can list" }
+else { Fail "observe" "can was $($obsList.can | ConvertTo-Json -Compress)" }
+
+$obsMade = Request2 $obsPort '{"cmd":"create","cols":100,"rows":30}'
+$obsId = $obsMade.id
+$obsWin = New-Conn $obsPort
+$obsWin.Writer.WriteLine('{"cmd":"attach","id":' + $obsId + '}')
+$null = Wait-Ready-Answering $obsWin
+
+$obsWatch = New-Conn $obsPort
+$obsWatch.Writer.WriteLine('{"cmd":"observe","id":' + $obsId + '}')
+$obsHello = Drain2 $obsWatch 1500
+if ($obsHello -like '*"ok":true*') { Pass "a session can be watched" }
+else { Fail "observe" "the daemon refused to let a session be watched: $obsHello" }
+
+# The window keeps its session. This is the whole point of the verb.
+$obsAfter = Request2 $obsPort '{"cmd":"list"}'
+$obsSess = @($obsAfter.sessions | Where-Object { $_.id -eq $obsId })[0]
+if ($obsSess -and $obsSess.attached) { Pass "and the window that had it still has it" }
+else { Fail "observe" "watching a session took it away from the window" }
+
+# Ordinary output reaches both.
+$null = Request2 $obsPort ('{"cmd":"send","id":' + $obsId + ',"data":"echo WATCHED-PLAIN\r"}')
+$obsSaw = ""
+$obsDeadline = (Get-Date).AddSeconds(30)
+while ((Get-Date) -lt $obsDeadline) {
+  $obsSaw += Drain2 $obsWatch 400
+  if ($obsSaw -like "*WATCHED-PLAIN*") { break }
+}
+if ($obsSaw -like "*WATCHED-PLAIN*") { Pass "and what the shell prints reaches the watcher" }
+else { Fail "observe" "the watcher never saw ordinary output" }
+
+# The marker is written in two halves and joined by the shell, so that
+# the string being looked for never appears in the command line itself.
+# PSReadLine echoes what was typed, the echo is ordinary output, and the
+# ring keeps it - so a whole marker in the command would turn up in the
+# ring and read as proof that the ring is keeping repaints.
+#
+# And the case the ring refuses to keep: a program on the alternate
+# screen. Entering it, drawing, and leaving is what every TUI does; the
+# ring holds none of the middle part and the watcher must see all of it.
+$altCmd = '[Console]::Write((([char]27)+\"[?1049h\")); ' +
+  '[Console]::Write(\"FULLSCR\"+\"EEN-FRAME\"); Start-Sleep -Milliseconds 300; ' +
+  '[Console]::Write((([char]27)+\"[?1049l\"))'
+$null = Request2 $obsPort ('{"cmd":"send","id":' + $obsId + ',"data":"' + $altCmd + '\r"}')
+$obsAlt = ""
+$altDeadline = (Get-Date).AddSeconds(30)
+while ((Get-Date) -lt $altDeadline) {
+  $obsAlt += Drain2 $obsWatch 400
+  if ($obsAlt -like "*FULLSCREEN-FRAME*") { break }
+}
+if ($obsAlt -like "*FULLSCREEN-FRAME*") { Pass "and a full-screen program's drawing reaches it too" }
+else { Fail "observe" "nothing a full-screen program drew ever arrived - this is the Claude Code case" }
+
+# The ring, for contrast: it should hold the plain output and none of
+# what was drawn on the alternate screen. If this ever starts holding
+# the frames, the ring has stopped being scrollback.
+$obsPeek = Request2 $obsPort ('{"cmd":"peek","id":' + $obsId + '}')
+if ($obsPeek.data -like "*WATCHED-PLAIN*") { Pass "the ring still holds ordinary output" }
+else { Fail "observe" "the ring lost ordinary output" }
+if ($obsPeek.data -notlike "*FULLSCREEN-FRAME*") { Pass "and still refuses to keep a full-screen repaint" }
+else { Fail "observe" "the ring is keeping alternate-screen frames, which is what it exists not to do" }
+
+$obsWatchGone = Request2 $obsPort '{"cmd":"observe","id":99999}'
+if (-not $obsWatchGone.ok) { Pass "watching a session that is not there is refused" }
+else { Fail "observe" "observing a nonexistent session reported success" }
+$obsWatch.Client.Close()
+$obsWin.Client.Close()
+
 # ════ cleanup ════
 foreach ($d in $script:daemons) {
   if (Get-Process -Id $d -ErrorAction SilentlyContinue) { Stop-DaemonTree $d }

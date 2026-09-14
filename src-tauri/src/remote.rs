@@ -475,37 +475,6 @@ fn daemon(req: &Request) -> Result<Value, String> {
     mux::client::request(stream, req)
 }
 
-/// The bytes of `now` that were not already in `before`.
-///
-/// `peek` hands back the last of a session's ring, not a stream, so two
-/// snapshots taken half a second apart overlap by everything that did not
-/// fall off the front. The tail of the older snapshot is the anchor: find
-/// where it sits in the newer one, and what follows it is new.
-///
-/// Anchored on the end rather than by walking prefixes because the front
-/// of a snapshot is the unreliable part — it is wherever the ring cap
-/// happened to cut, which can land mid-escape-sequence and be stripped
-/// differently between two reads. The *last* occurrence wins, so the
-/// worst a repeated prompt can cost is a little output skipped; matching
-/// the first would cost output shown twice, which in a terminal reads as
-/// the shell having run something twice.
-pub fn delta_after(before: &str, now: &str) -> String {
-    if before.is_empty() {
-        return now.to_string();
-    }
-    let mut cut = before.len().saturating_sub(256);
-    while cut < before.len() && !before.is_char_boundary(cut) {
-        cut += 1;
-    }
-    let anchor = &before[cut..];
-    match now.rfind(anchor) {
-        Some(i) => now[i + anchor.len()..].to_string(),
-        // No overlap at all: more output arrived between two polls than a
-        // whole ring holds, or the session was replaced. All of it is new.
-        None => now.to_string(),
-    }
-}
-
 fn sessions_json() -> Value {
     // `can_type` rides along with the list because the page has to know
     // which half of its bottom bar to draw, and asking twice for one
@@ -616,10 +585,33 @@ fn stream_session(out: &mut TcpStream, req: &Req, ctx: &Ctx) {
         return;
     }
 
-    let mut seen = String::new();
     let mut last_list = String::new();
     let mut quiet_ms = 0u64;
-    let mut primed = false;
+
+    // Watch the session rather than re-reading its scrollback.
+    //
+    // Polling `peek` and diffing what came back was the first version of
+    // this, and it cannot show a full-screen program at all: the ring
+    // deliberately keeps none of a program that took over the screen,
+    // because thousands of repaints are not scrollback anybody wants.
+    // So launching an agent TUI on the desktop showed nothing here -
+    // reported as "I tried launching Claude Code and it didn't render in
+    // the web".
+    //
+    // `observe` is the daemon verb for this: every byte the pty
+    // produces, repaints included, without attaching - attaching would
+    // take the session out of the window on the desk.
+    let mut watch = match id {
+        Some(id) => match observe(id) {
+            Ok(r) => Some(r),
+            Err(e) => {
+                let body = json!({"id": id, "error": e}).to_string();
+                let _ = send_event(out, "gone", &body);
+                None
+            }
+        },
+        None => None,
+    };
 
     loop {
         if GENERATION.load(Ordering::Relaxed) != ctx.generation {
@@ -638,24 +630,25 @@ fn stream_session(out: &mut TcpStream, req: &Req, ctx: &Ctx) {
             quiet_ms = 0;
         }
 
-        if let Some(id) = id {
-            match peek_text(id) {
-                Ok(text) => {
-                    // The first poll is the scrollback, and it is sent as
-                    // a `replace` so the page draws it from nothing
-                    // rather than appending it to whatever the previous
-                    // session left on screen.
-                    let (event, payload) = if !primed {
-                        primed = true;
-                        seen = text.clone();
-                        ("replace", text)
-                    } else {
-                        let d = delta_after(&seen, &text);
-                        seen = text;
-                        ("data", d)
-                    };
-                    if !payload.is_empty() || event == "replace" {
-                        let body = json!({"id": id, "text": payload}).to_string();
+        // Everything the session has said since the last turn round this
+        // loop. The read below carries a timeout, so this returns whether
+        // or not the shell is saying anything - the session list above
+        // still has to be refreshed on a session that is silent.
+        if let (Some(id), Some(w)) = (id, watch.as_mut()) {
+            match w.drain() {
+                Ok(chunks) => {
+                    for (first, text) in chunks {
+                        // The daemon's first line is everything it has:
+                        // the scrollback, plus whatever a full-screen
+                        // program is currently holding on the alternate
+                        // screen. Sent as `replace` so the page draws it
+                        // from nothing rather than appending it to the
+                        // previous session's output.
+                        let event = if first { "replace" } else { "data" };
+                        if text.is_empty() && !first {
+                            continue;
+                        }
+                        let body = json!({"id": id, "text": text}).to_string();
                         if send_event(out, event, &body).is_err() {
                             return;
                         }
@@ -664,20 +657,135 @@ fn stream_session(out: &mut TcpStream, req: &Req, ctx: &Ctx) {
                 }
                 Err(e) => {
                     let body = json!({"id": id, "error": e}).to_string();
-                    if send_event(out, "gone", &body).is_err() {
-                        return;
-                    }
-                    quiet_ms = 0;
+                    let _ = send_event(out, "gone", &body);
+                    watch = None;
                 }
             }
+        } else {
+            std::thread::sleep(Duration::from_millis(POLL_MS));
         }
-
-        std::thread::sleep(Duration::from_millis(POLL_MS));
         quiet_ms += POLL_MS;
         if quiet_ms >= KEEPALIVE_MS {
             quiet_ms = 0;
             if out.write_all(b": still here\n\n").is_err() {
                 return;
+            }
+        }
+    }
+}
+
+/// A connection to the daemon that is watching one session.
+///
+/// Its own connection, deliberately. `daemon()` opens one, asks one
+/// question and closes it, which is right for everything else here and
+/// useless for a subscription. The read carries a short timeout so the
+/// stream loop keeps turning: the session list has to be refreshed even
+/// while the shell says nothing at all.
+struct Watch {
+    sock: TcpStream,
+    /// Bytes that have arrived but do not yet make a whole line.
+    ///
+    /// This has to survive between calls, and that is the whole reason
+    /// the reading here is done by hand rather than with `read_line`. The
+    /// read carries a timeout, and a timeout can land in the middle of a
+    /// line - a full-screen program's repaint is tens of kilobytes on one
+    /// line, which is several reads. `read_line` reports that as an error
+    /// and the bytes it had already taken off the socket go with it, so
+    /// every large repaint would arrive as unparseable JSON and be
+    /// skipped. Which is how "it renders nothing" survives being fixed
+    /// once already.
+    buf: Vec<u8>,
+    first: bool,
+}
+
+fn observe(id: u32) -> Result<Watch, String> {
+    let stream = mux::client::connect().map_err(|_| "no session daemon is running".to_string())?;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(POLL_MS)))
+        .map_err(|e| e.to_string())?;
+    let mut w = stream.try_clone().map_err(|e| e.to_string())?;
+    let req = serde_json::to_vec(&json!({"cmd": "observe", "id": id})).map_err(|e| e.to_string())?;
+    w.write_all(&req).map_err(|e| e.to_string())?;
+    w.write_all(b"\n").map_err(|e| e.to_string())?;
+    w.flush().map_err(|e| e.to_string())?;
+    let mut watch = Watch { sock: stream, buf: Vec::new(), first: true };
+    // The daemon answers before it starts streaming, and the answer says
+    // whether there was a session to watch at all.
+    let reply = loop {
+        match watch.next_line()? {
+            Some(line) => break line,
+            None => continue,
+        }
+    };
+    let v: Value = serde_json::from_str(reply.trim()).map_err(|e| e.to_string())?;
+    if v.get("ok").and_then(Value::as_bool) != Some(true) {
+        return Err(v
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("the daemon would not let that session be watched")
+            .to_string());
+    }
+    Ok(watch)
+}
+
+impl Watch {
+    /// Whatever has arrived, as (is_this_the_first, text) pairs.
+    ///
+    /// A read timeout is silence rather than a failure - the shell is
+    /// simply not saying anything - and is the normal way out of here.
+    fn drain(&mut self) -> Result<Vec<(bool, String)>, String> {
+        let mut out = Vec::new();
+        loop {
+            let Some(line) = self.next_line()? else {
+                return Ok(out);
+            };
+            let v: Value = match serde_json::from_str(line.trim()) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            match v.get("ev").and_then(Value::as_str) {
+                Some("data") => {
+                    let text = v.get("data").and_then(Value::as_str).unwrap_or_default().to_string();
+                    let first = self.first;
+                    self.first = false;
+                    out.push((first, text));
+                }
+                // The session ended. Nothing more is coming down this
+                // connection whatever happens next.
+                Some("ended") => return Err("the session ended".to_string()),
+                _ => {}
+            }
+            // Do not sit here draining a session that produces faster
+            // than this can send: the caller has a keepalive and a
+            // session list to attend to.
+            if out.len() >= 64 {
+                return Ok(out);
+            }
+        }
+    }
+
+    /// One whole line, or `None` when the socket has gone quiet.
+    ///
+    /// A timeout is not an error here: it is what a shell that is not
+    /// saying anything looks like. Whatever arrived before it stays in
+    /// the buffer for next time.
+    fn next_line(&mut self) -> Result<Option<String>, String> {
+        loop {
+            if let Some(at) = self.buf.iter().position(|&b| b == b'\n') {
+                let line: Vec<u8> = self.buf.drain(..=at).collect();
+                return Ok(Some(String::from_utf8_lossy(&line).into_owned()));
+            }
+            let mut chunk = [0u8; 16 * 1024];
+            match self.sock.read(&mut chunk) {
+                Ok(0) => return Err("the session ended".to_string()),
+                Ok(n) => self.buf.extend_from_slice(&chunk[..n]),
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    return Ok(None)
+                }
+                Err(e) => return Err(e.to_string()),
             }
         }
     }
@@ -1063,55 +1171,7 @@ mod remote_tests {
         assert_eq!(route("GET", &path), Route::NotFound);
     }
 
-    #[test]
-    fn nothing_new_is_nothing_sent() {
-        assert_eq!(delta_after("hello world", "hello world"), "");
-        assert_eq!(delta_after("", ""), "");
-    }
-
-    #[test]
-    fn output_appended_since_the_last_look_is_what_comes_back() {
-        assert_eq!(delta_after("PS C:\\> ", "PS C:\\> dir\r\n"), "dir\r\n");
-        assert_eq!(delta_after("", "first output"), "first output");
-    }
-
-    /// The case the anchor exists for: the ring is a window, so by the
-    /// time it is full the older snapshot's front has already fallen off
-    /// the front of the newer one, and only the overlap is in both.
-    ///
-    /// Built at a realistic size on purpose. A snapshot shorter than the
-    /// anchor has no tail to anchor on and falls back to sending
-    /// everything — correct, but a different case, and a toy-sized
-    /// fixture would have been testing the fallback while claiming to
-    /// test the overlap.
-    #[test]
-    fn a_window_that_has_scrolled_still_lines_up() {
-        let body: String = (0..400).map(|n| format!("line {n} of output\r\n")).collect();
-        let before = format!("this has fallen off the front\r\n{body}");
-        let now = format!("{body}and this is new\r\n");
-        assert_eq!(delta_after(&before, &now), "and this is new\r\n");
-    }
-
-    /// Nothing recognisable in common means the session was replaced or
-    /// produced more than a ring's worth between polls. Showing all of it
-    /// is the honest answer; showing none of it would leave the phone
-    /// frozen on stale output.
-    #[test]
-    fn no_overlap_at_all_sends_everything() {
-        assert_eq!(delta_after("completely different", "nothing alike here"), "nothing alike here");
-    }
-
-    /// Multi-byte output must not be sliced mid-character: the anchor is
-    /// taken by bytes and then walked forward to a boundary, and getting
-    /// that wrong is a panic rather than a wrong answer.
-    #[test]
-    fn a_snapshot_full_of_multibyte_characters_does_not_panic() {
-        let before: String = "café — ✓ ".repeat(60);
-        let now = format!("{before}done");
-        assert_eq!(delta_after(&before, &now), "done");
-    }
-
-    /// The page is compiled in. If this is ever empty, the feature serves
+/// The page is compiled in. If this is ever empty, the feature serves
     /// a blank screen and says nothing about why.
     #[test]
     fn the_page_is_embedded_in_the_binary() {
