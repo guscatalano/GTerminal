@@ -566,7 +566,10 @@ function All-AppWindows {
       [void]$U::GetWindowText($h, $t, 256)
       $c = New-Object System.Text.StringBuilder 256
       [void]$U::GetClassName($h, $c, 256)
-      if ($t.ToString() -like "*GTerminal*") {
+      # By window class, not by title. The first version matched any
+      # title containing "GTerminal" and duly reported the console this
+      # suite is running in, whose title is the path to this script.
+      if ($c.ToString() -eq "Tauri Window" -or $t.ToString() -eq "GTerminal") {
         $r = New-Object 'GTerm.Vis+RECT'
         [void]$U::GetWindowRect($h, [ref]$r)
         $o = 0
@@ -1823,9 +1826,18 @@ if (-not $Only -or $Only -eq "cliphist") {
   }
   # And that the scene stayed in one window. Clicking the wrong menu item
   # is how this broke, and the loudest symptom of it was a second app.
-  if ($windowsAtEnd.Count -le 1) { Pass "and the scene never opened a second window" }
+  #
+  # Checked against the window under test first: a filter that matches
+  # nothing would otherwise report "one window" and read as a pass, which
+  # is the failure mode of every guard that counts things.
+  $seenOurs = @($windowsAtEnd | Where-Object { $_.Hwnd -eq $h10 }).Count
+  if (-not $seenOurs) {
+    $shapes = ($windowsAtEnd | ForEach-Object { "{0} / {1}" -f $_.Class, $_.Title }) -join " | "
+    Fail "cliphist" "the window under test is not among the app windows found, so the count below means nothing: $shapes"
+  } elseif ($windowsAtEnd.Count -le 1) { Pass "and the scene never opened a second window" }
   else {
-    Fail "cliphist" "$($windowsAtEnd.Count) GTerminal windows are up: $(($windowsAtEnd | ForEach-Object { "hwnd $($_.Hwnd) pid $($_.Pid) at $($_.L),$($_.T)" }) -join ' | ')"
+    $shapes = ($windowsAtEnd | ForEach-Object { "hwnd {0} pid {1} [{2}] {3} at {4},{5} {6}x{7}" -f $_.Hwnd, $_.Pid, $_.Class, $_.Title, $_.L, $_.T, $_.W, $_.H }) -join " | "
+    Fail "cliphist" "$($windowsAtEnd.Count) GTerminal windows are up: $shapes"
   }
   $dump = Join-Path $outDir "clip-frames"
   New-Item -ItemType Directory -Force $dump | Out-Null
