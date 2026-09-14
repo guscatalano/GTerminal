@@ -2764,3 +2764,15 @@ input.set-control {
 #app.elevated #tabbar-row {
   box-shadow: inset 0 2px 0 var(--danger);
 }
+
+/* The address and the token. Monospace because both are checked
+   character by character against a phone, and left-aligned because a
+   URL read from its right-hand end is a URL nobody can check. */
+.remote-mono {
+  font-family: Consolas, ui-monospace, monospace;
+  text-align: left;
+  word-break: break-all;
+  white-space: pre-wrap;
+  max-width: 34ch;
+}
+

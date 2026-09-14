@@ -56,6 +56,11 @@ windows-sys = { version = "0.61", features = [
   "Win32_System_SystemInformation",
   # thread priority for the keystroke path (mux::raise_thread_priority)
   "Win32_System_Threading",
+  # BCryptGenRandom, for the remote-control token. The whole security
+  # of that feature is one random string, so it comes from the OS
+  # generator rather than from anything this process could be talked
+  # into predicting.
+  "Win32_Security_Cryptography",
   "Win32_Storage_FileSystem",
   # package identity, to find where %LOCALAPPDATA% writes really land
   "Win32_Storage_Packaging_Appx",

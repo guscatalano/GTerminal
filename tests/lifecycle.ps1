@@ -1217,6 +1217,55 @@ $sd2Meta = @(Get-ChildItem "$env:LOCALAPPDATA\GTerminal\sessions" -Filter *.json
 if ($sd2Meta.Count -ge 1) { Pass "and wrote its sessions to disk before exiting" }
 else { Fail "shutdown" "no session checkpoint was written on shutdown" }
 
+# ════ typing into a session without taking it ════
+#
+# `write` goes to whatever the connection attached to, and attaching
+# takes the session off whoever had it - "one attacher at a time, and
+# the newest wins". That rule is right for two windows and exactly
+# wrong for the remote page, which has to be able to send one Ctrl-C
+# without pulling a tab out from under the person at the keyboard.
+# `send` addresses a session by id and leaves the attachment alone.
+#
+# Both halves are checked here, because only one of them failing is
+# the interesting bug: text that arrives while the desktop silently
+# loses its tab would look like a working feature right up until
+# somebody was typing in that tab.
+$sendPort = Start-Daemon
+$sendList = Request2 $sendPort '{"cmd":"list"}'
+if ($sendList.can -contains "send") { Pass "the daemon advertises send in its can list" }
+else { Fail "send" "can was $($sendList.can | ConvertTo-Json -Compress)" }
+
+$sendMade = Request2 $sendPort '{"cmd":"create","cols":100,"rows":30}'
+$sendId = $sendMade.id
+$sendWin = New-Conn $sendPort
+$sendWin.Writer.WriteLine('{"cmd":"attach","id":' + $sendId + '}')
+$null = Wait-Ready-Answering $sendWin
+
+$sendReply = Request2 $sendPort ('{"cmd":"send","id":' + $sendId + ',"data":"echo SENTFROMELSEWHERE\r"}')
+if ($sendReply.ok) { Pass "send is answered, so a caller over a network can tell it landed" }
+else { Fail "send" "expected ok, got $($sendReply | ConvertTo-Json -Compress)" }
+
+# The attached connection is the one that sees the output, exactly as
+# it would have seen it had the keystrokes come from its own window.
+$sendSaw = ""
+$sendDeadline = (Get-Date).AddSeconds(30)
+while ((Get-Date) -lt $sendDeadline) {
+  $sendSaw += Drain2 $sendWin 400
+  if ($sendSaw -like "*SENTFROMELSEWHERE*") { break }
+}
+if ($sendSaw -like "*SENTFROMELSEWHERE*") { Pass "and the text reaches the shell" }
+else { Fail "send" "the shell never showed what was sent to it" }
+
+$sendAfter = Request2 $sendPort '{"cmd":"list"}'
+$sendSess = @($sendAfter.sessions | Where-Object { $_.id -eq $sendId })[0]
+if ($sendSess -and $sendSess.attached) { Pass "and the window that had the session still has it" }
+else { Fail "send" "the session lost its attachment to a send" }
+
+$sendNowhere = Request2 $sendPort '{"cmd":"send","id":99999,"data":"x"}'
+if (-not $sendNowhere.ok) { Pass "sending to a session that is not there is refused, not swallowed" }
+else { Fail "send" "a send to a nonexistent session reported success" }
+$sendWin.Client.Close()
+
 # ════ cleanup ════
 foreach ($d in $script:daemons) {
   if (Get-Process -Id $d -ErrorAction SilentlyContinue) { Stop-DaemonTree $d }

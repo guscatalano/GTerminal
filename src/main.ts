@@ -43,6 +43,18 @@ import type { DaemonInfo } from "./daemon";
 import { activates } from "./menus";
 import { visibilityReport } from "./controls";
 import { shouldSuggestThemes } from "./firstrun";
+import {
+  PUBLISHING_WARNING,
+  addressesFor,
+  bindConsequence,
+  maskToken,
+  remoteBind,
+  remoteInput,
+  remoteOn,
+  remotePort,
+  statusLine,
+} from "./remote";
+import type { RemoteStatus } from "./remote";
 import { storageKey, keysToClear, FIRST_WINDOW } from "./windows";
 import { retagKeyed, retagOrder } from "./retag";
 import { windowName, moveTargets } from "./windownames";
@@ -256,6 +268,16 @@ interface AppConfig {
   status_interval_ms?: number;
   status_perf?: PerfStatusItem[];
   status_custom?: CmdStatusItem[];
+  /// Remote control - the phone view, served by this app over the LAN
+  /// or a tunnel. Every one of these is absent on an install that has
+  /// never turned it on, and absent has to keep meaning off: an update
+  /// must not leave a machine listening on a port it was not listening
+  /// on the day before. See src/remote.ts and src-tauri/src/remote.rs.
+  remote_enabled?: boolean;
+  remote_bind?: string;
+  remote_port?: number;
+  remote_token?: string;
+  remote_input?: boolean;
 }
 
 // Built-in decorative backgrounds — pure CSS, no assets.
@@ -7252,6 +7274,220 @@ function buildWeatherSection() {
 /// The group name goes in the description rather than into headings of its
 /// own, so the settings search finds "pane" and lands on the pane keys -
 /// the search matches each row's text, and a heading is not part of a row.
+/// Remote control: browsing and driving these sessions from a phone.
+///
+/// The whole section is written on the assumption that whoever is
+/// reading it has not thought all the way through what they are about
+/// to do. The daemon gets away with no authentication because only a
+/// local process can reach it; this reaches the network, so it says
+/// out loud what is on the other end of the port, what binding wide
+/// costs, and that the token is the only lock there is.
+///
+/// Every change here writes the config and then tells the Rust side to
+/// match it, in that order and with the config handed over rather than
+/// re-read: saveConfig debounces by 300ms, and a server started from
+/// the file in between would be running the previous answer.
+function buildRemoteSection() {
+  settingsSection("Remote control");
+
+  let status: RemoteStatus = {};
+  const redraws: Array<() => void> = [];
+  const redraw = () => {
+    for (const f of redraws) f();
+  };
+
+  const apply = async () => {
+    saveConfig();
+    try {
+      status = await invoke<RemoteStatus>("remote_sync", { config });
+    } catch (e) {
+      status = { running: false, error: String(e) };
+    }
+    redraw();
+  };
+
+  void invoke<RemoteStatus>("remote_status")
+    .then((st) => {
+      status = st;
+      redraw();
+    })
+    .catch(() => {});
+
+  const onOff = document.createElement("div");
+  onOff.className = "setting-stack";
+  const onOffSel = mkSelect(
+    [["off", "Off"], ["on", "On"]],
+    remoteOn(config) ? "on" : "off",
+    (v) => {
+      config.remote_enabled = v === "on";
+      // A token is generated on the way in rather than left to a
+      // second control. "Enabled with no token" is a state the server
+      // refuses to serve, and a switch that turns nothing on until you
+      // find another button is a switch people report as broken.
+      if (config.remote_enabled && !config.remote_token) {
+        void invoke<string>("remote_new_token")
+          .then((t) => {
+            config.remote_token = t;
+            void apply();
+          })
+          .catch(() => void apply());
+        return;
+      }
+      void apply();
+    }
+  );
+  const onOffStatus = document.createElement("div");
+  onOffStatus.className = "setting-status";
+  onOff.append(onOffSel, onOffStatus);
+  redraws.push(() => {
+    onOffSel.value = remoteOn(config) ? "on" : "off";
+    onOffStatus.textContent = statusLine(config, status);
+  });
+  settingRow(
+    "Remote control",
+    PUBLISHING_WARNING +
+      " It is off until you turn it on here, and turning it off again closes the port and every page open on it.",
+    onOff
+  );
+
+  const bindWrap = document.createElement("div");
+  bindWrap.className = "setting-stack";
+  const bindSel = mkSelect(
+    [
+      ["local", "This machine only (127.0.0.1)"],
+      ["lan", "Every address on this machine (0.0.0.0)"],
+    ],
+    remoteBind(config),
+    (v) => {
+      config.remote_bind = v;
+      void apply();
+    }
+  );
+  const bindSays = document.createElement("div");
+  bindSays.className = "setting-status";
+  bindWrap.append(bindSel, bindSays);
+  redraws.push(() => {
+    bindSel.value = remoteBind(config);
+    bindSays.textContent = bindConsequence(remoteBind(config));
+  });
+  settingRow(
+    "Reachable from",
+    "Loopback is the default and is the safe one: a tunnel such as WireGuard already puts your phone on this machine, so nothing has to be opened to the network to reach it, and the tunnel is already encrypted. The second option is a separate, deliberate decision - the page is served over plain HTTP, so on a bare network anything on it can read the traffic, token included.",
+    bindWrap
+  );
+
+  settingRow(
+    "Port",
+    "The port the page is served on. Change it if something else on this machine already has this one - the address below always shows the port actually in use.",
+    mkNumber(remotePort(config), 1024, 65535, (v) => {
+      config.remote_port = v;
+      void apply();
+    })
+  );
+
+  const linkWrap = document.createElement("div");
+  linkWrap.className = "setting-stack";
+  const links = document.createElement("div");
+  links.className = "setting-status remote-mono";
+  const copyLink = document.createElement("button");
+  copyLink.className = "set-control";
+  copyLink.textContent = "Copy address";
+  copyLink.addEventListener("click", () => {
+    const all = addressesFor(status, config.remote_token ?? "");
+    if (!all.length) return;
+    void clipWrite(all[0]).then(() => {
+      copyLink.textContent = "Copied";
+      window.setTimeout(() => (copyLink.textContent = "Copy address"), 1400);
+    });
+  });
+  linkWrap.append(copyLink, links);
+  redraws.push(() => {
+    const all = status.running ? addressesFor(status, config.remote_token ?? "") : [];
+    // The token is in the link, and a link is the thing that gets
+    // photographed off a screen. Shown anyway, because a link nobody
+    // can read is a link nobody can type into a phone - the warning
+    // on the switch above is what makes that an informed trade.
+    links.textContent = all.length ? all.join("\n") : "Nothing is being served.";
+    copyLink.disabled = !all.length;
+  });
+  settingRow(
+    "Address to open",
+    "Open this on the phone. The token travels in the link, and the page takes it out of the address bar as soon as it has read it.",
+    linkWrap
+  );
+
+  const tokWrap = document.createElement("div");
+  tokWrap.className = "setting-stack";
+  const tokLine = document.createElement("div");
+  tokLine.className = "setting-inline";
+  const tokText = document.createElement("div");
+  tokText.className = "setting-status remote-mono";
+  const copyTok = document.createElement("button");
+  copyTok.className = "set-control";
+  copyTok.textContent = "Copy";
+  copyTok.addEventListener("click", () => {
+    if (!config.remote_token) return;
+    void clipWrite(config.remote_token).then(() => {
+      copyTok.textContent = "Copied";
+      window.setTimeout(() => (copyTok.textContent = "Copy"), 1400);
+    });
+  });
+  const regen = document.createElement("button");
+  regen.className = "set-control";
+  regen.textContent = "Regenerate";
+  regen.title = "Every page currently open loses its access immediately";
+  regen.addEventListener("click", () => {
+    void invoke<string>("remote_new_token").then((t) => {
+      config.remote_token = t;
+      // The server restarts around the new token, which drops every
+      // connection it was holding. That is the point: regenerating has
+      // to end the access of whoever had the old one, including a page
+      // that is sitting there with a stream already open.
+      void apply();
+    });
+  });
+  tokLine.append(copyTok, regen);
+  tokWrap.append(tokLine, tokText);
+  redraws.push(() => {
+    tokText.textContent = config.remote_token
+      ? maskToken(config.remote_token)
+      : "None yet - turning this on generates one.";
+    copyTok.disabled = !config.remote_token;
+  });
+  settingRow(
+    "Access token",
+    "The only thing between the network and your shells. Every request needs it, including the page itself. Regenerating locks out anything already connected.",
+    tokWrap
+  );
+
+  const typeWrap = document.createElement("div");
+  typeWrap.className = "setting-stack";
+  const typeSel = mkSelect(
+    [["off", "Read-only"], ["on", "Allow typing"]],
+    remoteInput(config) ? "on" : "off",
+    (v) => {
+      config.remote_input = v === "on";
+      void apply();
+    }
+  );
+  const typeSays = document.createElement("div");
+  typeSays.className = "setting-status";
+  typeWrap.append(typeSel, typeSays);
+  redraws.push(() => {
+    typeSel.value = remoteInput(config) ? "on" : "off";
+    typeSays.textContent = remoteInput(config)
+      ? "The page can run commands in these sessions."
+      : "The page can read output and nothing else.";
+  });
+  settingRow(
+    "Typing from the page",
+    "Separate from watching, and separately off. A browser tab that can see your shell and one that can drive it are different things to have published, and the second should never arrive as a side effect of wanting the first.",
+    typeWrap
+  );
+
+  redraw();
+}
+
 function buildShortcutsSection() {
   settingsSection("Keyboard shortcuts");
   for (const group of SHORTCUTS) {
@@ -8434,6 +8670,7 @@ function buildSettingsPage() {
     })()
   );
 
+  buildRemoteSection();
   buildWeatherSection();
   buildShortcutsSection();
   buildUpdatesSection();

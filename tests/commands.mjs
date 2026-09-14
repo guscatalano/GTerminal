@@ -56,7 +56,15 @@ const OFF_UI_THREAD = new Set([
   "take_handoff",
   "open_folder",
   "create_shortcut",
+  // Remote control: binds a listening socket, resolves this machine's
+  // own name to find its LAN addresses, and asks the OS for random
+  // bytes. Any of the three can sit for a moment, and all three would
+  // sit on the UI thread.
+  "remote_sync",
+  "remote_status",
+  "remote_new_token",
 ]);
+
 
 // Allowed on the UI thread, each for one of two reasons: it is a memory
 // or config access that finishes in microseconds, or it is ordered

@@ -42,6 +42,30 @@ When the daemon has *no* live shells, restarting costs nothing, and the
 notice should say that instead — it is the difference between "you will
 lose four shells" and "this is free".
 
+## Verbs added since, and how they avoid the same trap
+
+Two requests have been added without bumping `protocol`, because a bump
+marks every daemon now running as stale and shows its user a restart
+notice — for a feature that only helps the update *after* this one. They
+are advertised in the `list` reply's `can` array instead, which is
+additive: a daemon too old to know them omits it, and an absent list
+means "assume nothing".
+
+- **`shutdown`** — stand down, immediately or once the last live shell
+  has gone. See the comment on the request itself.
+- **`send`** — type into a session addressed by id, without attaching.
+  `write` goes to whatever the connection attached to, and attaching
+  takes the session away from the window that had it open; that rule is
+  right for two windows and exactly wrong for the remote-control page,
+  which must be able to send one Ctrl-C without pulling a tab out from
+  under the person at the keyboard. Unlike `write`, it answers: the
+  caller is over a network and has to be able to tell "typed into a
+  shell" from "went nowhere".
+
+A daemon too old for either answers `{"ok":false,"error":"bad request"}`
+and keeps the connection, which is the behaviour this whole document is
+about. The caller reports that rather than swallowing it.
+
 ## Deliberately not doing
 
 **Handing PTYs to the new daemon.** A real handoff — passing pty handles
@@ -66,6 +90,17 @@ Daemon (`tests/lifecycle.ps1`):
    nonsense, then `list` on the same connection and get a reply.
 4. A restart via the reported pid brings the sessions back as ended ones,
    with their scrollback intact.
+
+Daemon, `send` (`tests/lifecycle.ps1`):
+
+11. `list` advertises `send` in its `can` array.
+12. A `send` to a live session is answered, and the text reaches the
+    shell — seen on the connection that is attached to it.
+13. The attachment does not move: the window that had the session still
+    has it afterwards. Only one of these two failing is the interesting
+    bug, which is why both are checked.
+14. A `send` to a session that does not exist is refused rather than
+    silently discarded.
 
 Frontend (`tests/daemon.mjs`), against `src/daemon.ts`:
 

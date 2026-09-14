@@ -1,0 +1,965 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="referrer" content="no-referrer" />
+    <title>GTerminal Pocket</title>
+    <style>
+      /* Deliberately one visual world: this is a terminal, and a terminal
+         is dark. Every colour is painted explicitly so the page holds on
+         whatever ground the phone's browser puts behind it.
+
+         No web fonts. The design was drawn in IBM Plex, but this page is
+         served from a machine on a tunnel and is very often opened by a
+         phone whose only route out is that tunnel — a page that waits on
+         fonts.googleapis.com would render late or not at all, on exactly
+         the connection this feature exists for. The stacks below pick the
+         nearest thing each platform already has. */
+      :root {
+        --ground: #0a0e13;
+        --surface: #111820;
+        --surface-2: #16202a;
+        --line: #223040;
+        --line-soft: #1a2530;
+        --ink: #d9e3ec;
+        --ink-dim: #93a3b3;
+        --ink-faint: #67788a;
+        --accent: #f0a44a;
+        --live: #4fd6a8;
+        --bad: #ff6b6b;
+        --cool: #6fb3d9;
+        --violet: #b48ce0;
+        --radius: 10px;
+        --sans: "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+        color-scheme: dark;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        height: 100%;
+      }
+
+      body {
+        margin: 0;
+        background: var(--ground);
+        color: var(--ink);
+        font-family: var(--sans);
+        -webkit-font-smoothing: antialiased;
+        overscroll-behavior: none;
+      }
+
+      /* On a phone the viewer is the page. On anything wider it sits in a
+         column of phone width, because that is the shape it was drawn for
+         and a terminal stretched to a 27" monitor is the desktop app. */
+      .device {
+        width: 100%;
+        max-width: 460px;
+        margin: 0 auto;
+        height: 100svh;
+        display: flex;
+        flex-direction: column;
+        background: var(--ground);
+        overflow: hidden;
+      }
+
+      /* ── status strip ──────────────────────────────────────────────── */
+      .top {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: calc(12px + env(safe-area-inset-top)) 14px 12px;
+        border-bottom: 1px solid var(--line-soft);
+        background: linear-gradient(var(--surface), var(--ground));
+      }
+
+      .host {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      .host b {
+        font: 600 14px/1.1 var(--sans);
+        letter-spacing: -0.01em;
+      }
+
+      .host span {
+        font: 400 11px/1.1 var(--mono);
+        color: var(--ink-faint);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .pill {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 9px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--surface-2);
+        font: 600 10px/1 var(--sans);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink-dim);
+      }
+
+      .pill.locked {
+        margin-left: auto;
+        color: var(--accent);
+        border-color: rgba(240, 164, 74, 0.4);
+      }
+
+      .pill.typing {
+        margin-left: auto;
+        color: var(--live);
+        border-color: rgba(79, 214, 168, 0.4);
+      }
+
+      .link-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--live);
+        box-shadow: 0 0 0 3px rgba(79, 214, 168, 0.18);
+      }
+
+      .link-dot.down {
+        background: var(--bad);
+        box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.18);
+      }
+
+      /* ── session strip ─────────────────────────────────────────────── */
+      .sessions {
+        flex: none;
+        display: flex;
+        gap: 8px;
+        padding: 12px 14px;
+        overflow-x: auto;
+        scrollbar-width: none;
+        border-bottom: 1px solid var(--line-soft);
+      }
+
+      .sessions::-webkit-scrollbar {
+        display: none;
+      }
+
+      .chip {
+        flex: none;
+        display: grid;
+        grid-template-columns: auto 1fr;
+        grid-template-rows: auto auto;
+        column-gap: 8px;
+        row-gap: 3px;
+        align-items: center;
+        min-width: 168px;
+        max-width: 220px;
+        padding: 9px 11px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+        color: inherit;
+        text-align: left;
+        font: inherit;
+        cursor: pointer;
+        transition: border-color 0.15s ease, background 0.15s ease;
+      }
+
+      .chip[aria-selected="true"] {
+        border-color: rgba(240, 164, 74, 0.55);
+        background: rgba(240, 164, 74, 0.07);
+      }
+
+      .chip:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      .dot {
+        grid-row: 1 / span 2;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--ink-faint);
+      }
+
+      .dot.open {
+        background: var(--live);
+      }
+
+      .dot.detached {
+        background: transparent;
+        box-shadow: inset 0 0 0 1.5px var(--cool);
+      }
+
+      .dot.ended {
+        background: var(--ink-faint);
+        box-shadow: inset 0 0 0 2px var(--ground);
+      }
+
+      .dot.closing {
+        background: var(--accent);
+      }
+
+      .chip .name {
+        font: 500 12.5px/1.2 var(--sans);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .chip .meta {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font: 400 10.5px/1.2 var(--mono);
+        color: var(--ink-faint);
+        white-space: nowrap;
+        overflow: hidden;
+      }
+
+      .badge {
+        flex: none;
+        padding: 1px 4px;
+        border-radius: 3px;
+        font: 600 9px/1.35 var(--mono);
+        letter-spacing: 0.04em;
+      }
+
+      .badge.ps {
+        background: #1e3a5f;
+        color: #8fc4f5;
+      }
+
+      .badge.cmd {
+        background: #2a2f36;
+        color: #b9c4cf;
+      }
+
+      /* ── terminal ──────────────────────────────────────────────────── */
+      .screen {
+        flex: 1;
+        min-height: 0;
+        position: relative;
+        background: var(--ground);
+        border-top: 1px solid rgba(240, 164, 74, 0.22);
+      }
+
+      .scroll {
+        position: absolute;
+        inset: 0;
+        overflow: auto;
+        padding: 12px 14px 18px;
+        font: 400 12px/1.55 var(--mono);
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .scroll pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .empty {
+        color: var(--ink-faint);
+        font-family: var(--sans);
+        font-size: 12.5px;
+        line-height: 1.6;
+        padding: 6px 0;
+      }
+
+      /* ── bottom bar ────────────────────────────────────────────────── */
+      .bottom {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 11px 14px calc(11px + env(safe-area-inset-bottom));
+        border-top: 1px solid var(--line-soft);
+        background: var(--surface);
+      }
+
+      .lock {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-width: 0;
+        padding: 9px 11px;
+        border: 1px dashed rgba(240, 164, 74, 0.34);
+        border-radius: var(--radius);
+        background: rgba(240, 164, 74, 0.05);
+        font: 400 11.5px/1.3 var(--sans);
+        color: var(--ink-dim);
+      }
+
+      .lock b {
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      .composer {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .composer .line {
+        display: flex;
+        gap: 8px;
+      }
+
+      .composer input {
+        flex: 1;
+        min-width: 0;
+        padding: 10px 11px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface-2);
+        color: var(--ink);
+        font: 400 13px/1.2 var(--mono);
+      }
+
+      .composer input:focus {
+        outline: none;
+        border-color: rgba(240, 164, 74, 0.55);
+      }
+
+      .keys {
+        display: flex;
+        gap: 6px;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+
+      .keys::-webkit-scrollbar {
+        display: none;
+      }
+
+      .key {
+        flex: none;
+        padding: 6px 10px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--surface-2);
+        color: var(--ink-dim);
+        font: 500 11px/1 var(--mono);
+        cursor: pointer;
+      }
+
+      .key.danger {
+        color: var(--bad);
+        border-color: rgba(255, 107, 107, 0.35);
+      }
+
+      .ghost {
+        flex: none;
+        width: 38px;
+        height: 38px;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface-2);
+        color: var(--ink-dim);
+        font: 600 15px/1 var(--sans);
+        cursor: pointer;
+      }
+
+      .ghost:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      .toast {
+        position: fixed;
+        left: 50%;
+        bottom: calc(84px + env(safe-area-inset-bottom));
+        transform: translateX(-50%);
+        max-width: 88vw;
+        padding: 8px 13px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--surface-2);
+        color: var(--ink-dim);
+        font: 400 12px/1.3 var(--sans);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.18s ease;
+      }
+
+      .toast.show {
+        opacity: 1;
+      }
+
+      .gate {
+        margin: 0 auto;
+        max-width: 420px;
+        padding: 40px 24px;
+        font: 400 13.5px/1.7 var(--sans);
+        color: var(--ink-dim);
+      }
+
+      .gate h1 {
+        font: 600 18px/1.3 var(--sans);
+        color: var(--ink);
+        margin: 0 0 10px;
+      }
+
+      .gate code {
+        font-family: var(--mono);
+        color: var(--cool);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="device" id="device" hidden>
+      <div class="top">
+        <div class="host">
+          <b id="hostname">GTerminal</b>
+          <span id="link">connecting…</span>
+        </div>
+        <span class="pill locked" id="mode-pill">Read-only</span>
+        <span class="pill"><span class="link-dot" id="live-dot"></span><span id="live-text">Live</span></span>
+      </div>
+
+      <div class="sessions" id="strip" role="tablist" aria-label="Sessions"></div>
+
+      <div class="screen">
+        <div class="scroll" id="screen" tabindex="0" role="region" aria-label="Session output">
+          <pre id="out"></pre>
+          <div class="empty" id="empty" hidden></div>
+        </div>
+      </div>
+
+      <div class="bottom">
+        <div class="lock" id="lock">
+          <span><b>Read-only.</b> Enable typing in the desktop app to drive this shell from here.</span>
+        </div>
+        <div class="composer" id="composer" hidden>
+          <div class="line">
+            <input
+              id="entry"
+              type="text"
+              autocomplete="off"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck="false"
+              placeholder="type, then Enter"
+            />
+            <button class="ghost" id="send" title="Send with Enter" aria-label="Send">↵</button>
+          </div>
+          <div class="keys">
+            <button class="key danger" data-key="ctrl-c">Ctrl-C</button>
+            <button class="key" data-key="esc">Esc</button>
+            <button class="key" data-key="tab">Tab</button>
+            <button class="key" data-key="up">↑</button>
+            <button class="key" data-key="down">↓</button>
+            <button class="key" data-key="enter">Enter</button>
+          </div>
+        </div>
+        <button class="ghost" id="jump" title="Jump to the newest output" aria-label="Jump to newest">↓</button>
+      </div>
+    </div>
+
+    <div class="gate" id="gate" hidden>
+      <h1>This link needs its token</h1>
+      <p>
+        Open the address GTerminal's Settings shows under <b>Remote control</b> — it carries
+        the access token in the link. Without it nothing here can reach your sessions.
+      </p>
+      <p><code id="gate-detail"></code></p>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+      "use strict";
+
+      // ── the token ──────────────────────────────────────────────────
+      // It arrives in the URL, because the first thing that happens is
+      // somebody opening a link on a phone and there is nowhere else to
+      // put it. It is taken out of the address bar immediately: the bar
+      // is visible over shoulders, it is what gets screenshotted, and it
+      // is what a share sheet copies. sessionStorage keeps it across a
+      // refresh; closing the tab forgets it, which is the right length of
+      // memory for a key to a shell.
+      const KEY = "gterminal-remote-token";
+      let token = "";
+      try {
+        const q = new URLSearchParams(location.search);
+        if (q.get("t")) {
+          token = q.get("t");
+          sessionStorage.setItem(KEY, token);
+          history.replaceState(null, "", location.pathname);
+        } else {
+          token = sessionStorage.getItem(KEY) || "";
+        }
+      } catch (e) {
+        // A browser with storage blocked still works for this session;
+        // it just cannot survive a refresh.
+        const q = new URLSearchParams(location.search);
+        token = q.get("t") || "";
+      }
+
+      const $ = (id) => document.getElementById(id);
+      const device = $("device");
+      const gate = $("gate");
+
+      if (!token) {
+        gate.hidden = false;
+        $("gate-detail").textContent = location.origin + "/?t=…";
+        throw new Error("no token");
+      }
+      device.hidden = false;
+
+      // ── talking to the app ─────────────────────────────────────────
+      // Everything but the stream sends the token as a header. EventSource
+      // cannot set headers, so the stream is the one request that keeps
+      // it in the query string.
+      async function api(path, opts) {
+        const o = Object.assign({ headers: {} }, opts || {});
+        o.headers = Object.assign({ "X-GTerminal-Token": token }, o.headers);
+        const r = await fetch(path, o);
+        if (!r.ok) throw new Error((await r.text()) || r.statusText);
+        return r.json();
+      }
+
+      let toastTimer = 0;
+      function toast(msg) {
+        const el = $("toast");
+        el.textContent = msg;
+        el.classList.add("show");
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => el.classList.remove("show"), 2600);
+      }
+
+      // ── drawing terminal output ────────────────────────────────────
+      // A deliberately small subset: colours, bold, line breaks, carriage
+      // returns and backspace. Everything else in the stream is stepped
+      // over rather than honoured.
+      //
+      // This is not a terminal emulator and must not grow into one — the
+      // real one is xterm.js in the desktop window. What a phone is for is
+      // reading what happened and typing a line, and a full-screen program
+      // (vim, htop) is exactly what the ring already declines to keep. A
+      // half-built emulator would paint those wrong and look broken; a
+      // deliberately small one paints what it has and looks like what it
+      // is.
+      const PALETTE = {
+        30: "#5b6673", 31: "#ff6b6b", 32: "#4fd6a8", 33: "#f0a44a",
+        34: "#6fb3d9", 35: "#b48ce0", 36: "#63c9c9", 37: "#d9e3ec",
+        90: "#67788a", 91: "#ff8f8f", 92: "#7ee6c4", 93: "#ffc47a",
+        94: "#93c9e8", 95: "#c9a8ec", 96: "#8adada", 97: "#ffffff",
+      };
+      // Anything past this falls off the top. A phone re-parsing a
+      // megabyte of markup twice a second is a phone that gets hot.
+      const MAX_LINES = 800;
+
+      const term = {
+        lines: [[]],
+        fg: null,
+        bold: false,
+        carry: "",
+      };
+
+      function reset() {
+        term.lines = [[]];
+        term.fg = null;
+        term.bold = false;
+        term.carry = "";
+      }
+
+      function push(text) {
+        if (!text) return;
+        const line = term.lines[term.lines.length - 1];
+        const last = line[line.length - 1];
+        if (last && last.c === term.fg && last.b === term.bold) last.t += text;
+        else line.push({ t: text, c: term.fg, b: term.bold });
+      }
+
+      function sgr(params) {
+        for (const raw of params.split(";")) {
+          const n = raw === "" ? 0 : Number(raw);
+          if (n === 0) {
+            term.fg = null;
+            term.bold = false;
+          } else if (n === 1) term.bold = true;
+          else if (n === 22) term.bold = false;
+          else if (n === 39) term.fg = null;
+          else if (PALETTE[n]) term.fg = PALETTE[n];
+        }
+      }
+
+      function write(chunk) {
+        let s = term.carry + chunk;
+        term.carry = "";
+        let plain = "";
+        let i = 0;
+        const flush = () => {
+          push(plain);
+          plain = "";
+        };
+        while (i < s.length) {
+          const ch = s[i];
+          if (ch === "\x1b") {
+            flush();
+            if (i + 1 >= s.length) {
+              term.carry = s.slice(i);
+              break;
+            }
+            const kind = s[i + 1];
+            if (kind === "[") {
+              let j = i + 2;
+              while (j < s.length && !(s[j] >= "@" && s[j] <= "~")) j++;
+              if (j >= s.length) {
+                term.carry = s.slice(i);
+                break;
+              }
+              const final = s[j];
+              const params = s.slice(i + 2, j).replace(/^[?>!]/, "");
+              if (final === "m") sgr(params);
+              else if (final === "J" && (params === "2" || params === "3")) reset();
+              else if (final === "K" && (params === "" || params === "0")) {
+                // Erase to end of line. The cursor is always at the end
+                // of what we have drawn, so there is nothing after it.
+              }
+              i = j + 1;
+              continue;
+            }
+            if (kind === "]") {
+              // OSC — window titles, the prompt hooks, the OSC 133 marks.
+              // Ended by BEL or by ESC \.
+              let j = i + 2;
+              while (j < s.length && s[j] !== "\x07" && !(s[j] === "\x1b" && s[j + 1] === "\\")) j++;
+              if (j >= s.length) {
+                term.carry = s.slice(i);
+                break;
+              }
+              i = s[j] === "\x07" ? j + 1 : j + 2;
+              continue;
+            }
+            if (kind === "(" || kind === ")" || kind === "#") {
+              if (i + 2 >= s.length) {
+                term.carry = s.slice(i);
+                break;
+              }
+              i += 3;
+              continue;
+            }
+            i += 2;
+            continue;
+          }
+          if (ch === "\n") {
+            flush();
+            term.lines.push([]);
+            i++;
+            continue;
+          }
+          if (ch === "\r") {
+            // A carriage return with no newline is a program redrawing
+            // the line it is on — a progress bar, or PSReadLine repainting
+            // what you typed. Replacing the line is the right answer for
+            // both; keeping it would show every frame of the animation.
+            flush();
+            term.lines[term.lines.length - 1] = [];
+            i++;
+            continue;
+          }
+          if (ch === "\b") {
+            flush();
+            const line = term.lines[term.lines.length - 1];
+            const last = line[line.length - 1];
+            if (last) {
+              last.t = last.t.slice(0, -1);
+              if (!last.t) line.pop();
+            }
+            i++;
+            continue;
+          }
+          if (ch === "\t") {
+            plain += "        ";
+            i++;
+            continue;
+          }
+          if (ch < " " && ch !== " ") {
+            i++;
+            continue;
+          }
+          plain += ch;
+          i++;
+        }
+        flush();
+        if (term.lines.length > MAX_LINES) term.lines.splice(0, term.lines.length - MAX_LINES);
+      }
+
+      function esc(s) {
+        return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      }
+
+      function paint() {
+        const html = term.lines
+          .map((line) =>
+            line
+              .map((sp) => {
+                const style =
+                  (sp.c ? "color:" + sp.c + ";" : "") + (sp.b ? "font-weight:600;" : "");
+                return style ? '<span style="' + style + '">' + esc(sp.t) + "</span>" : esc(sp.t);
+              })
+              .join("")
+          )
+          .join("\n");
+        $("out").innerHTML = html;
+      }
+
+      // ── the session strip ──────────────────────────────────────────
+      let sessions = [];
+      let activeId = null;
+
+      // The daemon's own vocabulary, so that what the phone says about a
+      // session is what the desktop sidebar says about it.
+      function stateOf(s) {
+        if (s.expires_ms) return "closing";
+        if (!s.alive) return "ended";
+        return s.attached ? "open" : "detached";
+      }
+
+      function leaf(p) {
+        if (!p) return "";
+        const parts = String(p).replace(/[\\/]+$/, "").split(/[\\/]/);
+        return parts[parts.length - 1] || p;
+      }
+
+      function nameOf(s) {
+        if (s.running && s.running.length) return s.running[0].replace(/\.exe$/i, "");
+        return leaf(s.cwd) || "session " + s.id;
+      }
+
+      function ageOf(ms) {
+        // The daemon reports when a session started, not when it last
+        // said anything, so this is its age and is labelled as nothing
+        // more precise than that.
+        const d = Math.max(0, Date.now() - ms) / 1000;
+        if (d < 60) return Math.round(d) + "s";
+        if (d < 3600) return Math.round(d / 60) + "m";
+        if (d < 86400) return Math.round(d / 3600) + "h";
+        return Math.round(d / 86400) + "d";
+      }
+
+      function drawStrip() {
+        const strip = $("strip");
+        strip.innerHTML = "";
+        for (const s of sessions) {
+          const b = document.createElement("button");
+          b.className = "chip";
+          b.setAttribute("role", "tab");
+          b.setAttribute("aria-selected", String(s.id === activeId));
+          const shell = (s.shell || "auto").toLowerCase();
+          const isCmd = shell === "cmd";
+          b.innerHTML =
+            '<span class="dot ' + stateOf(s) + '"></span>' +
+            '<span class="name"></span>' +
+            '<span class="meta"><span class="badge ' + (isCmd ? "cmd" : "ps") + '">' +
+            (isCmd ? "&gt;_" : "PS") +
+            "</span><span></span></span>";
+          b.querySelector(".name").textContent = nameOf(s);
+          b.querySelector(".meta span:last-child").textContent =
+            (leaf(s.cwd) || "?") + " · " + ageOf(s.created_ms);
+          b.addEventListener("click", () => select(s.id));
+          strip.appendChild(b);
+        }
+        $("link").textContent =
+          location.host + " · " + sessions.length + (sessions.length === 1 ? " session" : " sessions");
+      }
+
+      function atBottom() {
+        const el = $("screen");
+        return el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      }
+
+      function toBottom() {
+        const el = $("screen");
+        el.scrollTop = el.scrollHeight;
+      }
+
+      // ── the stream ─────────────────────────────────────────────────
+      // One EventSource, reopened when the selected session changes. The
+      // browser reconnects it on its own after a phone has been asleep,
+      // which is the whole reason this is SSE and not a polling loop
+      // written here.
+      let source = null;
+
+      function select(id) {
+        if (id === activeId && source) return;
+        activeId = id;
+        reset();
+        paint();
+        drawStrip();
+        open();
+      }
+
+      function open() {
+        if (source) source.close();
+        const q = new URLSearchParams({ t: token });
+        if (activeId !== null) q.set("id", String(activeId));
+        source = new EventSource("/api/stream?" + q.toString());
+
+        source.addEventListener("open", () => setLive(true));
+        source.addEventListener("error", () => setLive(false));
+
+        source.addEventListener("sessions", (e) => {
+          setLive(true);
+          const payload = JSON.parse(e.data);
+          sessions = payload.sessions || [];
+          if (activeId !== null && !sessions.some((s) => s.id === activeId)) activeId = null;
+          if (activeId === null && sessions.length) {
+            activeId = sessions[sessions.length - 1].id;
+            drawStrip();
+            open();
+            return;
+          }
+          drawStrip();
+          showEmptyIfNeeded(payload.error);
+        });
+
+        source.addEventListener("replace", (e) => {
+          const payload = JSON.parse(e.data);
+          if (payload.id !== activeId) return;
+          reset();
+          write(payload.text || "");
+          paint();
+          toBottom();
+          showEmptyIfNeeded();
+        });
+
+        source.addEventListener("data", (e) => {
+          const payload = JSON.parse(e.data);
+          if (payload.id !== activeId || !payload.text) return;
+          const stick = atBottom();
+          write(payload.text);
+          paint();
+          if (stick) toBottom();
+          showEmptyIfNeeded();
+        });
+
+        source.addEventListener("gone", (e) => {
+          const payload = JSON.parse(e.data);
+          $("empty").hidden = false;
+          $("empty").textContent = payload.error || "That session is no longer there.";
+        });
+
+        source.addEventListener("bye", () => {
+          // The desktop turned the feature off, or regenerated the token.
+          // Reconnecting would only be refused, and loudly.
+          if (source) source.close();
+          source = null;
+          setLive(false);
+          $("empty").hidden = false;
+          $("empty").textContent =
+            "Remote control was turned off — or its token was regenerated — in the desktop app.";
+        });
+      }
+
+      function showEmptyIfNeeded(err) {
+        const el = $("empty");
+        if (err) {
+          el.hidden = false;
+          el.textContent = err;
+          return;
+        }
+        if (!sessions.length) {
+          el.hidden = false;
+          el.textContent = "No sessions are open. Start one in the desktop app.";
+          return;
+        }
+        el.hidden = term.lines.some((l) => l.length);
+      }
+
+      function setLive(up) {
+        $("live-dot").classList.toggle("down", !up);
+        $("live-text").textContent = up ? "Live" : "Offline";
+      }
+
+      // ── typing ─────────────────────────────────────────────────────
+      let canType = false;
+
+      async function refreshMode() {
+        try {
+          const r = await api("/api/sessions");
+          canType = !!r.can_type;
+        } catch (e) {
+          canType = false;
+        }
+        $("lock").hidden = canType;
+        $("composer").hidden = !canType;
+        const pill = $("mode-pill");
+        pill.className = "pill " + (canType ? "typing" : "locked");
+        pill.textContent = canType ? "Input on" : "Read-only";
+      }
+
+      async function send(data) {
+        if (activeId === null) return;
+        try {
+          await api("/api/input", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: activeId, data }),
+          });
+        } catch (e) {
+          toast(String(e.message || e).slice(0, 140));
+          void refreshMode();
+        }
+      }
+
+      $("entry").addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        const v = $("entry").value;
+        $("entry").value = "";
+        void send(v + "\r");
+      });
+      $("send").addEventListener("click", () => {
+        const v = $("entry").value;
+        $("entry").value = "";
+        void send(v + "\r");
+        $("entry").focus();
+      });
+      // The bytes each key sends, kept here rather than in the markup:
+      // a literal 0x03 in an HTML attribute survives nothing — not an
+      // editor, not a diff, not a copy and paste — and this file is
+      // compiled into the binary exactly as it is written.
+      const KEYS = {
+        "ctrl-c": "\x03",
+        esc: "\x1b",
+        tab: "\t",
+        up: "\x1b[A",
+        down: "\x1b[B",
+        enter: "\r",
+      };
+      for (const k of document.querySelectorAll(".key")) {
+        k.addEventListener("click", () => void send(KEYS[k.dataset.key] || ""));
+      }
+
+      $("jump").addEventListener("click", toBottom);
+
+      // ── go ─────────────────────────────────────────────────────────
+      $("hostname").textContent = location.hostname;
+      void refreshMode();
+      setInterval(refreshMode, 15000);
+      open();
+    </script>
+  </body>
+</html>
