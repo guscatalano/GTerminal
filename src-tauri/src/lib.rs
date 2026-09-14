@@ -1330,6 +1330,28 @@ fn summon_label() -> Option<String> {
 /// lives there permanently rather than in a notice shown once, at the one
 /// moment nobody is looking at the tray.
 fn tray_strings(key: Option<&str>, version: &str) -> (String, String) {
+    tray_strings_with(key, version, None)
+}
+
+/// The same, plus whatever remote control is doing.
+///
+/// Split so the remote line can be tested without a config file, and so
+/// there is one place that decides how the two sentences sit together.
+/// The remote line goes second: "how do I get the window back" is the
+/// question the tooltip exists for, and it stays the first answer.
+fn tray_strings_with(
+    key: Option<&str>,
+    version: &str,
+    remote: Option<&str>,
+) -> (String, String) {
+    let (tip, show) = tray_strings_base(key, version);
+    match remote {
+        Some(r) => (format!("{tip}\n{r}"), show),
+        None => (tip, show),
+    }
+}
+
+fn tray_strings_base(key: Option<&str>, version: &str) -> (String, String) {
     // The version belongs here because the tray is the one part of this
     // app that is always on screen, and because "which version am I
     // running" turned out to be worth answering at a glance: a machine
@@ -1348,7 +1370,11 @@ fn tray_strings(key: Option<&str>, version: &str) -> (String, String) {
 }
 
 fn tray_text() -> (String, String) {
-    tray_strings(summon_label().as_deref(), env!("GTERMINAL_VERSION"))
+    tray_strings_with(
+        summon_label().as_deref(),
+        env!("GTERMINAL_VERSION"),
+        remote::tray_line().as_deref(),
+    )
 }
 
 fn apply_tray_text(app: &AppHandle) -> Result<(), String> {
@@ -1362,7 +1388,18 @@ fn apply_tray_text(app: &AppHandle) -> Result<(), String> {
     let quit = MenuItem::with_id(app, "quit", "Quit GTerminal", true, None::<&str>)
         .map_err(|e| e.to_string())?;
     let sep = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
-    let menu = Menu::with_items(app, &[&show, &sep, &quit]).map_err(|e| e.to_string())?;
+    // Remote control, when it is on. Enabled rather than greyed out, and
+    // it opens the window: somebody reading this line wants the switch,
+    // and the switch is in there.
+    let menu = match remote::tray_line() {
+        Some(line) => {
+            let r = MenuItem::with_id(app, "show", line, true, None::<&str>)
+                .map_err(|e| e.to_string())?;
+            let sep2 = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
+            Menu::with_items(app, &[&show, &sep, &r, &sep2, &quit]).map_err(|e| e.to_string())?
+        }
+        None => Menu::with_items(app, &[&show, &sep, &quit]).map_err(|e| e.to_string())?,
+    };
     tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
     tray.set_tooltip(Some(&tip)).map_err(|e| e.to_string())?;
     Ok(())
@@ -1436,6 +1473,29 @@ pub fn run() {
             // this existed, so an upgrade opens no socket it did not
             // open yesterday.
             remote::sync(&mux::read_config());
+            // And keep it following the windows.
+            //
+            // Polled rather than hooked onto every show, hide, summon,
+            // leave, create and destroy path. There are seven of those
+            // and the cost of missing one is a port left open with
+            // nothing on screen saying so - which is the exact failure
+            // this is here to prevent, so it gets the mechanism that
+            // cannot miss rather than the one that is tidier. Two
+            // seconds of latency on a state change nobody is watching.
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    let n = handle
+                        .webview_windows()
+                        .values()
+                        .filter(|w| w.is_visible().unwrap_or(false))
+                        .count() as u32;
+                    if remote::set_windows(n) {
+                        let _ = apply_tray_text(&handle);
+                    }
+                });
+            }
             // The window is created hidden (visible:false) so the webview's
             // white pre-paint never flashes; the frontend shows it once the
             // theme is applied. Backstop: if the frontend never boots (dead
@@ -1592,7 +1652,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{fade_alpha, pretty_hotkey, tray_strings, FADE_STEPS};
+    use super::{fade_alpha, pretty_hotkey, tray_strings, tray_strings_with, FADE_STEPS};
 
     /// A fade that does not reach both ends is worse than none: stopping
     /// short of 0 leaves a ghost of the window on screen after it should
@@ -1644,6 +1704,37 @@ mod tests {
         assert!(tip.contains("9.9.9"), "tooltip must name the version: {tip}");
         assert_eq!(item, "Show GTerminal");
         assert!(!item.contains('\t'), "no key means no accelerator column: {item:?}");
+    }
+
+    /// Once the window is hidden the tray is the only surface left, and
+    /// hidden is exactly the state in which somebody forgets a port onto
+    /// their shells is open. So it says so there.
+    #[test]
+    fn the_tray_carries_the_remote_warning_when_there_is_one() {
+        let (tip, item) = tray_strings_with(
+            Some("Alt+Space"),
+            "9.9.9",
+            Some("Remote control: 1 connected, from the network"),
+        );
+        assert!(tip.contains("1 connected"), "the tooltip must say it: {tip}");
+        // The window question still comes first. It is what the tooltip
+        // was for, and it is what somebody staring at a tray icon needs.
+        assert!(
+            tip.find("Alt+Space") < tip.find("Remote control"),
+            "how to get the window back stays the first answer: {tip}"
+        );
+        assert_eq!(item, "Show GTerminal	Alt+Space", "the action is unchanged: {item}");
+    }
+
+    /// And says nothing at all when the feature is off, rather than
+    /// "Remote control: off" - a tray line about a feature nobody turned
+    /// on is noise, and noise is what stops the real line being read.
+    #[test]
+    fn with_remote_off_the_tray_is_exactly_what_it_was() {
+        assert_eq!(
+            tray_strings_with(Some("Alt+Space"), "9.9.9", None),
+            tray_strings(Some("Alt+Space"), "9.9.9")
+        );
     }
 
     /// Packaged, %LOCALAPPDATA% writes land in the package's LocalCache,

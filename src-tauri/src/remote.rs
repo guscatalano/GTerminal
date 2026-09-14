@@ -95,6 +95,66 @@ static SERVED: AtomicU64 = AtomicU64::new(0);
 static LAST_SERVED_MS: AtomicU64 = AtomicU64::new(0);
 static NEXT_VIEWER: AtomicU64 = AtomicU64::new(1);
 
+/// How many windows of this app are on screen.
+///
+/// Serving requires one. Closing the last window hides it to the tray
+/// and the app keeps running, which is right for a terminal holding
+/// sessions and wrong for a port onto them: the badge that says the port
+/// is open lives in the window, so a hidden window would be serving with
+/// nothing anywhere saying so. Rather than let the warning and the thing
+/// it warns about come apart, the thing stops.
+///
+/// The setting is untouched by this. Showing a window starts it again,
+/// and the settings page calls that state paused rather than off, so
+/// nobody goes looking for a switch that is already in the right place.
+static WINDOWS: AtomicU32 = AtomicU32::new(0);
+
+/// Tell the server how many windows are up, and put the running state
+/// back in step with it. Cheap and idempotent: `sync` bumps a generation
+/// and rebinds only when something actually changed.
+pub fn set_windows(n: u32) -> bool {
+    let before = WINDOWS.swap(n, Ordering::SeqCst);
+    if before == n {
+        return false;
+    }
+    let was_running = RUNNING_PORT.load(Ordering::SeqCst) != 0;
+    let config = mux::read_config();
+    let should_run = enabled(&config) && n > 0;
+    if was_running != should_run {
+        sync(&config);
+        return true;
+    }
+    false
+}
+
+fn windows_open() -> bool {
+    WINDOWS.load(Ordering::SeqCst) > 0
+}
+
+/// One line for the tray, or nothing when the feature is off.
+///
+/// The tray is the only surface left once the window is hidden, and
+/// "hidden" is exactly the state somebody forgets they are in.
+pub fn tray_line() -> Option<String> {
+    let config = mux::read_config();
+    if !enabled(&config) {
+        return None;
+    }
+    if !windows_open() {
+        return Some("Remote control: paused while no window is open".to_string());
+    }
+    let n = match who_json() {
+        Value::Array(a) => a.len(),
+        _ => 0,
+    };
+    let where_ = if bind_addr(&config) == "0.0.0.0" { "the network" } else { "this machine" };
+    Some(match n {
+        0 => format!("Remote control: on, reachable from {where_}"),
+        1 => format!("Remote control: 1 connected, from {where_}"),
+        _ => format!("Remote control: {n} connected, from {where_}"),
+    })
+}
+
 /// Who is connected, as far as anything here can honestly say.
 ///
 /// The token is the only credential, so this cannot name a person and
@@ -951,6 +1011,16 @@ pub fn sync(config: &Value) -> Value {
     if !enabled(config) {
         return status();
     }
+    // Enabled, but there is no window to carry the warning. See WINDOWS.
+    if !windows_open() {
+        return json!({
+            "running": false,
+            "paused": true,
+            "port": port(config),
+            "bind": bind_addr(config),
+            "hosts": [],
+        });
+    }
     let token = token_of(config);
     if token.is_empty() {
         // Enabled with no token is not a thing that should be servable.
@@ -1118,6 +1188,7 @@ pub fn status() -> Value {
         let config = mux::read_config();
         return json!({
             "running": false,
+            "paused": enabled(&config) && !windows_open(),
             "port": port(&config),
             "bind": bind_addr(&config),
             "hosts": [],
@@ -1377,6 +1448,11 @@ mod remote_tests {
         let token = new_token();
         let mut chosen = 0u16;
         let mut reported = json!({});
+        // A window has to exist before anything binds, which in a unit
+        // test has to be said out loud: serving follows the window, so
+        // that a port onto somebody's shells cannot be open while the
+        // badge that warns about it is off screen. See WINDOWS.
+        WINDOWS.store(1, Ordering::SeqCst);
         // A fixed port would collide with whatever else is on the machine
         // running this, and a random one cannot be printed in settings.
         // Walking a small range is the version that neither fails

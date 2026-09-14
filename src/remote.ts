@@ -82,6 +82,10 @@ export function maskToken(token: string): string {
 
 export interface RemoteStatus {
   running?: boolean;
+  /// On, but not listening because no window is open. A distinct state
+  /// from off: the setting is where the user left it, and showing a
+  /// window starts it again without touching anything.
+  paused?: boolean;
   port?: number;
   bind?: string;
   hosts?: string[];
@@ -94,6 +98,11 @@ export interface RemoteStatus {
 /// the reason is the only useful thing on the page.
 export function statusLine(c: RemoteSettings, st: RemoteStatus): string {
   if (!remoteOn(c)) return "Off. Nothing is listening, and no port is open.";
+  // Checked before the error, because a paused server has not failed at
+  // anything and whatever error is left over is from before.
+  if (st.paused) {
+    return "Paused: nothing is listening while no window is open. Showing a window starts it again.";
+  }
   if (st.error) return st.error;
   if (!st.running) return "Turned on, but not listening yet.";
   const where = st.bind === "0.0.0.0" ? "every address on this machine" : "127.0.0.1 only";

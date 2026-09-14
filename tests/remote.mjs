@@ -297,6 +297,29 @@ check(
   true
 );
 
+
+// Closing the window hides it to the tray and the app keeps running,
+// which is right for sessions and wrong for a port onto them: the badge
+// that warns about the port lives in the window. So the server follows
+// the window, and the settings page has to call that paused rather than
+// off - somebody told "off" goes looking for a switch that is already
+// where they left it.
+check(
+  "no window open is paused, not off",
+  statusLine({ remote_enabled: true }, { running: false, paused: true }),
+  "Paused: nothing is listening while no window is open. Showing a window starts it again."
+);
+check(
+  "and paused outranks an error left over from before",
+  statusLine({ remote_enabled: true }, { running: false, paused: true, error: "address in use" }),
+  "Paused: nothing is listening while no window is open. Showing a window starts it again."
+);
+check(
+  "while off is still off",
+  statusLine({}, { paused: true }),
+  "Off. Nothing is listening, and no port is open."
+);
+
 if (failed) {
   console.log(`${failed} remote test(s) failed`);
   process.exit(1);
