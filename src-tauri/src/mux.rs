@@ -545,6 +545,22 @@ pub enum Request {
     /// afterwards whether you want a shell in it.
     Peek { id: u32 },
     Write { data: String },
+    /// Type into a session addressed by id, without attaching to it.
+    ///
+    /// `write` goes to whatever *this connection* attached to, and
+    /// attaching takes the session away from the window that has it open
+    /// - "one attacher at a time, and the newest wins". That rule is
+    /// right for two windows and exactly wrong for the remote page: a
+    /// phone sending one Ctrl-C must not pull the tab out from under the
+    /// person at the keyboard, which is what reusing attach would do.
+    ///
+    /// Deliberately NOT behind a protocol bump, for the reason spelled
+    /// out on `Shutdown`: a bump marks every daemon now running as stale
+    /// and shows its user a restart notice. Advertised in `can` instead,
+    /// and a daemon too old to know the verb answers "bad request",
+    /// which the remote server reports as what it is rather than
+    /// swallowing.
+    Send { id: u32, data: String },
     Resize { cols: u16, rows: u16 },
     Detach,
     /// Stand down: checkpoint everything and exit.
@@ -2189,7 +2205,7 @@ fn conn_loop(
                         //
                         // Additive: a daemon older than this omits it, and
                         // an absent list means "assume nothing".
-                        "can": ["shutdown"],
+                        "can": ["shutdown", "send"],
                     }),
                 )?;
             }
@@ -2382,6 +2398,27 @@ fn conn_loop(
                         }
                         let _ = s.writer.write_all(data.as_bytes());
                     }
+                }
+            }
+            Request::Send { id, data } => {
+                // Unlike `write`, this answers: the remote page is over a
+                // network and has to be able to tell "typed into a shell"
+                // from "went nowhere". A silent write would show up there
+                // as a keystroke that simply did not happen.
+                let mut sent = false;
+                if let Some(s) = sessions.lock().unwrap().live.get_mut(&id) {
+                    if is_typing(&data) {
+                        s.saw_input = true;
+                    }
+                    sent = s.writer.write_all(data.as_bytes()).is_ok();
+                }
+                if sent {
+                    write_line(&mut out, &json!({"ok": true}))?;
+                } else {
+                    write_line(
+                        &mut out,
+                        &json!({"ok": false, "error": "no live shell in that session"}),
+                    )?;
                 }
             }
             Request::Resize { cols, rows } => {

@@ -1,5 +1,6 @@
 mod claude_usage;
 mod mux;
+mod remote;
 mod stats;
 mod update;
 mod weather;
@@ -612,6 +613,31 @@ fn get_config() -> serde_json::Value {
 #[tauri::command]
 fn set_config(value: serde_json::Value) -> Result<(), String> {
     mux::write_config(&value)
+}
+
+/// Make the remote-control server match the config it is handed.
+///
+/// The config comes in as an argument rather than being read back off
+/// disk, because the frontend debounces its writes by 300ms: reading the
+/// file here would start the server against whatever was in it *before*
+/// the toggle the user just moved, and the settings page would then show
+/// the state it had a moment ago.
+#[tauri::command(async)]
+fn remote_sync(config: serde_json::Value) -> serde_json::Value {
+    remote::sync(&config)
+}
+
+#[tauri::command(async)]
+fn remote_status() -> serde_json::Value {
+    remote::status()
+}
+
+/// A new token, generated where the operating system's random generator
+/// is. Returned rather than written: the frontend owns config.json, and
+/// two writers to one file is how a setting gets lost.
+#[tauri::command(async)]
+fn remote_new_token() -> String {
+    remote::new_token()
 }
 
 // ── weather and air quality ────────────────────────────────────────────
@@ -1404,6 +1430,12 @@ pub fn run() {
         // config; this only installs the machinery.
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
+            // Remote control, if - and only if - the config on disk says
+            // it was turned on. `sync` binds nothing for a config that
+            // does not mention it, which is every config written before
+            // this existed, so an upgrade opens no socket it did not
+            // open yesterday.
+            remote::sync(&mux::read_config());
             // The window is created hidden (visible:false) so the webview's
             // white pre-paint never flashes; the frontend shows it once the
             // theme is applied. Backstop: if the frontend never boots (dead
@@ -1534,6 +1566,9 @@ pub fn run() {
             kill_session,
             get_config,
             set_config,
+            remote_sync,
+            remote_status,
+            remote_new_token,
             weather_report,
             claude_usage,
             update_status,
