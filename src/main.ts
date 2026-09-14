@@ -5614,11 +5614,19 @@ function watchRemote() {
   }
 }
 
-function openSettings() {
+function openSettings(jumpTo?: string) {
   buildSettingsPage();
   app.classList.add("settings-on");
   settingsSearch.focus();
   settingsSearch.select();
+  if (!jumpTo) return;
+  // After the focus, not before: focusing the search box scrolls the
+  // page back to the top, which would undo this.
+  const at = document.getElementById(sectionAnchor(jumpTo));
+  if (!at) return;
+  at.scrollIntoView({ block: "start" });
+  at.classList.add("settings-section-found");
+  window.setTimeout(() => at.classList.remove("settings-section-found"), 1400);
 }
 
 function closeSettings() {
@@ -7126,8 +7134,17 @@ function settingsSection(title: string): HTMLElement {
   const h = document.createElement("div");
   h.className = "settings-section-title";
   h.textContent = title;
+  // Addressable, so something elsewhere in the window can send you to
+  // the setting it is about instead of to the top of a long page.
+  h.id = sectionAnchor(title);
   settingsList.appendChild(h);
   return h;
+}
+
+/// The id of a section heading, from its own title. One function so the
+/// two ends of a jump cannot disagree about it.
+function sectionAnchor(title: string): string {
+  return "settings-at-" + title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
 /// "Is the – button even there?" — a question the settings page can
@@ -9942,7 +9959,10 @@ async function main() {
     e.stopPropagation();
     closeMenus();
     closeHistory();
-    if (!settingsOpen()) openSettings();
+    // Straight to the setting it is warning about. Opening the page at
+    // the top and leaving someone to scroll past everything else is the
+    // sort of thing that makes a warning feel like an ornament.
+    openSettings("Remote control");
   });
   watchRemote();
   // Custom window controls (native title bar is off). Close detaches —

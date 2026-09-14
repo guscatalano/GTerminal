@@ -1199,6 +1199,28 @@ input.set-control {
    Wash and blur for the same reason the sidebar has them - small text
    over whatever is behind it - except that here what is behind it is
    moving, so the blur is doing the work rather than the decoration. */
+/* Jumped-to sections clear the sticky search bar rather than hiding
+   under it, and say so briefly - landing silently on a long page looks
+   like nothing happened. */
+.settings-section-title {
+  scroll-margin-top: 58px;
+}
+
+.settings-section-title.settings-section-found {
+  animation: settings-found 1.4s ease-out;
+}
+
+@keyframes settings-found {
+  0%, 55% { color: var(--accent, #d98c3f); }
+  100% { color: inherit; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-section-title.settings-section-found {
+    animation: none;
+  }
+}
+
 .settings-searchbar {
   position: sticky;
   top: 0;

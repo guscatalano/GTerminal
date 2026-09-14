@@ -222,6 +222,19 @@ check(
   true
 );
 
+
+// The badge is a way in as well as a warning, and the way in is a string
+// matched against a section heading. Two ends of a jump that disagree
+// land you at the top of a long settings page with nothing said about
+// why, which is indistinguishable from a button that does nothing.
+const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+check(
+  "the badge asks for a section that exists",
+  main.includes('openSettings("Remote control")') &&
+    main.includes('settingsSection("Remote control")'),
+  true
+);
+
 if (failed) {
   console.log(`${failed} remote test(s) failed`);
   process.exit(1);
