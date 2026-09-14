@@ -110,3 +110,53 @@ export function addressesFor(st: RemoteStatus, token: string): string[] {
   const hosts = st.hosts && st.hosts.length ? st.hosts : ["127.0.0.1"];
   return hosts.map((h) => remoteUrl(h, port, token));
 }
+
+export interface RemoteStatusLive extends RemoteStatus {
+  /// Connections open right now. For this page that is a phone with the
+  /// stream up, so it reads as "somebody is watching".
+  viewers?: number;
+  /// Requests that have ever got past the token, and when the last one
+  /// did. "Nobody is connected right now" is not the same as "nobody has
+  /// been", and after the fact the second one is what you want to know.
+  served?: number;
+  last_ms?: number;
+}
+
+/// The badge in the window chrome, or nothing.
+///
+/// A setting buried in a settings page is not a warning. While this is
+/// on there is a port open onto the user's shells, and the window says
+/// so where it cannot be missed - it is the same reasoning as the light
+/// on a webcam, and it earns its space for the same reason: the whole
+/// risk of the feature is forgetting it is on.
+///
+/// Three states, because they are three different facts. On; on and
+/// reachable from the network rather than from this machine only; and
+/// somebody is connected to it right now.
+export function remoteBadge(
+  c: RemoteSettings,
+  st: RemoteStatusLive
+): { text: string; level: "on" | "wide" | "watched"; title: string } | null {
+  if (!remoteOn(c)) return null;
+  const viewers = st.viewers ?? 0;
+  const wide = remoteBind(c) === "lan";
+  const typing = remoteInput(c);
+  const where = wide
+    ? "reachable from every address on this machine"
+    : "reachable from this machine only";
+  const drive = typing
+    ? "Typing is on, so whoever is connected can run commands."
+    : "Typing is off, so it can be read but not driven.";
+  if (viewers > 0) {
+    return {
+      text: viewers === 1 ? "1 watching" : `${viewers} watching`,
+      level: "watched",
+      title: `Remote control is on and something is connected right now — ${where}. ${drive} Click to open the setting.`,
+    };
+  }
+  return {
+    text: wide ? "Remote · network" : "Remote on",
+    level: wide ? "wide" : "on",
+    title: `Remote control is on, ${where}. ${drive} ${PUBLISHING_WARNING} Click to open the setting.`,
+  };
+}

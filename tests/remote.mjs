@@ -16,6 +16,7 @@ import {
   remoteOn,
   remotePort,
   remoteUrl,
+  remoteBadge,
   statusLine,
 } from "../src/remote.ts";
 import { readFileSync } from "fs";
@@ -180,6 +181,46 @@ check(
 // the user agent's [hidden] rule - so the read-only notice and the
 // composer were both drawn, each squeezed into half the bottom bar.
 check("hidden actually hides", /\[hidden\]\s*\{\s*display:\s*none\s*!important/.test(page), true);
+
+
+// ── the warning in the window ──────────────────────────────────────────
+// A setting buried in a settings page is not a warning. While this is on
+// there is a port open onto the user's shells, and the whole risk of the
+// feature is forgetting that.
+check("off shows nothing at all", remoteBadge({}, {}), null);
+check(
+  "on says so",
+  remoteBadge({ remote_enabled: true }, { running: true, viewers: 0 })?.text,
+  "Remote on"
+);
+check(
+  "bound wide says more than on",
+  remoteBadge({ remote_enabled: true, remote_bind: "lan" }, { running: true, viewers: 0 })?.level,
+  "wide"
+);
+check(
+  "and somebody connected outranks both",
+  remoteBadge({ remote_enabled: true, remote_bind: "lan" }, { running: true, viewers: 1 })?.text,
+  "1 watching"
+);
+check(
+  "which is counted, not just noticed",
+  remoteBadge({ remote_enabled: true }, { running: true, viewers: 3 })?.text,
+  "3 watching"
+);
+// The sentence has to say whether whoever is there can only read.
+check(
+  "the tooltip says typing is off when it is",
+  /Typing is off/.test(remoteBadge({ remote_enabled: true }, {})?.title ?? ""),
+  true
+);
+check(
+  "and says it is on when it is",
+  /Typing is on/.test(
+    remoteBadge({ remote_enabled: true, remote_input: true }, {})?.title ?? ""
+  ),
+  true
+);
 
 if (failed) {
   console.log(`${failed} remote test(s) failed`);

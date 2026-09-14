@@ -48,13 +48,14 @@ import {
   addressesFor,
   bindConsequence,
   maskToken,
+  remoteBadge,
   remoteBind,
   remoteInput,
   remoteOn,
   remotePort,
   statusLine,
 } from "./remote";
-import type { RemoteStatus } from "./remote";
+import type { RemoteStatus, RemoteStatusLive } from "./remote";
 import { storageKey, keysToClear, FIRST_WINDOW } from "./windows";
 import { retagKeyed, retagOrder } from "./retag";
 import { windowName, moveTargets } from "./windownames";
@@ -5573,6 +5574,46 @@ settingsSearch.addEventListener("keydown", (e) => {
   }
 });
 
+/// The badge in the tab bar, while remote control is on.
+///
+/// Polled rather than pushed. The thing it reports - somebody is
+/// connected - happens in the server's own threads, and a notification
+/// channel from there into the window would be a second mechanism
+/// carrying one integer. Every five seconds is soon enough for a person
+/// to notice, and nothing is asked at all while the feature is off.
+let remoteBadgeTimer = 0;
+
+async function refreshRemoteBadge() {
+  const el = document.getElementById("remote-badge");
+  if (!el) return;
+  if (!remoteOn(config)) {
+    el.hidden = true;
+    return;
+  }
+  const st = await invoke<RemoteStatusLive>("remote_status").catch(() => ({}) as RemoteStatusLive);
+  const badge = remoteBadge(config, st);
+  if (!badge) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  el.textContent = badge.text;
+  el.title = badge.title;
+  el.className = badge.level;
+}
+
+/// Start or stop the polling to match the setting, and redraw at once so
+/// turning it on or off is answered by the window immediately rather
+/// than at the next tick.
+function watchRemote() {
+  window.clearInterval(remoteBadgeTimer);
+  remoteBadgeTimer = 0;
+  void refreshRemoteBadge();
+  if (remoteOn(config)) {
+    remoteBadgeTimer = window.setInterval(() => void refreshRemoteBadge(), 5000);
+  }
+}
+
 function openSettings() {
   buildSettingsPage();
   app.classList.add("settings-on");
@@ -7304,6 +7345,10 @@ function buildRemoteSection() {
       status = { running: false, error: String(e) };
     }
     redraw();
+    // The badge in the tab bar is the warning; it has to answer the
+    // switch immediately, not at whatever point its own timer next
+    // fires.
+    watchRemote();
   };
 
   void invoke<RemoteStatus>("remote_status")
@@ -9891,6 +9936,15 @@ async function main() {
     if (settingsOpen()) closeSettings();
     else openSettings();
   });
+  // The badge is a way in as well as a warning: the first thing anybody
+  // does after noticing it is look for the switch.
+  document.getElementById("remote-badge")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    closeMenus();
+    closeHistory();
+    if (!settingsOpen()) openSettings();
+  });
+  watchRemote();
   // Custom window controls (native title bar is off). Close detaches —
   // the daemon keeps every session running, same as before.
   const win = getCurrentWindow();

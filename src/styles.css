@@ -819,6 +819,64 @@ button.armed,
   text-overflow: ellipsis;
 }
 
+/* ── remote control, while it is on ──────────────────────────────────── */
+/* The whole risk of that feature is forgetting it is on, so this is in
+   the window chrome rather than in the settings page that turned it on.
+   Three states: on, on and reachable from the network, and something is
+   connected right now - loudest last. */
+
+#remote-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  margin-left: 6px;
+  padding: 3px 9px;
+  border: 1px solid var(--accent, #d98c3f);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent, #d98c3f) 14%, transparent);
+  color: var(--accent, #d98c3f);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#remote-badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+#remote-badge.wide,
+#remote-badge.watched {
+  border-color: var(--danger, #e05c5c);
+  background: color-mix(in srgb, var(--danger, #e05c5c) 16%, transparent);
+  color: var(--danger, #e05c5c);
+}
+
+/* Only when somebody is actually connected. A badge that pulses all day
+   is a badge people stop seeing, which is the one thing this must not
+   become. */
+#remote-badge.watched::before {
+  animation: remote-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes remote-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #remote-badge.watched::before {
+    animation: none;
+  }
+}
+
 /* ── hidden pills ────────────────────────────────────────────────────── */
 
 #hiddenbar {

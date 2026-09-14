@@ -85,6 +85,14 @@ static LIVE_CONNS: AtomicUsize = AtomicUsize::new(0);
 static RUNNING_PORT: AtomicU32 = AtomicU32::new(0);
 
 static FAILURES: AtomicU32 = AtomicU32::new(0);
+/// Connections that got past the token, ever, and when the last one did.
+///
+/// Not for security - a refused request is counted elsewhere - but so
+/// the window can say that somebody is actually reading it. "Remote
+/// control is on" and "somebody is looking at your shell right now" are
+/// different facts and the second one is the one worth interrupting for.
+static SERVED: AtomicU64 = AtomicU64::new(0);
+static LAST_SERVED_MS: AtomicU64 = AtomicU64::new(0);
 static LAST_FAIL_MS: AtomicU64 = AtomicU64::new(0);
 
 fn now_ms() -> u64 {
@@ -558,6 +566,8 @@ fn serve(stream: TcpStream, ctx: Arc<Ctx>) {
         return;
     }
     FAILURES.store(0, Ordering::Relaxed);
+    SERVED.fetch_add(1, Ordering::Relaxed);
+    LAST_SERVED_MS.store(now_ms(), Ordering::Relaxed);
 
     match route(&req.method, &req.path) {
         Route::Page => respond(&mut out, "200 OK", "text/html; charset=utf-8", PAGE),
@@ -826,7 +836,20 @@ fn status_for(bind: &str, p: u16) -> Value {
     } else {
         vec!["127.0.0.1".to_string()]
     };
-    json!({ "running": true, "port": p, "bind": bind, "hosts": hosts })
+    json!({
+        "running": true,
+        "port": p,
+        "bind": bind,
+        "hosts": hosts,
+        // What the window shows. `viewers` counts connections that are
+        // open now, which for this page means a phone with the stream
+        // up; `served` and `last_ms` cover the case where somebody read
+        // it and put the phone down, because "nobody is connected right
+        // now" is not the same as "nobody has been".
+        "viewers": LIVE_CONNS.load(Ordering::Relaxed),
+        "served": SERVED.load(Ordering::Relaxed),
+        "last_ms": LAST_SERVED_MS.load(Ordering::Relaxed),
+    })
 }
 
 pub fn status() -> Value {
@@ -838,6 +861,9 @@ pub fn status() -> Value {
             "port": port(&config),
             "bind": bind_addr(&config),
             "hosts": [],
+            "viewers": 0,
+            "served": SERVED.load(Ordering::Relaxed),
+            "last_ms": LAST_SERVED_MS.load(Ordering::Relaxed),
         });
     }
     status_for(bind_addr(&mux::read_config()), p as u16)
