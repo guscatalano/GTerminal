@@ -4355,6 +4355,20 @@ function openClipViewer(id: number, term: Terminal) {
     if (e.target === ov) closeClipViewer();
   });
   document.body.appendChild(ov);
+  // Where the buttons ended up, for the same reason the menu logs its
+  // rows: the scene that tests this panel derived the Paste button's
+  // position from the panel's width and the row height, and a guess is
+  // only right until the layout moves. Positions, never contents - what
+  // is in the history is what was copied.
+  logUi("clip.viewer", {
+    entries: clipHist.length,
+    rows: Array.from(ov.querySelectorAll<HTMLElement>(".clip-row")).map((r) => {
+      const b = (r.querySelector(".clip-btn") as HTMLElement | null)?.getBoundingClientRect();
+      return b
+        ? { paste: { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) } }
+        : { paste: null };
+    }),
+  });
 }
 
 /// The other end of "reopen elevated": whatever the window that asked for
@@ -5794,6 +5808,29 @@ function showContextMenu(x: number, y: number, items: CtxItem[]) {
     y,
     items: items.filter((i) => i !== "sep").length,
     first: items.find((i) => i !== "sep") ? (items.find((i) => i !== "sep") as { label: string }).label : null,
+    // Where each row actually landed, in client coordinates.
+    //
+    // The visual suite clicks menu items by memorised coordinate -
+    // "rows are 28px apart and a separator adds 8" - and adding one item
+    // above the one a scene aims at moves it silently. That is not
+    // hypothetical: "Reopen elevated…" went in above "Clipboard history…"
+    // and the clipboard-history scene started opening an elevated window
+    // instead, then clicking into it, and reported that the clipboard
+    // viewer had not appeared.
+    //
+    // A menu that says where its rows are costs one line per row here and
+    // removes the whole class of failure there. Labels that carry a
+    // clipboard preview are reduced to the item they are: this file's
+    // first rule is that the log never holds what was copied.
+    rows: Array.from(ctxMenu.querySelectorAll<HTMLElement>(".menu-row")).map((r) => {
+      const b = r.getBoundingClientRect();
+      const text = (r.textContent || "").trim();
+      return {
+        label: text.startsWith("Paste: ") ? "Paste: …" : text,
+        x: Math.round(b.left + b.width / 2),
+        y: Math.round(b.top + b.height / 2),
+      };
+    }),
   });
 }
 

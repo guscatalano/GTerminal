@@ -289,12 +289,12 @@ function Note-HitTest {
   [void]$U::GetWindowThreadProcessId($hwnd, [ref]$mine)
   Write-Host ("           under test: hwnd {0} pid {1} at {2},{3} {4}x{5}" -f $hwnd, $mine, $ours.L, $ours.T, ($ours.R - $ours.L), ($ours.B - $ours.T)) -ForegroundColor DarkYellow
   Write-Host ("           hit:        hwnd {0} pid {1} at {2},{3} {4}x{5}" -f $root, $ownerPid, $theirs.L, $theirs.T, ($theirs.R - $theirs.L), ($theirs.B - $theirs.T)) -ForegroundColor DarkYellow
-  foreach ($w in @(App-Windows $ownerPid)) {
-    $wr = New-Object 'GTerm.Vis+RECT'
-    [void]$U::GetWindowRect($w, [ref]$wr)
-    $wt = New-Object System.Text.StringBuilder 256
-    [void]$U::GetWindowText($w, $wt, 256)
-    Write-Host ("           pid ${ownerPid} also has: hwnd {0} at {1},{2} {3}x{4} `"{5}`"" -f $w, $wr.L, $wr.T, ($wr.R - $wr.L), ($wr.B - $wr.T), $wt.ToString()) -ForegroundColor DarkYellow
+  # Every GTerminal window on the desktop, not just this owner's. The
+  # window that intercepted the click turned out to belong to a second
+  # process entirely, which a per-process list would have shown as
+  # nothing unusual on either side.
+  foreach ($w in (All-AppWindows)) {
+    Write-Host ("           also up: hwnd {0} pid {1} at {2},{3} {4}x{5} `"{6}`"" -f $w.Hwnd, $w.Pid, $w.L, $w.T, $w.W, $w.H, $w.Title) -ForegroundColor DarkYellow
   }
 }
 
@@ -548,6 +548,41 @@ function App-Windows {
   , @($found)
 }
 
+# Every visible GTerminal window, whoever owns it.
+#
+# App-Windows answers "which windows does this process have", which is
+# the right question for the multi-window scenes and the wrong one for
+# "what just intercepted my click" - the answer there was a window of a
+# second process, which a per-process list cannot show.
+#
+# Returned as records rather than handles because the only use for this
+# is printing it: a handle on its own says nothing anyone can act on.
+function All-AppWindows {
+  $found = New-Object System.Collections.ArrayList
+  $cb = [GTerm.Vis+EnumWindowsProc]{
+    param($h, $l)
+    if ($U::IsWindowVisible($h)) {
+      $t = New-Object System.Text.StringBuilder 256
+      [void]$U::GetWindowText($h, $t, 256)
+      $c = New-Object System.Text.StringBuilder 256
+      [void]$U::GetClassName($h, $c, 256)
+      if ($t.ToString() -like "*GTerminal*") {
+        $r = New-Object 'GTerm.Vis+RECT'
+        [void]$U::GetWindowRect($h, [ref]$r)
+        $o = 0
+        [void]$U::GetWindowThreadProcessId($h, [ref]$o)
+        [void]$found.Add([pscustomobject]@{
+          Hwnd = $h; Pid = $o; Title = $t.ToString(); Class = $c.ToString()
+          L = $r.L; T = $r.T; W = ($r.R - $r.L); H = ($r.B - $r.T)
+        })
+      }
+    }
+    return $true
+  }
+  [void]$U::EnumWindows($cb, [IntPtr]::Zero)
+  $found.ToArray()
+}
+
 function Capture-Window {
   param($hwnd)
   $r = New-Object 'GTerm.Vis+RECT'
@@ -710,6 +745,35 @@ function Dump-UiLog {
   $all = @(Get-Content $path -ErrorAction SilentlyContinue)
   if ($match) { $all = @($all | Where-Object { $_ -match $match }) }
   foreach ($l in ($all | Select-Object -Last $lines)) { Write-Host "  $l" -ForegroundColor DarkGray }
+}
+
+# The window's log, parsed. Dump-UiLog is for a person reading a failure;
+# this is for a scene that wants to know where something ended up.
+function Ui-Events {
+  param([string]$ev = "")
+  $path = "$scratch\GTerminal\ui.log"
+  if (-not (Test-Path $path)) { return @() }
+  $out = New-Object System.Collections.ArrayList
+  foreach ($line in @(Get-Content $path -ErrorAction SilentlyContinue)) {
+    if ($line -notmatch '"ev":') { continue }
+    $o = try { $line | ConvertFrom-Json } catch { $null }
+    if ($o -and (-not $ev -or $o.ev -eq $ev)) { [void]$out.Add($o) }
+  }
+  $out.ToArray()
+}
+
+# A click at a point in the window's *client* area - the coordinates the
+# page itself uses, and the ones it logs. Everything else here clicks in
+# window coordinates, which include the frame and the title bar.
+function Click-Client {
+  param($hwnd, [int]$x, [int]$y)
+  $p = New-Object 'GTerm.Vis+POINT'
+  $p.X = $x
+  $p.Y = $y
+  [void]$U::ClientToScreen($hwnd, [ref]$p)
+  $r = New-Object 'GTerm.Vis+RECT'
+  [void]$U::GetWindowRect($hwnd, [ref]$r)
+  Click $hwnd ($p.X - $r.L) ($p.Y - $r.T)
 }
 
 function Wait-Mark {
@@ -1692,34 +1756,77 @@ if (-not $Only -or $Only -eq "clipboard") {
 # with its own source, and like the others it now reads the clipboard
 # through the app rather than the webview.
 #
-# Coordinates are derived rather than measured: the panel is 560px wide
-# and centred, the row's buttons sit at its right edge. The viewer is
-# photographed regardless, so a click that misses can be corrected from
-# the picture instead of from a guess.
+# Nothing here is clicked by a coordinate anybody worked out. Both the
+# menu and the panel report where their rows landed, and this clicks
+# what they say.
+#
+# The version that counted rows - "the menu is Paste, separator,
+# Clipboard history…, Select all; rows are 28px apart and a separator
+# adds 8" - was right until "Reopen elevated…" was added above the item
+# it aimed at. The click then chose Reopen elevated, the runner had no
+# UAC prompt to refuse it, a second GTerminal opened at the default size
+# on top of the first, and the next click went into *that* window. The
+# scene reported "the viewer may not have opened", which was true and
+# useless. A menu item is a normal thing to add; a test that silently
+# retargets when one is added is not a normal thing to keep.
 if (-not $Only -or $Only -eq "cliphist") {
-  $ctx10 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`"}"
+  # ui_log full: the positions this scene clicks come out of that log.
+  $ctx10 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"ui_log`":`"full`"}"
   $h10 = $ctx10.Hwnd
+  $script:menuRows = @()
+  $script:clipRows = @()
+  $script:windowsAtEnd = @()
   Record-Scene "cliphist" 30 $ctx10 {
     Run-Cmd 'echo cliphist-ready' 2
-    # One entry only. With several, the menu grows "Paste: older" rows and
-    # every coordinate below moves - so the older-entry case is not
-    # covered here, deliberately.
+    # One entry only. With several the panel grows rows, and the older
+    # entry case is not covered here, deliberately.
     Set-Clip 'echo HISTPASTE-97531' $h10
-    # No selection, so the menu is: Paste, separator, Clipboard history…,
-    # Select all. Rows are 28px apart and a separator adds 8.
     Right-Click ($h10) 500 260
-    Start-Sleep -Seconds 1
-    Click ($h10) 560 316                 # "Clipboard history…"
+    Start-Sleep -Seconds 2
+    $opened = @(Ui-Events "menu.open")
+    if ($opened.Count) {
+      $script:menuRows = @($opened[-1].rows)
+      $want = @($script:menuRows | Where-Object { $_.label -like "Clipboard history*" })
+      if ($want.Count) {
+        Click-Client ($h10) ([int]$want[0].x) ([int]$want[0].y)
+      }
+    }
     Start-Sleep -Seconds 2
     $script:viewer = Capture-Window $h10
-    Click ($h10) 882 386                 # first row's Paste button
+    $shown = @(Ui-Events "clip.viewer")
+    if ($shown.Count) {
+      $script:clipRows = @($shown[-1].rows)
+      if ($script:clipRows.Count -and $script:clipRows[0].paste) {
+        Click-Client ($h10) ([int]$script:clipRows[0].paste.x) ([int]$script:clipRows[0].paste.y)
+      }
+    }
     Start-Sleep -Seconds 2
     Key $VK_RETURN
     Start-Sleep -Seconds 4
     $script:histOut = Transcripts
+    $script:windowsAtEnd = @(All-AppWindows)
   }
-  if ($histOut -match "HISTPASTE-97531") { Pass "pasting from the clipboard history reaches the shell" }
-  else { Fail "cliphist" "nothing arrived - the viewer may not have opened, or Paste was not where it was clicked" }
+  # The two things that have to have happened before the paste can be
+  # judged at all, each said separately - "nothing arrived" covered a
+  # menu that never opened, an item that was not there and a panel that
+  # did not appear, and distinguished none of them.
+  if (-not $menuRows.Count) {
+    Fail "cliphist" "the terminal menu logged no rows - it may not have opened, or ui_log full did not take"
+  } elseif (-not @($menuRows | Where-Object { $_.label -like "Clipboard history*" }).Count) {
+    Fail "cliphist" "the menu has no Clipboard history item; it offered: $(($menuRows | ForEach-Object { $_.label }) -join ' | ')"
+  } elseif (-not $clipRows.Count) {
+    Fail "cliphist" "the clipboard panel never reported any rows - the item was clicked but the panel did not open"
+  } elseif ($histOut -match "HISTPASTE-97531") {
+    Pass "pasting from the clipboard history reaches the shell"
+  } else {
+    Fail "cliphist" "the panel opened and Paste was clicked where the panel said it was, but nothing reached the shell"
+  }
+  # And that the scene stayed in one window. Clicking the wrong menu item
+  # is how this broke, and the loudest symptom of it was a second app.
+  if ($windowsAtEnd.Count -le 1) { Pass "and the scene never opened a second window" }
+  else {
+    Fail "cliphist" "$($windowsAtEnd.Count) GTerminal windows are up: $(($windowsAtEnd | ForEach-Object { "hwnd $($_.Hwnd) pid $($_.Pid) at $($_.L),$($_.T)" }) -join ' | ')"
+  }
   $dump = Join-Path $outDir "clip-frames"
   New-Item -ItemType Directory -Force $dump | Out-Null
   $viewer.Save((Join-Path $dump "viewer.png"), [System.Drawing.Imaging.ImageFormat]::Png)
