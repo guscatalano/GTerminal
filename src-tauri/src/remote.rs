@@ -36,7 +36,7 @@ use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// The page, and everything it needs. Embedded rather than read from
@@ -93,6 +93,95 @@ static FAILURES: AtomicU32 = AtomicU32::new(0);
 /// different facts and the second one is the one worth interrupting for.
 static SERVED: AtomicU64 = AtomicU64::new(0);
 static LAST_SERVED_MS: AtomicU64 = AtomicU64::new(0);
+static NEXT_VIEWER: AtomicU64 = AtomicU64::new(1);
+
+/// Who is connected, as far as anything here can honestly say.
+///
+/// The token is the only credential, so this cannot name a person and
+/// must not pretend to. What it can say is what the connection itself
+/// shows: the address it came from, what the browser said it is, when it
+/// arrived, which session it is watching, and whether it has typed. That
+/// is enough to answer the question somebody actually asks when they see
+/// the badge light up, which is "is that me on my phone, or not".
+#[derive(Clone)]
+struct Viewer {
+    id: u64,
+    addr: String,
+    agent: String,
+    since_ms: u64,
+    last_ms: u64,
+    session: Option<u32>,
+    typed: u32,
+}
+
+static VIEWERS: Mutex<Vec<Viewer>> = Mutex::new(Vec::new());
+
+/// Refused attempts, kept separately and deliberately.
+///
+/// A wrong token is the one thing here worth seeing after the fact: on a
+/// loopback bind it means something on this machine is probing the port,
+/// and on a LAN bind it means something on the network is. Neither is
+/// necessarily an attack and both are worth knowing about.
+static REFUSED: Mutex<Option<(u64, String, u64)>> = Mutex::new(None);
+
+fn viewer_join(addr: String, agent: String) -> u64 {
+    let id = NEXT_VIEWER.fetch_add(1, Ordering::Relaxed);
+    let now = now_ms();
+    if let Ok(mut v) = VIEWERS.lock() {
+        v.push(Viewer { id, addr, agent, since_ms: now, last_ms: now, session: None, typed: 0 });
+    }
+    id
+}
+
+fn viewer_update(id: u64, session: Option<u32>, typed: bool) {
+    if let Ok(mut v) = VIEWERS.lock() {
+        if let Some(e) = v.iter_mut().find(|e| e.id == id) {
+            e.last_ms = now_ms();
+            if session.is_some() {
+                e.session = session;
+            }
+            if typed {
+                e.typed += 1;
+            }
+        }
+    }
+}
+
+fn viewer_leave(id: u64) {
+    if let Ok(mut v) = VIEWERS.lock() {
+        v.retain(|e| e.id != id);
+    }
+}
+
+/// What a browser said it is, reduced to the part worth showing.
+///
+/// Kept short on purpose. A full user-agent string is a paragraph of
+/// version numbers that tells the reader nothing they asked; "iPhone" or
+/// "Windows" answers "is that me on my phone" in one word. It is also a
+/// claim by the client rather than a fact, which is why the address is
+/// shown next to it rather than instead of it.
+pub fn device_from_agent(agent: &str) -> String {
+    let a = agent.to_ascii_lowercase();
+    for (needle, name) in [
+        ("iphone", "iPhone"),
+        ("ipad", "iPad"),
+        ("android", "Android"),
+        ("macintosh", "Mac"),
+        ("mac os", "Mac"),
+        ("windows", "Windows"),
+        ("cros", "ChromeOS"),
+        ("linux", "Linux"),
+    ] {
+        if a.contains(needle) {
+            return name.to_string();
+        }
+    }
+    if a.is_empty() {
+        "unknown device".to_string()
+    } else {
+        "another device".to_string()
+    }
+}
 static LAST_FAIL_MS: AtomicU64 = AtomicU64::new(0);
 
 fn now_ms() -> u64 {
@@ -506,6 +595,10 @@ struct Ctx {
 }
 
 fn serve(stream: TcpStream, ctx: Arc<Ctx>) {
+    let addr = stream
+        .peer_addr()
+        .map(|a| a.ip().to_string())
+        .unwrap_or_else(|_| "unknown address".to_string());
     let _ = stream.set_nodelay(true);
     // A connection that opens and says nothing must not hold a thread
     // for the life of the process; once a stream is running it never
@@ -523,6 +616,10 @@ fn serve(stream: TcpStream, ctx: Arc<Ctx>) {
 
     if !secret_eq(&ctx.token, &presented_token(&req)) {
         punish_failure();
+        if let Ok(mut r) = REFUSED.lock() {
+            let n = r.as_ref().map(|(n, _, _)| *n).unwrap_or(0) + 1;
+            *r = Some((n, addr.clone(), now_ms()));
+        }
         // No hint about what was wrong with it, and nothing about the
         // token — neither the one expected nor the one presented — is
         // written anywhere, here or in a log line.
@@ -537,6 +634,9 @@ fn serve(stream: TcpStream, ctx: Arc<Ctx>) {
     FAILURES.store(0, Ordering::Relaxed);
     SERVED.fetch_add(1, Ordering::Relaxed);
     LAST_SERVED_MS.store(now_ms(), Ordering::Relaxed);
+    // Every authorised request is a viewer for as long as it lasts, which
+    // for a page load is a moment and for a stream is the whole visit.
+    let who = viewer_join(addr, req.header("user-agent").unwrap_or_default().to_string());
 
     match route(&req.method, &req.path) {
         Route::Page => respond(&mut out, "200 OK", "text/html; charset=utf-8", PAGE),
@@ -551,8 +651,8 @@ fn serve(stream: TcpStream, ctx: Arc<Ctx>) {
                 None => respond_json(&mut out, "400 Bad Request", &json!({"error": "no id"})),
             }
         }
-        Route::Stream => stream_session(&mut out, &req, &ctx),
-        Route::Input => handle_input(&mut out, &req),
+        Route::Stream => stream_session(&mut out, &req, &ctx, who),
+        Route::Input => handle_input(&mut out, &req, who),
         // Behind the token like everything else. There is nothing secret
         // in a copy of xterm.js, but a route that answers without one is
         // a route that says the server is here.
@@ -560,6 +660,7 @@ fn serve(stream: TcpStream, ctx: Arc<Ctx>) {
         Route::EngineCss => respond(&mut out, "200 OK", "text/css; charset=utf-8", ENGINE_CSS),
         Route::NotFound => respond(&mut out, "404 Not Found", "text/plain; charset=utf-8", "no\n"),
     }
+    viewer_leave(who);
 }
 
 /// Live output.
@@ -576,7 +677,7 @@ fn serve(stream: TcpStream, ctx: Arc<Ctx>) {
 /// The cost is that `EventSource` cannot set a header, so the stream's
 /// token travels in the query string. That is the same place the page
 /// load's token was, so it is not a new exposure.
-fn stream_session(out: &mut TcpStream, req: &Req, ctx: &Ctx) {
+fn stream_session(out: &mut TcpStream, req: &Req, ctx: &Ctx, who: u64) {
     let id = req.param("id").and_then(|s| s.parse::<u32>().ok());
     let head = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\n{COMMON_HEADERS}Connection: close\r\n\r\n"
@@ -621,6 +722,7 @@ fn stream_session(out: &mut TcpStream, req: &Req, ctx: &Ctx) {
             return;
         }
 
+        viewer_update(who, id, false);
         let list = sessions_json().to_string();
         if list != last_list {
             last_list = list.clone();
@@ -807,7 +909,7 @@ fn send_event(out: &mut TcpStream, event: &str, data: &str) -> std::io::Result<(
 /// browser tab that can *see* your shell and one that can *drive* it are
 /// different things to have published, and the second should never arrive
 /// as a side effect of wanting the first.
-fn handle_input(out: &mut TcpStream, req: &Req) {
+fn handle_input(out: &mut TcpStream, req: &Req, who: u64) {
     if !input_allowed() {
         respond_json(
             out,
@@ -826,7 +928,10 @@ fn handle_input(out: &mut TcpStream, req: &Req) {
     };
     let data = body.get("data").and_then(Value::as_str).unwrap_or_default();
     match daemon(&Request::Send { id: id as u32, data: data.to_string() }) {
-        Ok(_) => respond_json(out, "200 OK", &json!({"ok": true})),
+        Ok(_) => {
+            viewer_update(who, Some(id as u32), true);
+            respond_json(out, "200 OK", &json!({"ok": true}))
+        }
         Err(e) => respond_json(out, "409 Conflict", &json!({"error": e})),
     }
 }
@@ -937,6 +1042,10 @@ fn lan_hosts() -> Vec<String> {
 }
 
 fn status_for(bind: &str, p: u16) -> Value {
+    let who = match who_json() {
+        Value::Array(a) => a,
+        _ => Vec::new(),
+    };
     let hosts = if bind == "0.0.0.0" {
         let mut h = lan_hosts();
         h.push("127.0.0.1".to_string());
@@ -954,10 +1063,53 @@ fn status_for(bind: &str, p: u16) -> Value {
         // up; `served` and `last_ms` cover the case where somebody read
         // it and put the phone down, because "nobody is connected right
         // now" is not the same as "nobody has been".
-        "viewers": LIVE_CONNS.load(Ordering::Relaxed),
+        // The count is the length of the list beside it, not the number
+        // of open sockets. A phone loading the page holds two - the page
+        // and its stream - and a badge reading "2 watching" next to one
+        // device is the kind of small lie that makes people stop
+        // believing the badge.
+        "viewers": who.len(),
         "served": SERVED.load(Ordering::Relaxed),
         "last_ms": LAST_SERVED_MS.load(Ordering::Relaxed),
+        "who": Value::Array(who),
+        "refused": refused_json(),
     })
+}
+
+/// The connections, as records the window can render.
+///
+/// Page loads come and go in a moment and would flicker through this
+/// list, so only connections that have been there long enough to be
+/// worth mentioning are listed - which in practice means the streams,
+/// because a stream is what somebody watching actually holds open.
+fn who_json() -> Value {
+    let now = now_ms();
+    let Ok(v) = VIEWERS.lock() else { return json!([]) };
+    let list: Vec<Value> = v
+        .iter()
+        .filter(|e| now.saturating_sub(e.since_ms) >= 1000 || e.session.is_some())
+        .map(|e| {
+            json!({
+                "addr": e.addr,
+                "device": device_from_agent(&e.agent),
+                "since_ms": e.since_ms,
+                "last_ms": e.last_ms,
+                "session": e.session,
+                "typed": e.typed,
+            })
+        })
+        .collect();
+    json!(list)
+}
+
+fn refused_json() -> Value {
+    match REFUSED.lock() {
+        Ok(r) => match r.as_ref() {
+            Some((n, addr, at)) => json!({"count": n, "addr": addr, "last_ms": at}),
+            None => Value::Null,
+        },
+        Err(_) => Value::Null,
+    }
 }
 
 pub fn status() -> Value {
@@ -972,6 +1124,8 @@ pub fn status() -> Value {
             "viewers": 0,
             "served": SERVED.load(Ordering::Relaxed),
             "last_ms": LAST_SERVED_MS.load(Ordering::Relaxed),
+            "who": json!([]),
+            "refused": refused_json(),
         });
     }
     status_for(bind_addr(&mux::read_config()), p as u16)
@@ -1171,7 +1325,36 @@ mod remote_tests {
         assert_eq!(route("GET", &path), Route::NotFound);
     }
 
-/// The page is compiled in. If this is ever empty, the feature serves
+    /// What a browser calls itself, reduced to the one word somebody
+    /// actually wants when the badge lights up.
+    #[test]
+    fn a_phone_is_named_as_a_phone() {
+        let iphone = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15";
+        assert_eq!(device_from_agent(iphone), "iPhone");
+        let android = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36";
+        assert_eq!(device_from_agent(android), "Android");
+    }
+
+    /// An iPad says "Mac OS X" too, and an Android says "Linux". Both are
+    /// matched before the desktop names they contain, which is the whole
+    /// reason the list is ordered rather than a map.
+    #[test]
+    fn the_devices_that_lie_about_themselves_are_matched_first() {
+        let ipad = "Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15";
+        assert_eq!(device_from_agent(ipad), "iPad");
+        let mac = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36";
+        assert_eq!(device_from_agent(mac), "Mac");
+    }
+
+    /// Something that sent no user-agent at all is not "another device",
+    /// which would read as a guess. It is unknown, and says so.
+    #[test]
+    fn nothing_said_is_reported_as_nothing_known() {
+        assert_eq!(device_from_agent(""), "unknown device");
+        assert_eq!(device_from_agent("curl/8.4.0"), "another device");
+    }
+
+    /// The page is compiled in. If this is ever empty, the feature serves
     /// a blank screen and says nothing about why.
     #[test]
     fn the_page_is_embedded_in_the_binary() {

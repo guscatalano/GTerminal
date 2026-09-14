@@ -48,6 +48,8 @@ import {
   addressesFor,
   bindConsequence,
   maskToken,
+  describeRefused,
+  describeViewer,
   remoteBadge,
   remoteBind,
   remoteInput,
@@ -5583,14 +5585,21 @@ settingsSearch.addEventListener("keydown", (e) => {
 /// to notice, and nothing is asked at all while the feature is off.
 let remoteBadgeTimer = 0;
 
+/// Set by the settings page while it is built, so the one poll feeds
+/// both the badge and the list of who is connected. A stale listener
+/// from a previous build writes into detached nodes and harms nothing.
+let onRemoteStatus: ((st: RemoteStatusLive) => void) | null = null;
+
 async function refreshRemoteBadge() {
   const el = document.getElementById("remote-badge");
   if (!el) return;
   if (!remoteOn(config)) {
     el.hidden = true;
+    onRemoteStatus?.({});
     return;
   }
   const st = await invoke<RemoteStatusLive>("remote_status").catch(() => ({}) as RemoteStatusLive);
+  onRemoteStatus?.(st);
   const badge = remoteBadge(config, st);
   if (!badge) {
     el.hidden = true;
@@ -7546,6 +7555,57 @@ function buildRemoteSection() {
     "Separate from watching, and separately off. A browser tab that can see your shell and one that can drive it are different things to have published, and the second should never arrive as a side effect of wanting the first.",
     typeWrap
   );
+
+  // Who is there.
+  //
+  // There is no account behind any of this - the token is the only
+  // credential - so this says what the connection shows and nothing
+  // more: where it came from, what the browser claims to be, what it is
+  // watching, whether it has typed. The claim and the address are both
+  // shown, because the address is the half that can be checked.
+  const whoWrap = document.createElement("div");
+  whoWrap.className = "setting-stack";
+  const whoList = document.createElement("div");
+  whoList.className = "remote-who";
+  const whoRefused = document.createElement("div");
+  whoRefused.className = "setting-status";
+  whoWrap.append(whoList, whoRefused);
+  redraws.push(() => {
+    const now = Date.now();
+    whoList.textContent = "";
+    const seen = (status as RemoteStatusLive).who ?? [];
+    if (!remoteOn(config)) {
+      const none = document.createElement("div");
+      none.className = "setting-status";
+      none.textContent = "Nothing can connect while this is off.";
+      whoList.appendChild(none);
+    } else if (!seen.length) {
+      const none = document.createElement("div");
+      none.className = "setting-status";
+      none.textContent = "Nobody is connected.";
+      whoList.appendChild(none);
+    } else {
+      for (const v of seen) {
+        const line = document.createElement("div");
+        line.className = "remote-who-line";
+        line.textContent = describeViewer(v, now);
+        whoList.appendChild(line);
+      }
+    }
+    whoRefused.textContent = describeRefused((status as RemoteStatusLive).refused, now);
+  });
+  settingRow(
+    "Connected now",
+    "Anyone holding the token is allowed in, so this cannot say who somebody is — only where they connected from and what their browser says it is. Regenerating the token above disconnects everything immediately.",
+    whoWrap
+  );
+
+  // The badge polls this already; the page listens in rather than
+  // starting a second clock of its own.
+  onRemoteStatus = (st) => {
+    status = st;
+    redraw();
+  };
 
   redraw();
 }

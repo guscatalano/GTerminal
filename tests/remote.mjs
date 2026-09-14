@@ -16,6 +16,8 @@ import {
   remoteOn,
   remotePort,
   remoteUrl,
+  describeRefused,
+  describeViewer,
   remoteBadge,
   statusLine,
 } from "../src/remote.ts";
@@ -232,6 +234,66 @@ check(
   "the badge asks for a section that exists",
   main.includes('openSettings("Remote control")') &&
     main.includes('settingsSection("Remote control")'),
+  true
+);
+
+
+// ── who is connected ───────────────────────────────────────────────────
+// The token is the only credential, so nothing here knows who anybody
+// is. What it can say is what the connection showed, and the line has to
+// keep the claim ("my browser says iPhone") next to the fact ("it came
+// from this address") rather than letting the first stand for the both.
+const T0 = 1_700_000_000_000;
+check(
+  "a watcher is described by device and address",
+  describeViewer({ device: "iPhone", addr: "10.0.0.14", since_ms: T0 - 65_000 }, T0),
+  "iPhone at 10.0.0.14 · connected 1m ago"
+);
+check(
+  "with what it is watching, when it is watching something",
+  describeViewer({ device: "iPad", addr: "10.0.0.9", session: 3, since_ms: T0 - 5_000 }, T0),
+  "iPad at 10.0.0.9 · watching session 3 · connected 5s ago"
+);
+check(
+  "and whether it has typed, which is the half that matters",
+  describeViewer({ device: "Android", addr: "10.0.0.3", session: 1, typed: 4, since_ms: T0 }, T0),
+  "Android at 10.0.0.3 · watching session 1 · typed 4 times · connected 0s ago"
+);
+check(
+  "nothing known is said as nothing known, never guessed",
+  describeViewer({}, T0),
+  "a device at an unknown address"
+);
+// Session 0 is a real session id. A truthiness test would drop it.
+check(
+  "session zero is still a session",
+  describeViewer({ device: "Mac", addr: "10.0.0.2", session: 0 }, T0).includes("watching session 0"),
+  true
+);
+
+check("no refusals says nothing at all", describeRefused(null, T0), "");
+check("no refusals is not the same as zero refusals", describeRefused({ count: 0 }, T0), "");
+check(
+  "one refusal is reported with where it came from",
+  describeRefused({ count: 1, addr: "10.0.0.77", last_ms: T0 - 120_000 }, T0),
+  "Turned away once for the wrong token — last from 10.0.0.77 2m ago."
+);
+check(
+  "and several are counted",
+  describeRefused({ count: 9, addr: "10.0.0.77", last_ms: T0 }, T0),
+  "Turned away 9 times for the wrong token — last from 10.0.0.77 0s ago."
+);
+
+// The badge's tooltip is where somebody reads this first, so it carries
+// the same answer rather than sending them to the settings page for it.
+check(
+  "the badge says who, not just how many",
+  /iPhone at 10\.0\.0\.14/.test(
+    remoteBadge(
+      { remote_enabled: true },
+      { viewers: 1, who: [{ device: "iPhone", addr: "10.0.0.14", session: 2 }] }
+    )?.title ?? ""
+  ),
   true
 );
 

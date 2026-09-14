@@ -111,6 +111,32 @@ export function addressesFor(st: RemoteStatus, token: string): string[] {
   return hosts.map((h) => remoteUrl(h, port, token));
 }
 
+/// One connection, as the server can honestly describe it.
+///
+/// There is no account here and no name: the token is the only
+/// credential, so anyone holding it is "authorised" and nothing knows
+/// who they are. What the connection itself shows is the address it came
+/// from and what the browser claimed to be, and the second of those is a
+/// claim rather than a fact - which is why both are shown, never one
+/// standing in for the other.
+export interface RemoteViewer {
+  addr?: string;
+  device?: string;
+  since_ms?: number;
+  last_ms?: number;
+  session?: number | null;
+  typed?: number;
+}
+
+/// Requests that were turned away for presenting the wrong token, or
+/// none. On a loopback bind that means something on this machine is
+/// knocking; on a LAN bind, something on the network is.
+export interface RemoteRefused {
+  count?: number;
+  addr?: string;
+  last_ms?: number;
+}
+
 export interface RemoteStatusLive extends RemoteStatus {
   /// Connections open right now. For this page that is a phone with the
   /// stream up, so it reads as "somebody is watching".
@@ -120,6 +146,46 @@ export interface RemoteStatusLive extends RemoteStatus {
   /// been", and after the fact the second one is what you want to know.
   served?: number;
   last_ms?: number;
+  who?: RemoteViewer[];
+  refused?: RemoteRefused | null;
+}
+
+/// How long ago, in the shortest form that is still true.
+export function ago(ms: number | undefined, now: number): string {
+  if (!ms) return "";
+  const d = Math.max(0, now - ms) / 1000;
+  if (d < 60) return `${Math.round(d)}s ago`;
+  if (d < 3600) return `${Math.round(d / 60)}m ago`;
+  if (d < 86400) return `${Math.round(d / 3600)}h ago`;
+  return `${Math.round(d / 86400)}d ago`;
+}
+
+/// One line about one connection.
+///
+/// Device and address both, in that order: the device is what somebody
+/// recognises ("that's my phone") and the address is what makes it
+/// checkable. Saying only the device would be repeating the client's own
+/// claim back as though it were established.
+export function describeViewer(v: RemoteViewer, now: number): string {
+  const parts = [`${v.device || "a device"} at ${v.addr || "an unknown address"}`];
+  if (typeof v.session === "number") parts.push(`watching session ${v.session}`);
+  if (v.typed) parts.push(v.typed === 1 ? "typed once" : `typed ${v.typed} times`);
+  const since = ago(v.since_ms, now);
+  if (since) parts.push(`connected ${since}`);
+  return parts.join(" · ");
+}
+
+/// The line about attempts that were refused, or nothing when there have
+/// been none. Worth its own sentence rather than a number in a corner:
+/// it is the only thing here that says somebody who should not be
+/// knocking is.
+export function describeRefused(r: RemoteRefused | null | undefined, now: number): string {
+  if (!r || !r.count) return "";
+  const when = ago(r.last_ms, now);
+  const times = r.count === 1 ? "once" : `${r.count} times`;
+  return `Turned away ${times} for the wrong token — last from ${r.addr || "an unknown address"}${
+    when ? ` ${when}` : ""
+  }.`;
 }
 
 /// The badge in the window chrome, or nothing.
@@ -148,10 +214,16 @@ export function remoteBadge(
     ? "Typing is on, so whoever is connected can run commands."
     : "Typing is off, so it can be read but not driven.";
   if (viewers > 0) {
+    // Who, when it can be said. The count alone answers "is somebody
+    // there" and leaves the question everybody asks next - "is that me
+    // on my phone?" - for a settings page they have to go and find.
+    const now = Date.now();
+    const seen = (st.who ?? []).map((v) => describeViewer(v, now));
+    const who = seen.length ? ` ${seen.join("; ")}.` : "";
     return {
       text: viewers === 1 ? "1 watching" : `${viewers} watching`,
       level: "watched",
-      title: `Remote control is on and something is connected right now — ${where}. ${drive} Click to open the setting.`,
+      title: `Remote control is on and something is connected right now — ${where}.${who} ${drive} Click to open the setting.`,
     };
   }
   return {
