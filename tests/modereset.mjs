@@ -79,7 +79,11 @@ check(
   `it writes \`${previewWrites}\` — recorded output replayed with no cleanup, which is what is on screen right after a reboot`
 );
 
-const viewerWrites = ts.match(/term\.write\(data \+ ([A-Z_]+)\)/)?.[1] ?? "";
+// The write may carry a callback as its second argument - it does now,
+// so a search primed from a history hit runs after the text has landed
+// - so the match stops at the reset's name rather than at a close
+// paren that might be a comma.
+const viewerWrites = ts.match(/term\.write\(data \+ ([A-Z_]+)[),]/)?.[1] ?? "";
 check(
   "the transcript viewer applies the reset",
   viewerWrites === "VIEWER_MODE_RESET",

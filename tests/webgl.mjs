@@ -77,17 +77,36 @@ function probe(transparent) {
   return { line, ...nums };
 }
 
+/// The probe, with one retry for a frame that never happened.
+///
+/// A result where every pixel is clear and not one glyph was drawn -
+/// `opaque=0 glyph=0` - is not a renderer that painted transparency; it
+/// is a WebGL context that never came up, which is what a headless Edge
+/// does when it is the thirtieth one launched in a row and the GPU
+/// process has been asked for too much. Alone this suite passed every
+/// time; in the batch it failed two runs in three with exactly that
+/// signature. Such a frame proves nothing either way, so it is thrown
+/// away and asked for again, once. A second one is a real failure.
+function probeReal(transparent) {
+  const first = probe(transparent);
+  if (first.opaque === 0 && first.glyph === 0) {
+    console.log(`  (an empty frame - no WebGL context - retrying once: ${first.line})`);
+    return probe(transparent);
+  }
+  return first;
+}
+
 // A transparent theme: nearly every pixel the renderer owns must be left
 // alone, and the glyphs must still be there — if they are not, the
 // snapshot caught an empty buffer and proves nothing.
-const clear = probe(true);
+const clear = probeReal(true);
 console.log(`  transparent theme -> ${clear.line}`);
 check("a transparent background is left transparent", clear.clear > 0, `${clear.line} — the renderer painted over every pixel, so background art cannot show through`);
 check("and the text is still drawn", clear.glyph > 100, `${clear.line} — too few glyph pixels; the snapshot did not catch a real frame, so the result above means nothing`);
 
 // The control. Without it, a renderer that drew nothing at all would look
 // like a pass above.
-const solid = probe(false);
+const solid = probeReal(false);
 console.log(`  opaque theme      -> ${solid.line}`);
 check("an opaque background is painted", solid.clear === 0, `${solid.line} — an opaque theme left transparent pixels, so the probe is not measuring the renderer`);
 check("and its text is drawn too", solid.glyph > 100, solid.line);

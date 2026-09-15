@@ -36,6 +36,17 @@ jobs:
       - name: Theme contrast audit
         run: node tests/contrast.mjs
 
+      # Every node suite `npm test` names, in one step. They were only
+      # ever run locally: CI ran contrast.mjs and nothing else, so a
+      # suite that passed on the machine that wrote it was the only
+      # evidence a suite had. The runner reads the list out of
+      # package.json, so a suite added to `npm test` is in CI the same
+      # commit and one that is not cannot be mistaken for covered.
+      # Several of these drive headless Edge, which the Windows runner
+      # ships with.
+      - name: Node suites
+        run: node tests/run-node.mjs
+
       - name: Build daemon (debug, used by E2E suites)
         run: cargo build --manifest-path src-tauri/Cargo.toml
 
