@@ -606,7 +606,11 @@ class GTermPredictor : System.Management.Automation.Subsystem.Prediction.IComman
 ///    reports nothing is older than this.
 /// 2: `{"ev":"taken"}` to a client whose session another window has just
 ///    attached to.
-pub const PROTOCOL: u32 = 2;
+/// 3: every connection presents the token from `daemon.token` as its
+///    first line. A daemon that does not ask for one is a daemon from
+///    before that rule, and the window retires it rather than talking
+///    to something anything on the machine could also talk to.
+pub const PROTOCOL: u32 = 3;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
@@ -1666,6 +1670,85 @@ fn port_file() -> PathBuf {
     state_dir().join("daemon.port")
 }
 
+pub fn token_file() -> PathBuf {
+    state_dir().join("daemon.token")
+}
+
+/// The secret every connection to the daemon must present.
+///
+/// The socket is loopback TCP, which anything running on this machine
+/// can reach - including a sandboxed process that cannot read a single
+/// file in %LOCALAPPDATA%. That was defensible while the daemon was an
+/// implementation detail of one window. It is not now: the daemon holds
+/// live shells, `send` types into them without attaching, and remote
+/// control put a network-facing server in front of it.
+///
+/// So the check is "can you read this file", which is the same question
+/// NTFS already answers for everything else in the state directory -
+/// and the answer is no for another user, and no for a process that
+/// cannot see the user's profile.
+///
+/// A named pipe with a user ACL would say the same thing more
+/// idiomatically and is still the better end state; this is the part of
+/// it that does not require rewriting every socket in the file.
+fn read_token() -> String {
+    std::fs::read_to_string(token_file())
+        .map(|t| t.trim().to_string())
+        .unwrap_or_default()
+}
+
+fn write_token() -> String {
+    let token = new_secret();
+    std::fs::create_dir_all(state_dir()).ok();
+    // Written before the port file, so a client that finds a port
+    // always finds a token to go with it.
+    std::fs::write(token_file(), &token).expect("write daemon token");
+    token
+}
+
+/// 160 bits from the operating system's generator, hex encoded.
+fn new_secret() -> String {
+    let mut bytes = [0u8; 20];
+    fill_secret(&mut bytes);
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[cfg(windows)]
+fn fill_secret(out: &mut [u8]) {
+    use windows_sys::Win32::Security::Cryptography::{
+        BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+    };
+    let status = unsafe {
+        BCryptGenRandom(std::ptr::null_mut(), out.as_mut_ptr(), out.len() as u32, BCRYPT_USE_SYSTEM_PREFERRED_RNG)
+    };
+    // A token that is quietly all zeroes would be no token at all.
+    assert!(status == 0, "the system random generator refused");
+}
+
+#[cfg(not(windows))]
+fn fill_secret(out: &mut [u8]) {
+    use std::io::Read;
+    std::fs::File::open("/dev/urandom")
+        .expect("no system random generator")
+        .read_exact(out)
+        .expect("the system random generator refused");
+}
+
+/// Compare without letting the clock say how much was right.
+pub fn secret_matches(expected: &str, presented: &str) -> bool {
+    if expected.is_empty() {
+        return false;
+    }
+    let e = expected.as_bytes();
+    let p = presented.as_bytes();
+    let mut diff: u32 = (e.len() ^ p.len()) as u32;
+    for (i, eb) in e.iter().enumerate() {
+        let pb = if i < p.len() { p[i] } else { 0 };
+        diff |= (eb ^ pb) as u32;
+    }
+    diff == 0
+}
+
 pub fn sessions_dir() -> PathBuf {
     state_dir().join("sessions")
 }
@@ -1929,8 +2012,11 @@ fn daemon_answers(port: u16) -> bool {
         return false;
     };
     sock.set_read_timeout(Some(std::time::Duration::from_millis(600))).ok();
-    if sock.write_all(b"{\"cmd\":\"list\"}
-").is_err() {
+    // With the token on it, because an unauthenticated probe now gets
+    // "unauthorized" - which contains no "ok" and would read as "no
+    // daemon here", and a second daemon would start on top of the first.
+    let probe = format!("{{\"cmd\":\"list\",\"token\":\"{}\"}}\n", read_token());
+    if sock.write_all(probe.as_bytes()).is_err() {
         return false;
     }
     let mut line = String::new();
@@ -1956,6 +2042,10 @@ pub fn run_daemon() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind daemon socket");
     let port = listener.local_addr().expect("local addr").port();
     std::fs::create_dir_all(state_dir()).ok();
+    // The token first: a client that can see a port must be able to see
+    // the secret that goes with it, or the first thing a new daemon does
+    // is refuse the window that started it.
+    write_token();
     std::fs::write(port_file(), port.to_string()).expect("write port file");
 
     finalize_stale_history();
@@ -2328,10 +2418,59 @@ fn conn_loop(
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut out = stream;
     let mut line = String::new();
+
+    // Whether this connection has shown the token yet. It rides on the
+    // first request as an extra field rather than on a line of its own:
+    // a hello line would be answered "bad request" by any daemon from
+    // before this rule, and the caller would read that answer in place
+    // of the one it asked for - so a freshly updated window would fail
+    // to retire the old daemon holding all the sessions. An unknown
+    // field is ignored by serde, so an old daemon behaves exactly as it
+    // did and a new one has what it needs.
+    //
+    // Checked once rather than per line: a connection that has attached
+    // carries a keystroke per line after this, and putting forty bytes
+    // of hex in front of every one of them would be paying for the
+    // check on the path this app measures in milliseconds.
+    let mut authorised = false;
+
     loop {
         line.clear();
         if reader.read_line(&mut line)? == 0 {
             break;
+        }
+        if !authorised {
+            let presented = serde_json::from_str::<serde_json::Value>(line.trim())
+                .ok()
+                .and_then(|v| v.get("token").and_then(|t| t.as_str()).map(str::to_string))
+                .unwrap_or_default();
+            if !secret_matches(&read_token(), &presented) {
+                // Answered and then dropped. Silence would be
+                // indistinguishable from a daemon that had died, and a
+                // caller that cannot tell those apart retries forever.
+                write_line(&mut out, &json!({"ok": false, "error": "unauthorized"}))?;
+                return Ok(());
+            }
+            authorised = true;
+            // A line that is only a token is a greeting, not a request:
+            // it authorises the connection and is answered with nothing
+            // at all. Callers that write their own first line - the
+            // window attaching, the remote server observing, a test
+            // driving the wire by hand - can send this and then carry on
+            // exactly as they did before, rather than threading the
+            // field into a command they built as text.
+            //
+            // Silent on purpose. An acknowledgement would be one reply
+            // more than every existing caller expects, and they read
+            // replies positionally.
+            if serde_json::from_str::<serde_json::Value>(line.trim())
+                .ok()
+                .map(|v| v.get("cmd").is_none())
+                .unwrap_or(false)
+            {
+                line.clear();
+                continue;
+            }
         }
         let req: Request = match serde_json::from_str(line.trim()) {
             Ok(r) => r,
@@ -3109,6 +3248,22 @@ fn start_session(
     Ok(())
 }
 
+/// A request with the daemon's token on it.
+///
+/// Every connection has to present it once, on its first line, and this
+/// is the only place that knows how. Callers that write their own first
+/// line - attaching, observing - go through here rather than adding the
+/// field by hand, because a first line without it is a connection the
+/// daemon closes and a bug that only shows up on the path nobody tests
+/// twice.
+pub fn with_token(req: &Request) -> serde_json::Value {
+    let mut v = serde_json::to_value(req).expect("serialize");
+    if let Some(map) = v.as_object_mut() {
+        map.insert("token".into(), serde_json::Value::String(read_token()));
+    }
+    v
+}
+
 pub mod client {
     use super::*;
     use std::process::{Command, Stdio};
@@ -3237,8 +3392,7 @@ pub mod client {
     }
 
     pub fn request(mut stream: TcpStream, req: &Request) -> Result<serde_json::Value, String> {
-        write_line(&mut stream, &serde_json::to_value(req).expect("serialize"))
-            .map_err(|e| e.to_string())?;
+        write_line(&mut stream, &with_token(req)).map_err(|e| e.to_string())?;
         let mut reader = BufReader::new(stream);
         let mut line = String::new();
         reader.read_line(&mut line).map_err(|e| e.to_string())?;

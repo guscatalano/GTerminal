@@ -46,12 +46,44 @@ function Stop-DaemonTree {
   taskkill /PID $daemonPid /F 2>&1 | Out-Null
 }
 
+# The daemon's token, and a way to put it on a line.
+#
+# Every connection has to present it once, on its first request. The
+# daemon writes it next to the port file before the port file exists, so
+# a test that has a port always has a token to go with it.
+function Daemon-Token {
+  $f = "$env:LOCALAPPDATA\GTerminal\daemon.token"
+  if (Test-Path $f) { (Get-Content $f -Raw).Trim() } else { "" }
+}
+
+# A request with the token folded in. Written as text rather than
+# through ConvertTo-Json so that the JSON these tests send stays
+# readable at the call site - half of them are checking what the daemon
+# does with an exact string.
+function With-Token {
+  param([string] $json)
+  $t = Daemon-Token
+  if (-not $t) { return $json }
+  $trimmed = $json.TrimEnd()
+  if ($trimmed -eq "{}") { return "{`"token`":`"$t`"}" }
+  # Insert as the first field, which keeps a malformed-on-purpose
+  # payload malformed in the way the test intended.
+  if ($trimmed.StartsWith("{")) { return "{`"token`":`"$t`"," + $trimmed.Substring(1) }
+  $json
+}
+
 function New-Conn {
   param($port)
   $c = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $port)
   $c.NoDelay = $true
   $s = $c.GetStream()
   $w = [System.IO.StreamWriter]::new($s); $w.NewLine = "`n"; $w.AutoFlush = $true
+  # Greet with the token. The daemon answers nothing to a line that is
+  # only a token, so everything written after this behaves exactly as it
+  # did before there was one - which matters here, where half the tests
+  # read replies positionally.
+  $t = Daemon-Token
+  if ($t) { $w.WriteLine("{`"token`":`"$t`"}") }
   [pscustomobject]@{ Client = $c; Stream = $s; Writer = $w; Acc = ""; Buf = New-Object byte[] 65536 }
 }
 
@@ -1349,6 +1381,71 @@ if (-not $obsWatchGone.ok) { Pass "watching a session that is not there is refus
 else { Fail "observe" "observing a nonexistent session reported success" }
 $obsWatch.Client.Close()
 $obsWin.Client.Close()
+
+# ════ the token on the socket ════
+#
+# The daemon listens on loopback TCP, which anything running on this
+# machine can reach - including a sandboxed process that cannot read a
+# single file in the user's profile. It holds live shells, `send` types
+# into them without attaching, and remote control put a network-facing
+# server in front of it, so "anything local can drive a shell" stopped
+# being a defensible default.
+#
+# The check is "can you read daemon.token", which is the question NTFS
+# already answers for the rest of the state directory: no for another
+# user, and no for a process that cannot see this profile.
+$authPort = Start-Daemon
+
+# A connection that says nothing about a token is refused and dropped.
+$bare = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $authPort)
+$bw = [System.IO.StreamWriter]::new($bare.GetStream()); $bw.NewLine = "`n"; $bw.AutoFlush = $true
+$br = [System.IO.StreamReader]::new($bare.GetStream())
+$bw.WriteLine('{"cmd":"list"}')
+$bareAnswer = $br.ReadLine()
+if ($bareAnswer -and ($bareAnswer | ConvertFrom-Json).error -eq "unauthorized") {
+  Pass "a connection with no token is refused"
+} else {
+  Fail "auth" "expected unauthorized, got: $bareAnswer"
+}
+# And refused for good: the daemon closes rather than leaving a socket
+# open for a guesser to keep trying on.
+# A closed socket reads as null on a clean close and throws on a reset;
+# both are the daemon having gone, and only "it answered again" is the
+# failure being looked for.
+$stillTalking = $false
+try {
+  $bw.WriteLine('{"cmd":"list"}')
+  Start-Sleep -Milliseconds 300
+  $again = $br.ReadLine()
+  $stillTalking = $null -ne $again
+} catch { $stillTalking = $false }
+if (-not $stillTalking) { Pass "and the connection is closed rather than left open to guess on" }
+else { Fail "auth" "the daemon kept talking to a connection it had refused" }
+$bare.Close()
+
+# A wrong token is no better than none.
+$wrong = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $authPort)
+$ww = [System.IO.StreamWriter]::new($wrong.GetStream()); $ww.NewLine = "`n"; $ww.AutoFlush = $true
+$wr = [System.IO.StreamReader]::new($wrong.GetStream())
+$ww.WriteLine('{"cmd":"list","token":"0000000000000000000000000000000000000000"}')
+$wrongAnswer = $wr.ReadLine()
+if ($wrongAnswer -and ($wrongAnswer | ConvertFrom-Json).error -eq "unauthorized") { Pass "and a wrong one is refused too" }
+else { Fail "auth" "expected unauthorized for a wrong token, got: $wrongAnswer" }
+$wrong.Close()
+
+# The right one works, which New-Conn has been doing all along - said
+# out loud here so the three cases sit together.
+$good = Request2 $authPort '{"cmd":"list"}'
+if ($good.ok) { Pass "and the token from the state directory is accepted" }
+else { Fail "auth" "a connection carrying the real token was refused" }
+
+# The token is not the port file. A daemon that wrote one and not the
+# other would refuse every client it started.
+if (Test-Path "$env:LOCALAPPDATA\GTerminal\daemon.token") { Pass "the daemon leaves its token where a client can find it" }
+else { Fail "auth" "no daemon.token was written" }
+$tokenText = (Get-Content "$env:LOCALAPPDATA\GTerminal\daemon.token" -Raw).Trim()
+if ($tokenText.Length -ge 32) { Pass "and it is long enough to be worth checking ($($tokenText.Length) characters)" }
+else { Fail "auth" "the token is $($tokenText.Length) characters, which is not a secret" }
 
 # ════ cleanup ════
 foreach ($d in $script:daemons) {

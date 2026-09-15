@@ -64,6 +64,18 @@ $env:LOCALAPPDATA = Join-Path $env:TEMP "gterminal-typing-test"
 New-Item -ItemType Directory -Force $env:LOCALAPPDATA | Out-Null
 Remove-Item "$env:LOCALAPPDATA\GTerminal" -Recurse -Force -ErrorAction SilentlyContinue
 
+# The daemon wants its token on the first line of a connection. A line
+# that is only a token is a greeting it answers with nothing, so
+# everything written after it behaves as it did before there was one.
+function Greet {
+  param($writer, [string] $stateDir)
+  $f = Join-Path $stateDir "daemon.token"
+  if (Test-Path $f) {
+    $t = (Get-Content $f -Raw).Trim()
+    if ($t) { $writer.WriteLine("{`"token`":`"$t`"}") }
+  }
+}
+
 $daemon = Start-Process -FilePath $exe -ArgumentList "--daemon" -WindowStyle Hidden -PassThru
 Start-Sleep -Milliseconds 1200
 $port = [int](Get-Content "$env:LOCALAPPDATA\GTerminal\daemon.port").Trim()
@@ -72,6 +84,7 @@ $client = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $port)
 $client.NoDelay = $true
 $script:stream = $client.GetStream()
 $w = [System.IO.StreamWriter]::new($script:stream); $w.NewLine = "`n"; $w.AutoFlush = $true
+Greet $w "$env:LOCALAPPDATA\GTerminal"
 $r = [System.IO.StreamReader]::new($script:stream)
 
 # NDJSON reading via raw polls: a sync ReadTimeout on a NetworkStream kills
@@ -283,6 +296,7 @@ function Open-Shell {
   $ctl = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $port)
   $cs = $ctl.GetStream()
   $cw = [System.IO.StreamWriter]::new($cs); $cw.NewLine = "`n"; $cw.AutoFlush = $true
+  Greet $cw "$env:LOCALAPPDATA\GTerminal"
   $cr = [System.IO.StreamReader]::new($cs)
   $cw.WriteLine("{""cmd"":""create"",""cols"":120,""rows"":30,""shell"":""$shell""}")
   $sid = ($cr.ReadLine() | ConvertFrom-Json).id
@@ -313,6 +327,7 @@ function Close-Shell {
   $ctl = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $port)
   $cs = $ctl.GetStream()
   $cw = [System.IO.StreamWriter]::new($cs); $cw.NewLine = "`n"; $cw.AutoFlush = $true
+  Greet $cw "$env:LOCALAPPDATA\GTerminal"
   $cr = [System.IO.StreamReader]::new($cs)
   # The first kill is soft (grace window); the second makes it stick.
   $cw.WriteLine("{""cmd"":""kill"",""id"":$($sess.Id)}"); $null = $cr.ReadLine()

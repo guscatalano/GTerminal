@@ -127,7 +127,7 @@ Deeper dives: [tiling panes](docs/tiling-panes.md),
 
 ## Known limitations
 
-- The daemon socket is unauthenticated localhost TCP; switching to a user-ACL'd named pipe is the planned hardening step.
+- The daemon socket is localhost TCP, and every connection must present a token read from the state directory — so reaching it requires being the user whose profile holds the token, not merely being on the machine. A user-ACL'd named pipe would say the same thing more idiomatically and is still the better end state.
 - Scrollback checkpoints are capped at 512KB per session and flushed every 3s, so a hard cut can lose the last few seconds.
 
 **Shells**: PowerShell 7, Windows PowerShell, and Command Prompt. Set the default in ⚙ settings; right-click the + button (tab bar or sidebar) to open a one-off tab in a specific shell. Each session remembers its shell — reboot resurrection brings back the same one. All shells get cwd tracking (PowerShell via a prompt hook, cmd via its `$E]9;9;$P$E\` prompt escape).

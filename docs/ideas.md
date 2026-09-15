@@ -132,7 +132,7 @@ text, and the only reason it is not higher is that nobody has asked.
 
 ## Known and deliberate
 
-### 11. The daemon socket
+### 11. The daemon socket — *the hole is closed; the pipe is not built*
 
 Unauthenticated localhost TCP, which was defensible while only the
 window spoke to it. Remote control changes the shape of that: the daemon
@@ -140,3 +140,18 @@ is now what sits behind a network-facing server, and anything else
 running as this user can drive a shell through it. The README has
 listed the named-pipe hardening as the planned step for some time; it
 has more weight behind it now than when it was written.
+
+Done differently, for now. Every connection presents a 160-bit token
+read from `daemon.token` in the state directory, checked once per
+connection — so reaching the daemon means being able to read this
+user's profile, which is the same bar the pipe ACL would set, and the
+sandboxed-process case that loopback TCP let through is closed. The
+token rides on the first request rather than a line of its own, because
+a hello line is answered "bad request" by a daemon from before the rule
+and a freshly updated window would fail to retire the old daemon
+holding all the sessions.
+
+What is still worth doing: the pipe itself, which would make the check
+structural rather than something every client has to remember. The
+remaining gap is a process running as this user that has no business
+driving a shell — for which a file it can read is no barrier.

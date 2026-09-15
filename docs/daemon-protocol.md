@@ -80,6 +80,33 @@ A daemon too old for either answers `{"ok":false,"error":"bad request"}`
 and keeps the connection, which is the behaviour this whole document is
 about. The caller reports that rather than swallowing it.
 
+## The token
+
+Every connection presents the daemon's token once, on its first line,
+as a `token` field alongside the command — or as a line holding nothing
+else, which the daemon authorises and answers with silence, for callers
+that build their first request as text. A connection that presents the
+wrong token, or none, is answered `{"ok":false,"error":"unauthorized"}`
+and closed.
+
+The token is 160 bits from the system generator, written to
+`daemon.token` in the state directory before the port file exists, so a
+client that can find a port can always find the token that goes with
+it. The check is therefore "can you read this file", which is the
+question NTFS already answers for everything else in that directory:
+no for another user, and no for a process that cannot see this profile.
+
+It is checked once per connection rather than per line. A connection
+that has attached carries a keystroke per line after that, and forty
+bytes of hex in front of each one would be paying for the check on the
+path this app measures in milliseconds.
+
+A named pipe with a user ACL would say the same thing more idiomatically
+and remains the better end state. This is the part of it that does not
+require rewriting every socket in `mux.rs`, and it closes the hole that
+mattered: loopback TCP is reachable by anything on the machine,
+including a sandboxed process that cannot read a byte of the profile.
+
 ## Deliberately not doing
 
 **Handing PTYs to the new daemon.** A real handoff — passing pty handles

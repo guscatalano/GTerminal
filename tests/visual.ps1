@@ -544,6 +544,18 @@ function Wait-Settled {
   $prev
 }
 
+# The daemon wants its token on the first line of a connection. A line
+# that is only a token is a greeting it answers with nothing, so
+# everything written after it behaves as it did before there was one.
+function Greet {
+  param($writer, [string] $stateDir)
+  $f = Join-Path $stateDir "daemon.token"
+  if (Test-Path $f) {
+    $t = (Get-Content $f -Raw).Trim()
+    if ($t) { $writer.WriteLine("{`"token`":`"$t`"}") }
+  }
+}
+
 function App-Windows {
   param([int]$procId)
   $found = New-Object System.Collections.ArrayList
@@ -1040,6 +1052,7 @@ function Daemon-Sessions {
   try {
     $c = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $port)
     $w = [System.IO.StreamWriter]::new($c.GetStream()); $w.NewLine = "`n"; $w.AutoFlush = $true
+    Greet $w (Join-Path $scratch "GTerminal")
     $rd = [System.IO.StreamReader]::new($c.GetStream())
     $w.WriteLine('{"cmd":"list"}')
     $line = $rd.ReadLine()
@@ -1068,6 +1081,7 @@ function Seed-Daemon {
   foreach ($i in 1..$count) {
     $c = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $port)
     $w = [System.IO.StreamWriter]::new($c.GetStream()); $w.NewLine = "`n"; $w.AutoFlush = $true
+    Greet $w (Join-Path $scratch "GTerminal")
     $rd = [System.IO.StreamReader]::new($c.GetStream())
     $w.WriteLine('{"cmd":"create","cols":100,"rows":30}')
     $newId = ($rd.ReadLine() | ConvertFrom-Json).id

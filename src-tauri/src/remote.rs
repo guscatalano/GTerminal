@@ -866,7 +866,10 @@ fn observe(id: u32) -> Result<Watch, String> {
         .set_read_timeout(Some(Duration::from_millis(POLL_MS)))
         .map_err(|e| e.to_string())?;
     let mut w = stream.try_clone().map_err(|e| e.to_string())?;
-    let req = serde_json::to_vec(&json!({"cmd": "observe", "id": id})).map_err(|e| e.to_string())?;
+    // Through with_token: this is the first line of the connection, and
+    // a first line without the daemon's token is one the daemon closes.
+    let req = serde_json::to_vec(&mux::with_token(&Request::Observe { id }))
+        .map_err(|e| e.to_string())?;
     w.write_all(&req).map_err(|e| e.to_string())?;
     w.write_all(b"\n").map_err(|e| e.to_string())?;
     w.flush().map_err(|e| e.to_string())?;

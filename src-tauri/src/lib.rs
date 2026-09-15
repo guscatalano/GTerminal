@@ -44,7 +44,8 @@ fn attach_internal(app: &AppHandle, state: &PtyManager, id: u32, owner: Option<&
         state.owners.lock().unwrap().insert(id, owner.to_string());
     }
     let mut stream = mux::client::ensure()?;
-    mux::write_line(&mut stream, &serde_json::to_value(Request::Attach { id }).unwrap())
+    // First line of this connection, so it carries the token.
+    mux::write_line(&mut stream, &mux::with_token(&Request::Attach { id }))
         .map_err(|e| e.to_string())?;
     let mut reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
     let mut line = String::new();
