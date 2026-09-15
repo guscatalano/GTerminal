@@ -1,0 +1,224 @@
+<!doctype html>
+<!--
+  Select, then right-click. Does the selection survive long enough to be
+  copied?
+
+  Driven by tests/rightclick.mjs. Reported from real use: "it only works
+  if I select with shift and then right click and copy; if I select
+  without, then right clicking it disappears."
+
+  The menu is built from the contextmenu event, and the selection it
+  offers to copy is whatever the terminal holds at that moment. xterm
+  clears the selection on a mousedown outside it - including the right
+  button - so the menu can be built after the thing it was about has
+  already gone. main.ts guards that by stopping the right-button press
+  in the capture phase, before xterm's own listener sees it.
+
+  Both are here: the raw behaviour, so the guard is measured against
+  something, and the guard itself, written the same way main.ts writes
+  it. If the guard ever stops working, the case below fails rather than
+  somebody discovering it with a selection they wanted.
+-->
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css" />
+<style>
+  body {
+    margin: 0;
+    background: #101014;
+  }
+  #host {
+    width: 720px;
+    height: 240px;
+  }
+  #out {
+    font: 12px monospace;
+    white-space: pre-wrap;
+    color: #000;
+    background: #fff;
+  }
+</style>
+<div id="host"></div>
+<pre id="out">PENDING</pre>
+<script type="module">
+  import { Terminal } from "../../node_modules/@xterm/xterm/lib/xterm.mjs";
+
+  const E = "\x1b";
+  const host = document.getElementById("host");
+  const out = document.getElementById("out");
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  /// One terminal per case. State from a previous gesture - a live
+  /// selection, a mouse mode, a listener - is exactly what would make
+  /// one of these pass for the wrong reason.
+  async function fresh(text) {
+    const div = document.createElement("div");
+    host.appendChild(div);
+    const term = new Terminal({ cols: 80, rows: 8, allowProposedApi: true, fontSize: 14 });
+    term.open(div);
+    await new Promise((r) => term.write(text, r));
+    await sleep(40);
+    const screen = div.querySelector(".xterm-screen");
+    return { term, div, screen };
+  }
+
+  function point(screen, col, row) {
+    const r = screen.getBoundingClientRect();
+    return {
+      clientX: r.left + (r.width / 80) * (col + 0.5),
+      clientY: r.top + (r.height / 8) * (row + 0.5),
+      bubbles: true,
+      cancelable: true,
+      view: window,
+    };
+  }
+
+  function select(screen, from, to, row, shift) {
+    const at = (c) => ({ ...point(screen, c, row), button: 0, buttons: 1, shiftKey: !!shift });
+    screen.dispatchEvent(new MouseEvent("mousedown", { ...at(from), detail: 1 }));
+    for (let c = from + 1; c <= to; c++) {
+      screen.dispatchEvent(new MouseEvent("mousemove", at(c)));
+      document.dispatchEvent(new MouseEvent("mousemove", at(c)));
+    }
+    const up = { ...at(to), buttons: 0 };
+    screen.dispatchEvent(new MouseEvent("mouseup", up));
+    document.dispatchEvent(new MouseEvent("mouseup", up));
+  }
+
+  /// The right button, at a point deliberately away from the selection -
+  /// which is the case that loses it. Right-clicking exactly on the
+  /// highlight is the easy one and not the one anybody reports.
+  function rightClick(screen, col, row, shift) {
+    const at = { ...point(screen, col, row), button: 2, buttons: 2, shiftKey: !!shift, detail: 1 };
+    screen.dispatchEvent(new MouseEvent("mousedown", at));
+    const menu = new MouseEvent("contextmenu", at);
+    screen.dispatchEvent(menu);
+    screen.dispatchEvent(new MouseEvent("mouseup", { ...at, buttons: 0 }));
+    return menu;
+  }
+
+  /// main.ts's guard, written the same way: capture phase, right button
+  /// only, and only when there is something to protect.
+  function installGuard(pane, term, seen) {
+    pane.addEventListener(
+      "mousedown",
+      (e) => {
+        if (e.button !== 2) return;
+        seen.selAtRightClick = term.getSelection();
+        if (seen.selAtRightClick) e.stopPropagation();
+      },
+      true
+    );
+  }
+
+  (async () => {
+    try {
+      const results = [];
+      const TEXT = "COPY-THIS-LINE-OF-OUTPUT";
+
+      // 1. Raw xterm, no guard: select, then right-click elsewhere.
+      //    Measured rather than assumed - and the measurement came back
+      //    the other way round. This xterm ignores the right button for
+      //    selection entirely (its mousedown handler leaves on anything
+      //    but button 0), so the selection is not lost here at all and
+      //    main.ts's capture-phase guard is protecting against something
+      //    that no longer happens. Kept, because it costs a branch and
+      //    an xterm that changes its mind about this would otherwise
+      //    take the selection with it - but the case says what is true
+      //    now rather than what the guard's comment assumes.
+      {
+        const { term, screen } = await fresh(TEXT);
+        select(screen, 0, 18, 0);
+        const before = term.getSelection();
+        let atMenu = null;
+        screen.addEventListener("contextmenu", () => (atMenu = term.getSelection()));
+        rightClick(screen, 40, 2);
+        await sleep(20);
+        results.push({
+          name: "without the guard, a right-click away from the selection loses it",
+          before,
+          atMenu,
+        });
+        term.dispose();
+      }
+
+      // 2. The same with main.ts's guard in place. This is the app.
+      {
+        const { term, div, screen } = await fresh(TEXT);
+        const seen = { selAtRightClick: "" };
+        installGuard(div, term, seen);
+        select(screen, 0, 18, 0);
+        const before = term.getSelection();
+        let atMenu = null;
+        div.addEventListener("contextmenu", () => (atMenu = term.getSelection()));
+        rightClick(screen, 40, 2);
+        await sleep(20);
+        results.push({
+          name: "with the guard, a plain selection survives the right-click",
+          before,
+          atMenu,
+          remembered: seen.selAtRightClick,
+        });
+        term.dispose();
+      }
+
+      // 3. A program is reading the mouse. The selection was made with
+      //    shift, because that is the only way to make one at all - and
+      //    then the right button is pressed without shift, which is what
+      //    a hand does next.
+      {
+        const { term, div, screen } = await fresh(TEXT);
+        await new Promise((r) => term.write(`${E}[?1000h${E}[?1006h`, r));
+        const seen = { selAtRightClick: "" };
+        installGuard(div, term, seen);
+        let toApp = "";
+        term.onData((d) => (toApp += d));
+        select(screen, 0, 18, 0, true);
+        const before = term.getSelection();
+        let atMenu = null;
+        let defaultPrevented = null;
+        div.addEventListener("contextmenu", () => (atMenu = term.getSelection()));
+        const menu = rightClick(screen, 40, 2);
+        defaultPrevented = menu.defaultPrevented;
+        await sleep(20);
+        results.push({
+          name: "a shift-made selection survives a plain right-click while a program reads the mouse",
+          before,
+          atMenu,
+          remembered: seen.selAtRightClick,
+          toApp,
+          defaultPrevented,
+        });
+        term.dispose();
+      }
+
+      // 4. And with shift held on the right button too - the gesture the
+      //    settings text promises always reaches the menu.
+      {
+        const { term, div, screen } = await fresh(TEXT);
+        await new Promise((r) => term.write(`${E}[?1000h${E}[?1006h`, r));
+        const seen = { selAtRightClick: "" };
+        installGuard(div, term, seen);
+        let toApp = "";
+        term.onData((d) => (toApp += d));
+        select(screen, 0, 18, 0, true);
+        const before = term.getSelection();
+        let atMenu = null;
+        div.addEventListener("contextmenu", () => (atMenu = term.getSelection()));
+        rightClick(screen, 40, 2, true);
+        await sleep(20);
+        results.push({
+          name: "and shift+right-click keeps it too",
+          before,
+          atMenu,
+          remembered: seen.selAtRightClick,
+          toApp,
+        });
+        term.dispose();
+      }
+
+      out.textContent = "RESULTS " + JSON.stringify(results);
+    } catch (e) {
+      out.textContent = "RESULTS-ERROR " + String(e && e.stack ? e.stack : e);
+    }
+  })();
+</script>

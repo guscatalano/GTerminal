@@ -71,3 +71,27 @@ export function shiftHintLearned(g: ShiftHintGesture): boolean {
 /// nothing is a suggestion that did not suit.
 export const SHIFT_HINT_TEXT =
   "This program is using the mouse, so the drag went to it. Try holding Shift to select — then Ctrl+Shift+C to copy.";
+
+/// What was just copied, in a form that can be checked at a glance.
+///
+/// The console's right button copies the selection and clears the
+/// highlight, which is its behaviour everywhere and worth keeping - but
+/// a highlight that vanishes with nothing said is indistinguishable
+/// from one that was lost. Reported exactly that way: "I select, then
+/// right-click, and it disappears", by somebody whose text had in fact
+/// been copied. The copy is the quiet half of a gesture whose loud half
+/// is the selection going away.
+///
+/// A count and a first line rather than the text itself: the point is
+/// to recognise what you got, and a confirmation that reprints a page
+/// of output is a second problem. It is on screen for a few seconds and
+/// reaches no log - see uilog.ts, which exists so that what was copied
+/// stays out of files people are asked to send.
+export function copiedNote(text: string): string {
+  const lines = text.split(/\r\n|\r|\n/);
+  const chars = `${text.length} character${text.length === 1 ? "" : "s"}`;
+  if (lines.length > 1) return `Copied ${lines.length} lines, ${chars}`;
+  const one = lines[0].trim();
+  const shown = one.length > 40 ? `${one.slice(0, 40)}…` : one;
+  return `Copied ${chars}: ${shown}`;
+}

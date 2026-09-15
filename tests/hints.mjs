@@ -13,6 +13,7 @@
 import {
   SHIFT_HINT_LIMIT,
   SHIFT_HINT_TEXT,
+  copiedNote,
   shiftHintLearned,
   shouldOfferShiftHint,
 } from "../src/hints.ts";
@@ -94,6 +95,41 @@ check("and the key that copies", /Ctrl\+Shift\+C/.test(SHIFT_HINT_TEXT), true);
 // followed is worse than no instruction.
 check("and suggests rather than instructs", / Try /.test(SHIFT_HINT_TEXT), true);
 check("so it does not read as a rule", /^Hold Shift/.test(SHIFT_HINT_TEXT), false);
+
+
+// ── saying that a copy happened ────────────────────────────────────────
+// The console's right button copies the selection and clears the
+// highlight. Reported as "I select, then right-click and it disappears"
+// - by somebody whose text had in fact been copied. A highlight that
+// vanishes with nothing said is indistinguishable from one that was
+// lost, so the pane says what went to the clipboard.
+check("one line is shown back, so it can be recognised", copiedNote("hello world"), "Copied 11 characters: hello world");
+check("a single character is not 1 characters", copiedNote("x"), "Copied 1 character: x");
+// Long output is counted, not reprinted: a confirmation that puts a
+// page of text back on the screen is a second problem.
+check(
+  "a long line is cut short",
+  copiedNote("y".repeat(80)),
+  "Copied 80 characters: " + "y".repeat(40) + "…"
+);
+check(
+  "several lines are counted rather than shown",
+  copiedNote("one\ntwo\nthree"),
+  "Copied 3 lines, 13 characters"
+);
+check(
+  "and CRLF counts the same as LF — the shell writes one and the clipboard the other",
+  copiedNote("one\r\ntwo"),
+  "Copied 2 lines, 8 characters"
+);
+// The count is of what was copied, not of what is shown: trimming is
+// for reading, and a report that disagreed with the clipboard would be
+// worse than no report.
+check(
+  "leading space is trimmed from the preview but not from the count",
+  copiedNote("   indented"),
+  "Copied 11 characters: indented"
+);
 
 if (failed) {
   console.log(`${failed} hint test(s) failed`);

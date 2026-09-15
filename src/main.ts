@@ -45,6 +45,7 @@ import { visibilityReport } from "./controls";
 import { shouldSuggestThemes } from "./firstrun";
 import {
   SHIFT_HINT_TEXT,
+  copiedNote,
   shiftHintLearned,
   shouldOfferShiftHint,
 } from "./hints";
@@ -4911,6 +4912,14 @@ async function createTab(
         pushClip(sel);
         void copyToClipboard(sel, "right-click-copy");
         term.clearSelection();
+        // And say so. Clearing the highlight is the console's own
+        // behaviour and worth keeping, but a highlight that vanishes
+        // with nothing said is indistinguishable from one that was
+        // lost - reported here as "I select, then right-click, and it
+        // disappears", by somebody whose text had in fact been copied.
+        // The copy is the quiet half of a gesture whose loud half is
+        // the selection going away.
+        showPaneHint(pane, copiedNote(sel));
       } else {
         void paste();
       }
