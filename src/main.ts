@@ -18,6 +18,12 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { SearchAddon } from "@xterm/addon-search";
 import { ImageAddon } from "@xterm/addon-image";
+import {
+  DEFAULT_EDITOR_COMMAND,
+  editorArgv,
+  findFileLinks,
+  resolveLink,
+} from "./filelinks";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { register, unregisterAll } from "@tauri-apps/plugin-global-shortcut";
 import {
@@ -248,6 +254,13 @@ interface AppConfig {
   close_action?: string;
   summon_animation?: string;
   restore_prompt?: boolean;
+  /// What opens a file when a path in the output is clicked. `{file}`,
+  /// `{line}` and `{col}` are filled in; the rest is passed through, so
+  /// an editor nobody here has heard of needs no support, only its own
+  /// flags. Blank means the default — see DEFAULT_EDITOR_COMMAND.
+  editor_command?: string;
+  /// Whether paths in the output are clickable at all.
+  file_links?: boolean;
   /// Whether a program may draw pictures (sixel).
   ///
   /// Off by default, and that is the opposite of what it was until the
@@ -3593,6 +3606,26 @@ function jumpPrompt(dir: -1 | 1) {
   tab.term.scrollToLine(target);
 }
 
+/// Open a file at a line with whatever the settings say opens files.
+///
+/// Failures are said out loud in the pane rather than swallowed. The
+/// common one is an editor that is not installed - `code` is only on
+/// the path if VS Code put it there - and a click that silently does
+/// nothing is indistinguishable from a link that was never a link.
+async function openAtLine(file: string, line: number, col?: number) {
+  const cmd = editorArgv(config.editor_command ?? DEFAULT_EDITOR_COMMAND, file, line, col);
+  if (!cmd) return;
+  const pane = activeId === null ? undefined : tabs.get(activeId)?.pane;
+  try {
+    await invoke("open_at_line", { program: cmd.program, args: cmd.args, check: file });
+    logUi("link.open", { line, col: col ?? null });
+  } catch (e) {
+    const why = String(e);
+    if (pane) showPaneHint(pane, `Could not open it: ${why}`);
+    logUi("error", { message: `open at line: ${why}` });
+  }
+}
+
 /// How much decoded image data one tab may hold.
 ///
 /// Clamped rather than trusted: this is megabytes of RGBA per tab, and
@@ -4699,6 +4732,64 @@ async function createTab(
   if (config.clickable_links !== false) {
     term.loadAddon(new WebLinksAddon((_e, uri) => void openUrl(uri).catch(() => {})));
   }
+  // Paths in the output, clickable.
+  //
+  // A provider rather than the link addon's regex: a match is only
+  // worth offering if the file is actually there, and that question
+  // needs the shell's working directory and a trip to the filesystem.
+  // The alternative - colour every `foo.ts:12` in sight and find out on
+  // click - is how a terminal ends up looking like a badly rendered web
+  // page, and how "it opened an empty buffer" becomes a bug report.
+  if (config.file_links !== false) {
+    term.registerLinkProvider({
+      provideLinks(y, callback) {
+        // y is one-based and counted from the top of the viewport, which
+        // is what the provider contract says and not what the buffer
+        // indexes by - hence the -1 and nothing else. An earlier version
+        // added viewportY and subtracted it again, which is the shape of
+        // a half-remembered fix.
+        const text = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
+        if (!text) {
+          callback(undefined);
+          return;
+        }
+        const found = findFileLinks(text);
+        if (!found.length) {
+          callback(undefined);
+          return;
+        }
+        const cwd = lastInfo.get(id)?.cwd ?? "";
+        // Asked of the filesystem before anything is offered. Hover is
+        // the only time this runs, so the cost is one existence check
+        // per line somebody is actually pointing at.
+        void Promise.all(
+          found.map(async (f) => {
+            const full = resolveLink(cwd, f.path);
+            const there = await invoke<boolean>("file_exists", { path: full }).catch(() => false);
+            return there ? { f, full } : undefined;
+          })
+        ).then((checked) => {
+          const live = checked.filter((c): c is { f: (typeof found)[0]; full: string } => !!c);
+          if (!live.length) {
+            callback(undefined);
+            return;
+          }
+          callback(
+            live.map(({ f, full }) => ({
+              range: {
+                start: { x: f.start + 1, y },
+                end: { x: f.end, y },
+              },
+              text: full,
+              activate: () => void openAtLine(full, f.line, f.col),
+              hover: () => undefined,
+            }))
+          );
+        });
+      },
+    });
+  }
+
   // Pictures, for the programs that draw them.
   //
   // A budget rather than a free hand. Decoded image data is held as
@@ -8507,6 +8598,22 @@ function buildSettingsPage() {
         changed();
       }
     )
+  );
+  settingRow(
+    "Clickable file paths",
+    "Click a path in the output — `src/main.ts:4821`, a stack trace, a compiler error — to open it where it is. Only offered for paths that exist, checked against the shell's current folder when the tool printed a relative one.",
+    mkSelect([["on", "On"], ["off", "Off"]], config.file_links !== false ? "on" : "off", (v) => {
+      config.file_links = v === "on";
+      changed();
+    })
+  );
+  settingRow(
+    "…opened with",
+    "The command to run. {file}, {line} and {col} are filled in and everything else is passed through, so an editor nobody here has heard of needs its own flags rather than support. It is run directly, not through a shell, so a path with a space in it needs no quoting.",
+    mkText(config.editor_command ?? DEFAULT_EDITOR_COMMAND, (v) => {
+      config.editor_command = v;
+      changed();
+    })
   );
   settingRow(
     "Pictures in the terminal",

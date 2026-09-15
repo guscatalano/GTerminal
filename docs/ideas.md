@@ -85,7 +85,7 @@ than behaving like a key that is not bound.
 
 ## Argued for, not started
 
-### 4. Open `src/main.ts:4821` from the output
+### 4. Open `src/main.ts:4821` from the output — *done*
 
 `addon-web-links` matches URLs only, so every file-and-line in compiler
 or test output is dead text. A link provider plus a configurable open
@@ -93,6 +93,20 @@ command. The payoff is daily for anybody reading build output; the work
 is one provider and one setting, and the hard part is the pattern —
 Windows paths, relative paths, and `path:line:col` all at once, without
 turning ordinary prose into links.
+
+Done. A link provider rather than the addon's regex, because a match is
+only worth offering if the file is actually there - which needs the
+shell's working directory and a trip to the filesystem, asked on hover.
+The pattern is in `src/filelinks.ts` with the twenty-four cases that
+pin it, half of them things that must *not* become links: a clock time
+is three numbers and two colons, and this terminal prints one in its
+own status bar.
+
+Opened by a command from settings, split into a program and arguments
+before the values are substituted - the other order tears a path with a
+space in it into two arguments, which on Windows is anything under
+"Program Files". A plain click activates it; Ctrl is not required, read
+from xterm's activation path rather than remembered.
 
 ### 5. Copy on select
 

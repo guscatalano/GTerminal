@@ -336,6 +336,42 @@ fn open_folder(path: String) -> Result<String, String> {
     Ok(path)
 }
 
+/// Open a file at a line, with whatever the settings say opens files.
+///
+/// The program and its arguments arrive already split - see `editorArgv`
+/// in src/filelinks.ts - and are spawned directly rather than through a
+/// shell. A path with a space in it is anything under "Program Files",
+/// and handing the line to cmd would make quoting the user's problem at
+/// exactly the moment they clicked one.
+///
+/// The file is checked first. The pattern that produced it is a guess
+/// about text on a screen, and a guess that turns into "your editor
+/// opened an empty buffer called `warning.rs`" is worse than one that
+/// says it could not find the file.
+#[tauri::command(async)]
+fn open_at_line(program: String, args: Vec<String>, check: String) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    if !check.is_empty() && !std::path::Path::new(&check).is_file() {
+        return Err(format!("{check} is not a file"));
+    }
+    std::process::Command::new(&program)
+        .args(&args)
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .spawn()
+        .map_err(|e| format!("could not run {program}: {e}"))?;
+    Ok(())
+}
+
+/// Whether a path names a file that is there.
+///
+/// Asked before a link is offered, not after it is clicked: a path that
+/// does not exist should not look clickable in the first place. Cheap
+/// enough to ask per hover, which is the only time it is asked.
+#[tauri::command(async)]
+fn file_exists(path: String) -> bool {
+    std::path::Path::new(&path).is_file()
+}
+
 /// Where the logs live, so the window can offer to open the folder.
 #[tauri::command]
 fn package_family_name() -> Option<String> {
@@ -1621,6 +1657,8 @@ pub fn run() {
             open_elevated_window,
             take_handoff,
             open_folder,
+            open_at_line,
+            file_exists,
             log_ui,
             summon_toggle,
             window_labels,

@@ -55,6 +55,13 @@ const OFF_UI_THREAD = new Set([
   // Reads and deletes a file at startup.
   "take_handoff",
   "open_folder",
+  // Spawns an editor, which is a process start and everything that
+  // comes with it - and is reached from a click, so the UI thread is
+  // exactly the one waiting on it.
+  "open_at_line",
+  // Touches the filesystem. Asked once per hovered line, on a path that
+  // may be on a network share that is not answering.
+  "file_exists",
   "create_shortcut",
   // Remote control: binds a listening socket, resolves this machine's
   // own name to find its LAN addresses, and asks the OS for random
