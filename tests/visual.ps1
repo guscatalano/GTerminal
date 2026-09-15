@@ -1895,31 +1895,48 @@ if (-not $Only -or $Only -eq "tuicopy") {
     [void](Wait-Mark @("MOUSEGRAB-READY") 30)
     Start-Sleep -Seconds 1
 
-    # 1. A plain drag across the line it printed. It goes to the program.
-    Drag $h26 60 150 380 150
+    # Down the pane rather than across the top of it. The first run of
+    # this dragged at screen y=210 and the hit-test reported a 200x279
+    # Explorer popup sitting at 141,1 - so the gesture went to a flyout
+    # belonging to somebody else's process, the terminal saw nothing,
+    # and the scene reported that a program had eaten the drag. It had
+    # not; the drag never arrived. The fixture prints twelve identical
+    # lines so there is text this far down to aim at.
+    Focus-Pane $h26
+    Start-Sleep -Milliseconds 400
+
+    # 1. A plain drag across a line it printed. It goes to the program.
+    Drag $h26 60 300 380 300
     Start-Sleep -Seconds 1
-    Right-Click $h26 300 220
+    Right-Click $h26 500 420
     Start-Sleep -Seconds 2
     $opened = @(Ui-Events "menu.open")
     if ($opened.Count) { $script:noSelMenu = @($opened[-1].rows | ForEach-Object { $_.label }) }
-    Key $VK_ESC
+    # Closed by clicking the terminal, not by Escape. Escape is input:
+    # it reaches the shell, and xterm drops the selection on any input -
+    # so the key that tidied the menu away was also the key that threw
+    # away the thing the next step was about to copy.
+    Click $h26 900 600
     Start-Sleep -Seconds 1
 
     # 2. The same drag with Shift, which takes it back from the program.
-    Drag-WithShift $h26 60 150 380 150
-    Start-Sleep -Seconds 1
-    Right-Click $h26 300 220
-    Start-Sleep -Seconds 2
-    $opened = @(Ui-Events "menu.open")
-    if ($opened.Count) { $script:selMenu = @($opened[-1].rows | ForEach-Object { $_.label }) }
-    Key $VK_ESC
+    Drag-WithShift $h26 60 300 380 300
     Start-Sleep -Seconds 1
 
-    # 3. And the key the menu and the hint both name.
+    # 3. The key the menu and the hint both name, before any menu is
+    #    opened over the top of it.
     Set-Clipboard -Value "nothing-copied-yet"
     Key 0x43 @([byte]$VK_CTRL, [byte]$VK_SHIFT)   # Ctrl+Shift+C
     Start-Sleep -Seconds 2
     $script:copied = try { Get-Clipboard -Raw } catch { "" }
+
+    # 4. And the menu, which should now be offering Copy.
+    Right-Click $h26 500 420
+    Start-Sleep -Seconds 2
+    $opened = @(Ui-Events "menu.open")
+    if ($opened.Count) { $script:selMenu = @($opened[-1].rows | ForEach-Object { $_.label }) }
+    Click $h26 900 600
+    Start-Sleep -Seconds 1
   }
 
   if (-not $noSelMenu.Count) {
@@ -1944,7 +1961,13 @@ if (-not $Only -or $Only -eq "tuicopy") {
     Fail "tuicopy" "shift-drag selected nothing - the way out of a program holding the mouse does not work: $($selMenu -join ' | ')"
   }
 
-  if ($copied -match "SELECT-ME-IF-YOU-CAN") { Pass "and Ctrl+Shift+C puts it on the clipboard" }
+  # Matched on the tail of the marker, not the whole of it. A drag that
+  # begins a few pixels into the pane begins a few characters into the
+  # line, so the clipboard holds "T-ME-IF-YOU-CAN line 12" - which is a
+  # correct copy of what was selected and would fail a whole-marker
+  # match. Aiming at column zero instead would be a test that passes
+  # because of the pane's padding.
+  if ($copied -match "IF-YOU-CAN line \d+") { Pass "and Ctrl+Shift+C puts it on the clipboard" }
   elseif ($copied -match "nothing-copied-yet") { Fail "tuicopy" "the clipboard never changed" }
   else { Fail "tuicopy" "something else was copied: $($copied -replace '\s+', ' ')" }
   Stop-App $ctx26

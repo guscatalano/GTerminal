@@ -6026,11 +6026,22 @@ function showContextMenu(x: number, y: number, items: CtxItem[]) {
     // removes the whole class of failure there. Labels that carry a
     // clipboard preview are reduced to the item they are: this file's
     // first rule is that the log never holds what was copied.
-    rows: Array.from(ctxMenu.querySelectorAll<HTMLElement>(".menu-row")).map((r) => {
+    // Notes as well as rows. A note is not a choice and not a .menu-row,
+    // so a log of the rows alone said nothing about it - and the scene
+    // reading that log reported a menu that had explained nothing when
+    // the explanation was on screen. What the log is for is what the
+    // menu showed, which includes the lines that are not choices.
+    rows: Array.from(ctxMenu.querySelectorAll<HTMLElement>(".menu-row, .menu-note")).map((r) => {
       const b = r.getBoundingClientRect();
-      const text = (r.textContent || "").trim();
+      // The label, not the row's whole text. Rows carry their shortcut
+      // in a second span now, and reading textContent glued the two
+      // together into "CopyCtrl+Shift+C" - which a scene looking for
+      // "Copy" does not find, and which read as the selection having
+      // failed when it had not.
+      const text = (r.querySelector(".menu-label")?.textContent || r.textContent || "").trim();
       return {
         label: text.startsWith("Paste: ") ? "Paste: …" : text,
+        note: r.classList.contains("menu-note"),
         x: Math.round(b.left + b.width / 2),
         y: Math.round(b.top + b.height / 2),
       };

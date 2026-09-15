@@ -17,12 +17,50 @@ param(
   [int] $Seconds = 0
 )
 
+# Ask for VT input first, or the rest of this is written into a void.
+#
+# Measured, not assumed: writing ESC[?1000h from here and reading what
+# the terminal received showed only the cursor show/hide pair - conhost
+# parses what a console program writes and re-emits its own stream, and
+# it does not pass a mouse-mode request on behalf of a program that has
+# not asked for virtual-terminal input. A real TUI sets this when it
+# puts the console in raw mode, which is why one of those gets the
+# mouse and this fixture did not.
+$vt = @"
+using System;
+using System.Runtime.InteropServices;
+public static class ConIn {
+  [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr GetStdHandle(int n);
+  [DllImport("kernel32.dll", SetLastError=true)] public static extern bool GetConsoleMode(IntPtr h, out uint m);
+  [DllImport("kernel32.dll", SetLastError=true)] public static extern bool SetConsoleMode(IntPtr h, uint m);
+}
+"@
+if (-not ("ConIn" -as [type])) { Add-Type -TypeDefinition $vt }
+$stdin = [ConIn]::GetStdHandle(-10)
+$mode = 0
+$hadMode = [ConIn]::GetConsoleMode($stdin, [ref]$mode)
+if ($hadMode) {
+  # ENABLE_VIRTUAL_TERMINAL_INPUT, without ENABLE_LINE_INPUT and
+  # ENABLE_ECHO_INPUT: raw, which is the state a TUI runs in.
+  [void][ConIn]::SetConsoleMode($stdin, ($mode -bor 0x0200) -band (-bnot 0x0006))
+}
+
 $e = [char]27
 [Console]::Write("$e[?1000h$e[?1006h")
 try {
-  [Console]::WriteLine("SELECT-ME-IF-YOU-CAN — this script is reading the mouse.")
-  [Console]::WriteLine("Drag across the line above: nothing is selected, the press goes here.")
+  # Several identical lines, not one. A drag has to land on text, and
+  # the top of the pane is where a stray tooltip or flyout from
+  # somewhere else on the desktop tends to sit - a test that can only
+  # aim at one row has to aim at that one.
+  # Instructions first, then a block of identical selectable lines. A
+  # test drags at a fixed height and has to land on the marked text; with
+  # the sentences underneath, it landed on "Hold Shift and drag..." and
+  # reported that the wrong thing had been copied.
+  [Console]::WriteLine("Drag across the lines below: nothing is selected, the press goes to this script.")
   [Console]::WriteLine("Hold Shift and drag: the terminal takes it back, and Ctrl+Shift+C copies.")
+  foreach ($i in 1..12) {
+    [Console]::WriteLine("SELECT-ME-IF-YOU-CAN line $i")
+  }
   [Console]::WriteLine("MOUSEGRAB-READY")
   if ($Seconds -gt 0) {
     Start-Sleep -Seconds $Seconds
@@ -35,5 +73,6 @@ try {
   # after the program that wanted them has gone - which is the failure
   # the last case in tests/mouse.mjs exists to catch.
   [Console]::Write("$e[?1000l$e[?1006l")
+  if ($hadMode) { [void][ConIn]::SetConsoleMode($stdin, $mode) }
   [Console]::WriteLine("MOUSEGRAB-DONE")
 }
