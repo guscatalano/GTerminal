@@ -148,11 +148,24 @@ so the viewer lands on it. Matching is case-insensitive and stays that
 way: "did I see this last week" is not a question anybody asks with the
 case they saw it in.
 
-### 8. Export a block or a session
+### 8. Export a block or a session — *done, for sessions*
 
 Transcripts are kept and can be read back. Getting one *out* — as text,
 or as HTML with the colours intact — is a small addition on top, and the
 thing anybody does with a failure they want to show someone else.
+
+Done for whole transcripts: two buttons in the history viewer, text
+with every escape removed and HTML with the colours kept. The HTML side
+is a small renderer that keeps colour and weight and steps over
+everything else - nobody wants a cursor-accurate replay of their build
+in a browser, they want to read it - and treats a bare carriage return
+as "replace the line", so a progress bar exports as its last frame
+rather than all of them. Palette chosen to read on a white page as well
+as a dark one, because a file is opened where the theme does not follow.
+
+Not done: exporting one *block*. The pane menu already copies a block's
+text; saving it as a file is the same thing with a dialog in front, and
+was not worth its own button until somebody asks for it.
 
 ### 9. Auto-run a command in a new shell
 

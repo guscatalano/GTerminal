@@ -62,6 +62,9 @@ const OFF_UI_THREAD = new Set([
   // Touches the filesystem. Asked once per hovered line, on a path that
   // may be on a network share that is not answering.
   "file_exists",
+  // Writes a whole transcript to wherever the save dialog pointed,
+  // which may be a network share that is not answering.
+  "write_export",
   "create_shortcut",
   // Remote control: binds a listening socket, resolves this machine's
   // own name to find its LAN addresses, and asks the OS for random

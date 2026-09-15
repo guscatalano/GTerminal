@@ -1602,7 +1602,7 @@ pub fn with_state_dir_in(script: &str, dir: &str) -> String {
     )
 }
 
-fn state_dir() -> PathBuf {
+pub fn state_dir() -> PathBuf {
     let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".into());
     PathBuf::from(base).join(state_dir_name(runtime_channel()))
 }

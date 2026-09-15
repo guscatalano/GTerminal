@@ -362,6 +362,25 @@ fn open_at_line(program: String, args: Vec<String>, check: String) -> Result<(),
     Ok(())
 }
 
+/// Write a file to a path the save dialog handed back.
+///
+/// Only ever called with a path the user just chose in a dialog, but
+/// this is a command that writes to disk and it checks anyway: an
+/// absolute path, and nothing that would land inside this app's own
+/// state directory, which is the one place a mistaken write could take
+/// the daemon's sessions with it.
+#[tauri::command(async)]
+fn write_export(path: String, contents: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if !p.is_absolute() {
+        return Err("the export path has to be absolute".into());
+    }
+    if p.starts_with(mux::state_dir()) {
+        return Err("not into the app's own state directory".into());
+    }
+    std::fs::write(p, contents).map_err(|e| format!("could not write {path}: {e}"))
+}
+
 /// Whether a path names a file that is there.
 ///
 /// Asked before a link is offered, not after it is clicked: a path that
@@ -1659,6 +1678,7 @@ pub fn run() {
             open_folder,
             open_at_line,
             file_exists,
+            write_export,
             log_ui,
             summon_toggle,
             window_labels,

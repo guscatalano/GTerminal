@@ -51,6 +51,7 @@ import { activates } from "./menus";
 import { visibilityReport } from "./controls";
 import { shouldSuggestThemes } from "./firstrun";
 import { excerpt, findHits, MAX_HITS_PER_SESSION } from "./histsearch";
+import { exportFilename, transcriptToHtml, transcriptToText } from "./export";
 import {
   isPermissionGranted,
   requestPermission,
@@ -6206,6 +6207,38 @@ async function buildHistoryPage(filter?: string) {
 
 let viewerTerm: Terminal | null = null;
 let viewerFit: FitAddon | null = null;
+/// The transcript on screen, raw, so an export is of what was recorded
+/// and not of what the viewer happened to keep in its scrollback.
+let viewerRaw: { entry: HistoryEntry; data: string } | null = null;
+
+/// Save the open transcript as a file.
+///
+/// Text for a bug report or a chat; HTML when the colours are the
+/// point. The dialog picks the place, the Rust side does the write, and
+/// the result is said in the viewer bar rather than assumed - a save
+/// that silently did nothing is the same as one that was never offered.
+async function exportTranscript(kind: "txt" | "html") {
+  if (!viewerRaw) return;
+  const { entry, data } = viewerRaw;
+  const file = await saveDialog({
+    defaultPath: exportFilename(entry.created_ms, entry.shell, kind),
+    filters: [kind === "txt" ? { name: "Text", extensions: ["txt"] } : { name: "HTML", extensions: ["html"] }],
+  }).catch(() => null);
+  if (!file) return;
+  const title = `${fmtStamp(entry.created_ms)} · ${entry.shell} · ${entry.cwd}`;
+  const contents = kind === "txt" ? transcriptToText(data) : transcriptToHtml(data, title);
+  const say = document.getElementById("history-viewer-title")!;
+  try {
+    await invoke("write_export", { path: file, contents });
+    const was = say.textContent;
+    say.textContent = `Saved to ${file}`;
+    window.setTimeout(() => (say.textContent = was), 3000);
+    logUi("history.export", { kind, bytes: contents.length });
+  } catch (e) {
+    say.textContent = `Could not save: ${String(e)}`;
+    logUi("error", { message: `export: ${String(e)}` });
+  }
+}
 
 async function openTranscript(en: HistoryEntry, primed?: string) {
   let data: string;
@@ -6216,6 +6249,7 @@ async function openTranscript(en: HistoryEntry, primed?: string) {
     return;
   }
   const viewer = document.getElementById("history-viewer")!;
+  viewerRaw = { entry: en, data };
   document.getElementById("history-viewer-title")!.textContent =
     `${fmtStamp(en.created_ms)} · ${en.shell} · ${en.cwd}`;
   viewer.classList.add("open");
@@ -6254,6 +6288,7 @@ async function openTranscript(en: HistoryEntry, primed?: string) {
 function closeTranscriptTerm() {
   viewerTerm?.dispose();
   viewerTerm = null;
+  viewerRaw = null;
   viewerFit = null;
   document.getElementById("history-term")!.innerHTML = "";
 }
@@ -10653,6 +10688,8 @@ async function main() {
   window.addEventListener("contextmenu", (e) => e.preventDefault());
   document.getElementById("settings-close")!.addEventListener("click", closeSettings);
   initFind();
+  document.getElementById("history-export-txt")!.addEventListener("click", () => void exportTranscript("txt"));
+  document.getElementById("history-export-html")!.addEventListener("click", () => void exportTranscript("html"));
   // An exception thrown while rendering leaves the screen exactly as it
   // was - which is indistinguishable, from the outside, from a terminal
   // that decided not to redraw. Nothing recorded those, so a report of
