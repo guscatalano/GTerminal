@@ -42,6 +42,12 @@ jobs:
       - name: Lifecycle E2E suite
         run: pwsh -NoProfile -File tests/lifecycle.ps1
 
+      # Real shells through four profiles, asking whether the prompt hook
+      # survives each. It runs after lifecycle because it uses the same
+      # daemon binary and the same isolation.
+      - name: Prompt hook survives the profile
+        run: pwsh -NoProfile -File tests/prompt.ps1
+
       - name: Typing correctness + latency suite
         run: pwsh -NoProfile -File tests/typing.ps1
 

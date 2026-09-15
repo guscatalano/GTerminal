@@ -91,6 +91,32 @@ Blank is ignored. Tested in `tests/lifecycle.ps1`, where the marker has
 to appear twice - once echoed as the command, once printed as its
 output - because once means it was typed and never ran.
 
+## The prompt hook, and what survives a profile
+
+Everything that knows where a shell *is* comes from one hook, wrapped
+around `prompt` by the `-Command` that runs after the profile has
+loaded. It emits the folder on every prompt; tab titles follow it,
+command blocks are cut on it, and a template's run-on-open command is
+delivered the first time it fires. `tests/prompt.ps1` drives a real
+shell through four profiles and asks each one question - did a prompt
+report a folder:
+
+- **No profile.** Reports. The baseline.
+- **A profile that replaces `prompt`** - oh-my-posh, Starship, a
+  hand-written one. Reports. The hook takes `$function:prompt` as it is
+  *after* the profile, so a custom prompt is called from inside the
+  hook, not instead of it. This is the ordinary case and it is fine.
+- **A profile that throws.** Reports. The hook is installed by a
+  separate command and a profile that dies part-way does not take it
+  down.
+- **`prompt` redefined from inside a running session** - a tool's init
+  line pasted at the prompt, `function prompt { ... }` typed by hand.
+  **Stops reporting.** The hook is a wrapper and a redefinition
+  replaces the wrapper wholesale. Run-on-open is unaffected (its cwd
+  report fired before), but titles stop following `cd` and blocks stop
+  being cut from that point on. This is the one case, and it is named
+  here rather than guessed at.
+
 ## The token
 
 Every connection presents the daemon's token once, on its first line,
