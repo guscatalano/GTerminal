@@ -26,18 +26,21 @@ to keep what a full-screen program draws for exactly this reason. Images
 should be treated the same way: rendered live, not preserved into a
 replay.
 
-### 2. Say when a long command finishes
+### 2. Say when a long command finishes — *done*
 
-Every part of this already exists: `BlockTracker` knows when a command
-started, ended and what it exited with; there is a tray icon; there is a
-summon hotkey; and the window now knows whether it is on screen, which
-was added for remote control. Nothing joins them up.
+Off by default, thirty seconds by default, and silent while you are
+looking at the window, because the prompt coming back has already said
+it. Settings under Keyboard and input.
 
-A command that ran longer than some threshold and finished while the
-window was hidden or unfocused should say so, naming the command and its
-exit code. It is the "I started a build and wandered off" case, and it
-needs a notification permission and a threshold rather than any new
-understanding of the shell.
+One thing the building of it settled: a command's start is taken from
+the Enter that sent it, not from the prompt mark. The shell reports
+when a command *finished* and when a prompt appeared, never when one
+started, so timing from the prompt would count the minutes somebody
+spent typing - and a two-second command typed slowly would arrive as a
+long one. The cost is that a session driven from somewhere else, the
+phone view included, has no start time and says nothing. That is the
+right trade for now and worth revisiting if the daemon ever stamps the
+input it writes.
 
 ### 3. Jump between prompts — *done, and it was half-built already*
 

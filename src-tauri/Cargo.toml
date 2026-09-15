@@ -40,6 +40,7 @@ ureq = { version = "2", default-features = false, features = ["tls", "json", "gz
 # depended on directly here just to convert Claude Code's UTC transcript
 # timestamps into "today" in whatever timezone this machine is set to.
 chrono = "0.4"
+tauri-plugin-notification = "2"
 
 [target.'cfg(windows)'.dependencies]
 # Reaching WebView2's own settings, to turn Edge's accelerator keys off.

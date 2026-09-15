@@ -113,7 +113,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "tui-dom", "tui-fast", "reboot", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "selectright", "selectmax", "pasteboth", "tabkeys", "maxtop", "tray", "tuicopy")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "tui-dom", "tui-fast", "reboot", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "selectright", "selectmax", "pasteboth", "tabkeys", "maxtop", "tray", "tuicopy", "notify")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -1990,6 +1990,61 @@ if (-not $Only -or $Only -eq "tuicopy") {
   elseif ($copied -match "nothing-copied-yet") { Fail "tuicopy" "the clipboard never changed" }
   else { Fail "tuicopy" "something else was copied: $($copied -replace '\s+', ' ')" }
   Stop-App $ctx26
+}
+
+# ══ scene: saying that a long command finished ═════════════════════════
+# The decision is in src/notify.ts and tested there; what cannot be
+# tested there is whether the window ever gets as far as asking. Three
+# things have to line up first - the shell has to report the command
+# finishing, the window has to know when it started, and it has to ask
+# Windows whether anybody is looking - and every one of them is silent
+# when it goes wrong.
+#
+# Driven through the window rather than through the daemon. The start of
+# a command is taken from the Enter that sent it, so a session driven
+# over the wire has no start time and no notification: correct, and the
+# reason the first attempt at proving this measured nothing.
+#
+# The assertion is the window's own log rather than a toast on screen.
+# Whether Windows drew the toast is Windows' business and depends on
+# focus assist, quiet hours and a per-app permission; whether this app
+# decided to send one is ours.
+if (-not $Only -or $Only -eq "notify") {
+  $ctx27 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"ui_log`":`"full`",`"notify_done`":true,`"notify_after_seconds`":5}"
+  $h27 = $ctx27.Hwnd
+  Record-Scene "notify" 40 $ctx27 {
+    Focus-Pane $h27
+    Run-Cmd 'Start-Sleep -Seconds 9' 1
+    # Out of sight while it runs, which is the whole case. Minimize
+    # rather than hide to the tray: this is about the window not being
+    # in front, and a tray hide would also be testing the tray.
+    [void]$U::PostMessage($h27, 0x0112, [IntPtr]0xF020, [IntPtr]::Zero)   # WM_SYSCOMMAND, SC_MINIMIZE
+    Start-Sleep -Seconds 16
+    [void]$U::PostMessage($h27, 0x0112, [IntPtr]0xF120, [IntPtr]::Zero)   # SC_RESTORE
+    Start-Sleep -Seconds 2
+    $script:notifySent = @(Ui-Events "notify.sent")
+    $script:notifySkipped = @(Ui-Events "notify.skip")
+    $script:notifyFinishes = @(Ui-Events "blocks.finished")
+
+    # And the restraint, in the same session: something quick, finishing
+    # while the window is right here, must say nothing.
+    Focus-Pane $h27
+    Run-Cmd 'echo quick' 4
+    $script:afterQuick = @(Ui-Events "notify.sent")
+  }
+
+  if (-not $notifyFinishes.Count) {
+    Fail "notify" "the shell never reported a command finishing - no OSC 133;D reached the window, so nothing here could have been decided"
+  } elseif ($notifySent.Count -ge 1) {
+    Pass "a long command finishing out of sight is said out loud"
+  } else {
+    $why = ($notifySkipped | ForEach-Object { "ran $($_.ranMs)ms visible=$($_.visible) focused=$($_.focused)" }) -join " | "
+    Fail "notify" "nothing was sent. Finishes seen: $($notifyFinishes.Count), started times: $(($notifyFinishes | ForEach-Object { $_.started }) -join ',') $(if ($why) { "- skipped because $why" })"
+  }
+
+  if ($afterQuick.Count -eq $notifySent.Count) { Pass "and a quick one with the window in front says nothing" }
+  else { Fail "notify" "a short command in a window you are looking at still sent a notification" }
+  Stop-App $ctx27
 }
 
 # ══ scene: a second window ═════════════════════════════════════════════

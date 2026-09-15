@@ -1462,6 +1462,10 @@ pub fn run() {
         .on_window_event(|win, event| on_any_window_event(win, event))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // Toasts for a command that finished while nobody was looking.
+        // See shouldNotify in src/notify.ts for when one is worth
+        // sending; this only installs the machinery.
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         // The summon hotkey is registered from the frontend, which owns the
         // config; this only installs the machinery.

@@ -44,6 +44,18 @@ import { activates } from "./menus";
 import { visibilityReport } from "./controls";
 import { shouldSuggestThemes } from "./firstrun";
 import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
+import {
+  DEFAULT_NOTIFY_AFTER_SECONDS,
+  notifyBody,
+  notifyEnabled,
+  notifyTitle,
+  shouldNotify,
+} from "./notify";
+import {
   MOUSE_SELECTION_NOTE,
   NO_FAILURES_NOTE,
   SHIFT_HINT_TEXT,
@@ -235,6 +247,12 @@ interface AppConfig {
   close_action?: string;
   summon_animation?: string;
   restore_prompt?: boolean;
+  /// Saying that a long command finished while nobody was looking. Off
+  /// unless asked for, and see src/notify.ts for when one is sent - the
+  /// restraint is the whole feature.
+  notify_done?: boolean;
+  notify_after_seconds?: number;
+  notify_when_focused?: boolean;
   /// How much goes to ui.log: "off", "errors" (the default) or "full".
   /// Booleans from older configs still mean what they meant.
   ui_log?: boolean | "off" | "errors" | "full";
@@ -3562,6 +3580,48 @@ function jumpPrompt(dir: -1 | 1) {
   tab.term.scrollToLine(target);
 }
 
+/// Say that a command finished, if saying so is worth an interruption.
+///
+/// The judgement is in notify.ts and tested there; this is the part that
+/// has to ask Windows. Two things are asked of the window rather than
+/// assumed: whether it is on screen at all, and whether it is the one
+/// being worked in. A hidden window is the obvious case - the terminal
+/// is in the tray and the prompt coming back is invisible - but a
+/// window sitting behind a browser is the same situation wearing a
+/// different hat.
+async function maybeNotifyFinished(command: string, ranMs: number, exit: number | undefined) {
+  if (!notifyEnabled(config)) return;
+  const win = getCurrentWindow();
+  const [visible, focused] = await Promise.all([
+    win.isVisible().catch(() => true),
+    win.isFocused().catch(() => true),
+  ]);
+  const finished = { ranMs, exit, visible, focused };
+  if (!shouldNotify(config, finished)) {
+    // Why not, in the log. A notification that does not arrive is
+    // indistinguishable from one that was never considered, and the
+    // three reasons it might not - too quick, you were looking at it,
+    // the feature is off - are not guessable from the outside.
+    logUi("notify.skip", { ranMs, visible, focused });
+    return;
+  }
+  try {
+    // Asked rather than assumed, every time: a permission can be taken
+    // away in Windows settings long after it was granted, and a toast
+    // that silently never arrives is worse than one that was never
+    // offered.
+    const allowed = (await isPermissionGranted()) || (await requestPermission()) === "granted";
+    if (!allowed) {
+      logUi("notify.refused", { ranMs });
+      return;
+    }
+    sendNotification({ title: notifyTitle(finished), body: notifyBody(command, ranMs) });
+    logUi("notify.sent", { ranMs, exit: exit ?? null });
+  } catch (e) {
+    logUi("error", { message: `notify: ${String(e)}` });
+  }
+}
+
 /// Walk back through the commands that failed.
 ///
 /// Each press goes to the newest failure above the view, and from the
@@ -4578,6 +4638,14 @@ async function createTab(
   const blocks = new BlockTracker();
   term.parser.registerOscHandler(133, (data) => {
     const marker = term.registerMarker(0);
+    // Every finish mark, whether or not anything comes of it. A
+    // notification that does not arrive has three silent reasons before
+    // the decision is even reached - no marker, no start time, the
+    // feature off - and telling them apart from the outside was costing
+    // a rebuild each.
+    if (data.startsWith("D")) {
+      logUi("blocks.finished", { started: commandStartedAt, marker: !!marker });
+    }
     if (!marker) return true;
     blocks.feed(data, marker);
     // Mark failures in the overview ruler — the scrollbar — rather than
@@ -4585,6 +4653,11 @@ async function createTab(
     // output. Failures only: marking every command makes a barcode and
     // the failures stop standing out.
     const done = blocks.lastClosed();
+    if (data.startsWith("D") && commandStartedAt) {
+      void maybeNotifyFinished(runningCommand, Date.now() - commandStartedAt, done?.exit);
+      commandStartedAt = 0;
+      runningCommand = "";
+    }
     if (data.startsWith("D") && done?.exit !== undefined && done.exit !== 0) {
       term.registerDecoration({
         marker: done.prompt as ReturnType<Terminal["registerMarker"]> & object,
@@ -4742,11 +4815,42 @@ async function createTab(
   // closeall scene still failed with the same four-byte transcript. The
   // query never reached the app at all - the daemon was stripping it out
   // of the replay - and the fix is in mux.rs, in replay_for.
+  // When the command now running was started, and what it was.
+  //
+  // Taken from the Enter that sent it rather than from the prompt mark,
+  // which is the only honest measure available: the shell reports when
+  // a command *finished* (OSC 133;D) and when the prompt appeared, but
+  // never when it started - so timing from the prompt would count the
+  // minutes somebody spent typing, and a command that ran for two
+  // seconds after five minutes of thinking would notify as a long one.
+  //
+  // The text is kept for the notification, because "Command finished"
+  // with no command is a notification that makes you go and look, which
+  // is the thing it was supposed to save.
+  let typedSinceEnter = "";
+  let commandStartedAt = 0;
+  let runningCommand = "";
   term.onData((data) => {
     // Includes the terminal's ANSWERS, not just typing: the cursor-position
     // reply a shell will not start without comes through here. A failure
     // was swallowed silently, which is how a shell that never gets its
     // answer looks like a shell that never started.
+    // Only what a person typed: this channel also carries the
+    // terminal's own answers to a program's questions, and a
+    // cursor-position reply is not a command.
+    if (!data.startsWith("\x1b")) {
+      for (const ch of data) {
+        if (ch === "\r" || ch === "\n") {
+          commandStartedAt = Date.now();
+          runningCommand = typedSinceEnter;
+          typedSinceEnter = "";
+        } else if (ch === "\x7f" || ch === "\b") {
+          typedSinceEnter = typedSinceEnter.slice(0, -1);
+        } else if (ch >= " ") {
+          typedSinceEnter += ch;
+        }
+      }
+    }
     logUi("pty.reply", { id, bytes: data.length, hex: peek(data) });
     invoke("write_session", { id, data }).catch((err) => {
       logUi("error.write", { id, bytes: data.length, hex: peek(data), err: String(err) });
@@ -8323,6 +8427,39 @@ function buildSettingsPage() {
       changed();
       applyAppearance();
     })
+  );
+  settingRow(
+    "Say when a long command finishes",
+    "A toast when a command that ran for a while finishes and the window is not the one you are looking at. Off by default: a terminal that says something every time a prompt comes back is one whose notifications get turned off within the hour, and then the one that mattered is missed with the rest.",
+    mkSelect([["off", "Off"], ["on", "On"]], config.notify_done === true ? "on" : "off", (v) => {
+      config.notify_done = v === "on";
+      changed();
+    })
+  );
+  settingRow(
+    "…after this long",
+    "How long a command has to run before finishing is worth saying. Shorter than this and it fires for commands you sat and watched, which is the fastest way to learn to ignore it.",
+    mkNumber(
+      config.notify_after_seconds ?? DEFAULT_NOTIFY_AFTER_SECONDS,
+      5,
+      3600,
+      (v) => {
+        config.notify_after_seconds = v;
+        changed();
+      }
+    )
+  );
+  settingRow(
+    "…even when you are looking at it",
+    "Normally nothing is said while the window is on screen and in front, because the prompt coming back has already said it. Turn this on to be told anyway.",
+    mkSelect(
+      [["off", "Only when away"], ["on", "Always"]],
+      config.notify_when_focused === true ? "on" : "off",
+      (v) => {
+        config.notify_when_focused = v === "on";
+        changed();
+      }
+    )
   );
   settingRow(
     "Right-click",
