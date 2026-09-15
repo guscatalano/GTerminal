@@ -108,12 +108,21 @@ space in it into two arguments, which on Windows is anything under
 "Program Files". A plain click activates it; Ctrl is not required, read
 from xterm's activation path rather than remembered.
 
-### 5. Copy on select
+### 5. Copy on select — *done*
 
 The other half of QuickEdit, and this app already offers the console's
 right-button behaviour for people arriving from conhost. One setting.
 Had it existed, the whole "I select and it disappears" thread would not
 have happened.
+
+Done, off by default. Fires when the selection *settles* rather than on
+every change - xterm reports each cell a drag crosses, and writing the
+clipboard forty times per gesture is forty chances to collide with
+whatever else has it open. Selections made this way stay out of the
+clipboard history, which would otherwise fill with the half-selections
+a hand makes on the way to the one it wanted. A scene drags with the
+setting off and then on, because either half alone passes for the
+wrong reason.
 
 ### 6. Broadcast input to several panes
 

@@ -254,6 +254,11 @@ interface AppConfig {
   close_action?: string;
   summon_animation?: string;
   restore_prompt?: boolean;
+  /// Copy whatever is selected, the moment it is selected. The other
+  /// half of QuickEdit, for hands that arrived from conhost. Off by
+  /// default: it overwrites the clipboard on every drag, which is a
+  /// surprise to anybody who did not ask for it.
+  copy_on_select?: boolean;
   /// What opens a file when a path in the output is clicked. `{file}`,
   /// `{line}` and `{col}` are filled in; the rest is passed through, so
   /// an editor nobody here has heard of needs no support, only its own
@@ -4732,6 +4737,28 @@ async function createTab(
   if (config.clickable_links !== false) {
     term.loadAddon(new WebLinksAddon((_e, uri) => void openUrl(uri).catch(() => {})));
   }
+  // Copy on select, for the hands that expect it.
+  //
+  // Fired on the selection *settling*, not on every change: xterm emits
+  // onSelectionChange for each cell a drag crosses, and writing the
+  // clipboard forty times per gesture is forty chances to collide with
+  // whatever else on the machine has it open. The debounce is short
+  // enough that the text is there by the time a hand reaches Ctrl+V.
+  //
+  // The clipboard history is deliberately not pushed to here. Every
+  // drag would become an entry, and the history would fill with the
+  // half-selections a hand makes on the way to the one it wanted.
+  let copySettle = 0;
+  term.onSelectionChange(() => {
+    if (config.copy_on_select !== true) return;
+    window.clearTimeout(copySettle);
+    copySettle = window.setTimeout(() => {
+      const sel = term.getSelection();
+      if (!sel) return;
+      void copyToClipboard(sel, "select");
+    }, 150);
+  });
+
   // Paths in the output, clickable.
   //
   // A provider rather than the link addon's regex: a match is only
@@ -8628,6 +8655,14 @@ function buildSettingsPage() {
     "Megabytes of decoded image per tab. Pictures are held as raw pixels, so this is the real cost of them; the oldest are dropped when the budget is full, and a dropped one leaves a marker rather than a hole.",
     mkNumber(imageStorageMb(config), 1, 256, (v) => {
       config.images_storage_mb = v;
+      changed();
+    })
+  );
+  settingRow(
+    "Copy on select",
+    "Whatever you select is copied as you select it — the other half of QuickEdit, for hands that arrived from conhost. Off by default because it overwrites the clipboard on every drag. Selections made this way are not added to the clipboard history, which would otherwise fill with the half-selections a hand makes on the way to the one it wanted.",
+    mkSelect([["off", "Off"], ["on", "On"]], config.copy_on_select === true ? "on" : "off", (v) => {
+      config.copy_on_select = v === "on";
       changed();
     })
   );

@@ -113,7 +113,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "tui-dom", "tui-fast", "reboot", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "selectright", "selectmax", "pasteboth", "tabkeys", "maxtop", "tray", "tuicopy", "notify")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "tui-dom", "tui-fast", "reboot", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "selectright", "selectmax", "pasteboth", "tabkeys", "maxtop", "tray", "tuicopy", "notify", "copyselect")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -2059,6 +2059,45 @@ if (-not $Only -or $Only -eq "notify") {
   if ($afterQuick.Count -eq $notifySent.Count) { Pass "and a quick one with the window in front says nothing" }
   else { Fail "notify" "a short command in a window you are looking at still sent a notification" }
   Stop-App $ctx27
+}
+
+# ══ scene: copy on select ══════════════════════════════════════════════
+# The other half of QuickEdit: a drag copies what it selected, and no
+# key is pressed. Two halves are asserted because either alone passes
+# for a wrong reason - "the clipboard changed" could be Ctrl+Shift+C
+# from a previous scene, and "it changed to the right text" could be a
+# real copy that the setting had nothing to do with. So the same drag is
+# made with the setting off first, and the clipboard has to sit still.
+if (-not $Only -or $Only -eq "copyselect") {
+  # Off: the drag selects and nothing else happens.
+  $ctxA = Start-App "{$baseCfg,`"default_shell`":`"pwsh`"}"
+  $hA = $ctxA.Hwnd
+  Set-Clipboard -Value "untouched-while-off"
+  Record-Scene "copyselect" 30 $ctxA {
+    Run-Cmd 'echo COPYSEL-24680' 3
+    [void](Drag-Effective ($hA) 20 62 300 62 -FromY 50 -ToY 80)
+    Start-Sleep -Seconds 2
+    $script:offResult = try { Get-Clipboard -Raw } catch { "" }
+  }
+  if ($offResult -match "untouched-while-off") { Pass "with copy-on-select off, a drag leaves the clipboard alone" }
+  else { Fail "copyselect" "a drag changed the clipboard with the setting off - got '$(($offResult -replace "`r|`n", " ").Trim())'" }
+  Stop-App $ctxA
+
+  # On: the same drag, and the text is on the clipboard with no key pressed.
+  $ctxB = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"copy_on_select`":true}"
+  $hB = $ctxB.Hwnd
+  Set-Clipboard -Value "nothing-copied-yet"
+  Record-Scene "copyselect" 30 $ctxB {
+    Run-Cmd 'echo COPYSEL-13579' 3
+    [void](Drag-Effective ($hB) 20 62 300 62 -FromY 50 -ToY 80)
+    # Longer than the settle the window waits for after the drag stops.
+    Start-Sleep -Seconds 2
+    $script:onResult = try { Get-Clipboard -Raw } catch { "" }
+  }
+  if ($onResult -match "COPYSEL-13579") { Pass "with it on, the drag itself copies - no key pressed" }
+  elseif ($onResult -match "nothing-copied-yet") { Fail "copyselect" "the drag selected but the clipboard never changed" }
+  else { Fail "copyselect" "something else was copied: '$(($onResult -replace "`r|`n", " ").Trim())'" }
+  Stop-App $ctxB
 }
 
 # ══ scene: a second window ═════════════════════════════════════════════
