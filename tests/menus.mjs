@@ -99,6 +99,21 @@ check("and it does not offer to open an elevated window", paneMenu.includes('lab
 check("while it does offer the clipboard history", paneMenu.includes("Clipboard history"), true);
 check("and Copy, with the key that does it", paneMenu.includes('keys: "Ctrl+Shift+C"'), true);
 
+
+// The note has to be wired to the decision, not re-derived at the call
+// site: a second copy of "no selection and something is reading the
+// mouse" is a second place for it to go stale.
+check(
+  "the terminal menu asks whether to explain a missing Copy",
+  paneMenu.includes("menuExplainsMissingCopy("),
+  true
+);
+check(
+  "and the note it shows is the one that was tested",
+  paneMenu.includes("note: MOUSE_SELECTION_NOTE"),
+  true
+);
+
 if (failed) {
   console.log(`${failed} menu test(s) failed`);
   process.exit(1);

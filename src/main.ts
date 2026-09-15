@@ -46,6 +46,7 @@ import { shouldSuggestThemes } from "./firstrun";
 import {
   MOUSE_SELECTION_NOTE,
   SHIFT_HINT_TEXT,
+  menuExplainsMissingCopy,
   copiedNote,
   shiftHintLearned,
   shouldOfferShiftHint,
@@ -4962,7 +4963,7 @@ async function createTab(
       // item somebody opened it for: the hint that explains this has a
       // lifetime limit and the session that prompted all of this spent
       // both showings before the person stopped trying.
-      if (!sel && term.modes.mouseTrackingMode !== "none") {
+      if (menuExplainsMissingCopy(!!sel, term.modes.mouseTrackingMode !== "none")) {
         items.push({ note: MOUSE_SELECTION_NOTE }, "sep");
       }
       // Focus returns to the terminal after every menu action so typing

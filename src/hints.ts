@@ -128,3 +128,14 @@ export function copiedNote(text: string): string {
 /// the answer to the question the right-click just asked.
 export const MOUSE_SELECTION_NOTE =
   "Nothing selected — this program is using the mouse. Shift+drag to select.";
+
+/// Should the menu explain why there is no Copy in it?
+///
+/// Only when both halves are true: nothing is selected, and a program
+/// is holding the mouse. Either on its own is an ordinary state that
+/// needs no explaining - an empty selection in a plain shell means
+/// nobody has selected anything, and a selection while a program reads
+/// the mouse means shift already did its job.
+export function menuExplainsMissingCopy(hasSelection: boolean, tracking: boolean): boolean {
+  return !hasSelection && tracking;
+}

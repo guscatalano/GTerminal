@@ -113,7 +113,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "tui-dom", "tui-fast", "reboot", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "selectright", "selectmax", "pasteboth", "tabkeys", "maxtop", "tray")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "tui-dom", "tui-fast", "reboot", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "selectright", "selectmax", "pasteboth", "tabkeys", "maxtop", "tray", "tuicopy")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -316,6 +316,23 @@ function Drag {
   }
   $U::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
   Start-Sleep -Milliseconds 300
+}
+
+# A drag with Shift held down for the whole of it.
+#
+# Not `Key`, which presses and releases: the modifier has to be down
+# across the press, the movement and the release, because holding it is
+# the gesture. Released in a finally - a shift left stuck down turns
+# every later keystroke in the run into a capital and every later click
+# into an extend, and the scene that failed would not be this one.
+function Drag-WithShift {
+  param($hwnd, $x1, $y1, $x2, $y2)
+  $U::keybd_event([byte]$VK_SHIFT, 0, 0, [UIntPtr]::Zero)
+  try {
+    Drag $hwnd $x1 $y1 $x2 $y2
+  } finally {
+    $U::keybd_event([byte]$VK_SHIFT, 0, 2, [UIntPtr]::Zero)
+  }
 }
 
 # What the window is actually showing, not what it was sent.
@@ -1845,6 +1862,92 @@ if (-not $Only -or $Only -eq "cliphist") {
   $viewer.Dispose()
   Write-Host "  viewer saved to $dump" -ForegroundColor DarkGray
   Stop-App $ctx10
+}
+
+# ══ scene: copying out of a program that holds the mouse ═══════════════
+# Reported from real use, three times over, each report a different face
+# of one fact: a full-screen program asks for the mouse, so a drag
+# belongs to it and selects nothing. "It hijacks copying"; "holding
+# shift doesn't work, but without it it does"; "if I select without
+# shift then right-click, the Copy isn't there".
+#
+# tests/mouse.mjs proves the engine's half of this headlessly and
+# tests/hints.mjs the wording. This is the half neither can reach: a
+# real window, a real program holding a real mouse, and the menu that
+# comes up under a real right button.
+#
+# The menu is read out of the window's own log rather than off the
+# screen. It logs the rows it was built with, which is exactly the
+# question here - was Copy offered, and was there a line saying why not
+# - and reading a menu from a screenshot would be an OCR problem
+# standing in for a question already answered in a file.
+if (-not $Only -or $Only -eq "tuicopy") {
+  $ctx26 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"ui_log`":`"full`"}"
+  $h26 = $ctx26.Hwnd
+  $script:noSelMenu = @()
+  $script:selMenu = @()
+  $script:copied = ""
+  Record-Scene "tuicopy" 40 $ctx26 {
+    # A program that takes the mouse and does nothing else: no alternate
+    # screen, no drawing. A failure here cannot then be ambiguous
+    # between the mouse and the screen.
+    Run-Cmd ("pwsh -NoProfile -File " + (Join-Path $repo "tests\fixtures\mousegrab.ps1") + " -Seconds 30") 2
+    [void](Wait-Mark @("MOUSEGRAB-READY") 30)
+    Start-Sleep -Seconds 1
+
+    # 1. A plain drag across the line it printed. It goes to the program.
+    Drag $h26 60 150 380 150
+    Start-Sleep -Seconds 1
+    Right-Click $h26 300 220
+    Start-Sleep -Seconds 2
+    $opened = @(Ui-Events "menu.open")
+    if ($opened.Count) { $script:noSelMenu = @($opened[-1].rows | ForEach-Object { $_.label }) }
+    Key $VK_ESC
+    Start-Sleep -Seconds 1
+
+    # 2. The same drag with Shift, which takes it back from the program.
+    Drag-WithShift $h26 60 150 380 150
+    Start-Sleep -Seconds 1
+    Right-Click $h26 300 220
+    Start-Sleep -Seconds 2
+    $opened = @(Ui-Events "menu.open")
+    if ($opened.Count) { $script:selMenu = @($opened[-1].rows | ForEach-Object { $_.label }) }
+    Key $VK_ESC
+    Start-Sleep -Seconds 1
+
+    # 3. And the key the menu and the hint both name.
+    Set-Clipboard -Value "nothing-copied-yet"
+    Key 0x43 @([byte]$VK_CTRL, [byte]$VK_SHIFT)   # Ctrl+Shift+C
+    Start-Sleep -Seconds 2
+    $script:copied = try { Get-Clipboard -Raw } catch { "" }
+  }
+
+  if (-not $noSelMenu.Count) {
+    Fail "tuicopy" "the menu logged no rows after a plain drag - it may not have opened, or ui_log full did not take"
+  } else {
+    if ($noSelMenu -notcontains "Copy") { Pass "a plain drag inside a program holding the mouse selects nothing, so there is no Copy" }
+    else { Fail "tuicopy" "a plain drag selected something the program should have had: $($noSelMenu -join ' | ')" }
+    # The part that was missing, and the reason this scene exists: the
+    # menu has to say why, not just leave the item out.
+    if (@($noSelMenu | Where-Object { $_ -like "Nothing selected*" }).Count) {
+      Pass "and the menu says why Copy is not there"
+    } else {
+      Fail "tuicopy" "the menu left out Copy and explained nothing: $($noSelMenu -join ' | ')"
+    }
+  }
+
+  if (-not $selMenu.Count) {
+    Fail "tuicopy" "the menu logged no rows after a shift-drag"
+  } elseif ($selMenu -contains "Copy") {
+    Pass "a shift-drag takes the gesture back, and Copy is offered"
+  } else {
+    Fail "tuicopy" "shift-drag selected nothing - the way out of a program holding the mouse does not work: $($selMenu -join ' | ')"
+  }
+
+  if ($copied -match "SELECT-ME-IF-YOU-CAN") { Pass "and Ctrl+Shift+C puts it on the clipboard" }
+  elseif ($copied -match "nothing-copied-yet") { Fail "tuicopy" "the clipboard never changed" }
+  else { Fail "tuicopy" "something else was copied: $($copied -replace '\s+', ' ')" }
+  Stop-App $ctx26
 }
 
 # ══ scene: a second window ═════════════════════════════════════════════

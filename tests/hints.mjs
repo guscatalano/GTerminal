@@ -14,6 +14,7 @@ import {
   SHIFT_HINT_LIMIT,
   SHIFT_HINT_TEXT,
   MOUSE_SELECTION_NOTE,
+  menuExplainsMissingCopy,
   RIGHT_CLICK_MENU_NOTE,
   copiedNote,
   shiftHintLearned,
@@ -156,6 +157,16 @@ check("then what to do instead", /Shift\+drag/.test(MOUSE_SELECTION_NOTE), true)
 // about why an item is absent, and hedging it would leave somebody
 // wondering whether the menu was broken.
 check("and it is not just the hint again", MOUSE_SELECTION_NOTE === SHIFT_HINT_TEXT, false);
+
+
+// All four combinations, because three of them are ordinary states that
+// must not be explained at somebody. Only "nothing selected, and a
+// program is holding the mouse" is the case where an absent Copy needs
+// an account of itself.
+check("no selection while a program holds the mouse is the case", menuExplainsMissingCopy(false, true), true);
+check("no selection in a plain shell explains nothing — nobody selected anything", menuExplainsMissingCopy(false, false), false);
+check("a selection while a program holds the mouse means shift already worked", menuExplainsMissingCopy(true, true), false);
+check("and a selection in a plain shell is the ordinary case", menuExplainsMissingCopy(true, false), false);
 
 if (failed) {
   console.log(`${failed} hint test(s) failed`);
