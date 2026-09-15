@@ -44,6 +44,11 @@ import { activates } from "./menus";
 import { visibilityReport } from "./controls";
 import { shouldSuggestThemes } from "./firstrun";
 import {
+  SHIFT_HINT_TEXT,
+  shiftHintLearned,
+  shouldOfferShiftHint,
+} from "./hints";
+import {
   PUBLISHING_WARNING,
   addressesFor,
   bindConsequence,
@@ -229,6 +234,13 @@ interface AppConfig {
   /// How much goes to ui.log: "off", "errors" (the default) or "full".
   /// Booleans from older configs still mean what they meant.
   ui_log?: boolean | "off" | "errors" | "full";
+  /// Set once a shift-drag has selected something while a program was
+  /// reading the mouse. The hint that teaches it is never shown again
+  /// after that: it would be telling somebody to do the thing they are
+  /// already doing.
+  shift_select_learned?: boolean;
+  /// How many times that hint has been shown. Capped - see hints.ts.
+  shift_hint_shown?: number;
   /// Set once the first-run theme hint has been shown — or once an
   /// existing install has been marked as not needing it. Never unset.
   themes_hint_shown?: boolean;
@@ -4838,6 +4850,49 @@ async function createTab(
     true
   );
 
+  // "How would anyone know Shift does that?"
+  //
+  // While a full-screen program is reading the mouse, a drag selects
+  // nothing - it belongs to the program. Every route to the answer is
+  // closed by the same fact: no selection, so no Copy in the menu, and
+  // the shortcut list in settings is no help to somebody who does not
+  // know there is a shortcut to look for. So the window says it, at the
+  // moment the drag comes back empty, and stops saying it once a
+  // shift-drag has worked. See src/hints.ts and tests/hints.mjs.
+  let dragFrom: { x: number; y: number } | null = null;
+  pane.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    dragFrom = { x: e.clientX, y: e.clientY };
+  });
+  pane.addEventListener("mouseup", (e) => {
+    const from = dragFrom;
+    dragFrom = null;
+    if (e.button !== 0 || !from) return;
+    const moved = Math.abs(e.clientX - from.x) + Math.abs(e.clientY - from.y);
+    const gesture = {
+      tracking: term.modes.mouseTrackingMode !== "none",
+      dragged: moved >= 12,
+      shift: e.shiftKey,
+      selected: term.hasSelection(),
+    };
+    if (shiftHintLearned(gesture)) {
+      if (config.shift_select_learned !== true) {
+        config.shift_select_learned = true;
+        saveConfig();
+      }
+      return;
+    }
+    const memory = {
+      shown: config.shift_hint_shown ?? 0,
+      learned: config.shift_select_learned === true,
+    };
+    if (!shouldOfferShiftHint(gesture, memory)) return;
+    config.shift_hint_shown = memory.shown + 1;
+    saveConfig();
+    logUi("hint.shift", { shown: config.shift_hint_shown });
+    showPaneHint(pane, SHIFT_HINT_TEXT);
+  });
+
   pane.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     // The console's own right button: copy a selection, paste when there
@@ -4881,6 +4936,7 @@ async function createTab(
       if (sel) {
         items.push({
           label: "Copy",
+          keys: "Ctrl+Shift+C",
           action: () => {
             pushClip(sel);
             void copyToClipboard(sel, "menu");
@@ -4915,6 +4971,7 @@ async function createTab(
       } else {
         items.push({
           label: "Paste",
+          keys: "Ctrl+Shift+V",
           action: () => {
             void paste();
             term.focus();
@@ -5825,7 +5882,12 @@ function closeViewer() {
   closeTranscriptTerm();
 }
 
-type CtxItem = { label: string; action: () => void; color?: string; confirm?: boolean } | "sep";
+/// `keys` is the shortcut that does the same thing, shown in its own
+/// column. A menu is where people find out a key exists - the settings
+/// list is where they go once they already suspect it.
+type CtxItem =
+  | { label: string; action: () => void; color?: string; confirm?: boolean; keys?: string }
+  | "sep";
 function showContextMenu(x: number, y: number, items: CtxItem[]) {
   ctxMenu.innerHTML = "";
   for (const it of items) {
@@ -5870,6 +5932,12 @@ function showContextMenu(x: number, y: number, items: CtxItem[]) {
       });
     } else {
       row = menuRow(it.label, it.action);
+    }
+    if (it.keys) {
+      const k = document.createElement("span");
+      k.className = "menu-keys";
+      k.textContent = it.keys;
+      row.appendChild(k);
     }
     if (it.color) {
       const dot = document.createElement("span");
@@ -6254,6 +6322,26 @@ function menuClickCounts(row: HTMLElement, pressed: boolean, travel: number): bo
   const menu = row.closest<HTMLElement>(".menu");
   const at = Number(menu?.dataset.armedAt ?? "0");
   return activates(pressed, performance.now() - at, travel, MENU_ARM_MS, MENU_MIN_TRAVEL_PX);
+}
+
+/// A line along the bottom of a pane that goes away by itself.
+///
+/// Not a dialog. Whatever prompted it happened while somebody was doing
+/// something else, and a thing that has to be dismissed before the work
+/// continues is worse than the problem it is explaining. Click it to
+/// dismiss early; otherwise it leaves on its own.
+function showPaneHint(pane: HTMLElement, text: string) {
+  pane.querySelector(".pane-hint")?.remove();
+  const el = document.createElement("div");
+  el.className = "pane-hint";
+  el.textContent = text;
+  const go = () => {
+    el.classList.add("leaving");
+    window.setTimeout(() => el.remove(), 400);
+  };
+  el.addEventListener("click", go);
+  pane.appendChild(el);
+  window.setTimeout(go, 7000);
 }
 
 function menuRow(

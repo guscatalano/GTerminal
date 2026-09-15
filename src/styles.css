@@ -819,6 +819,54 @@ button.armed,
   text-overflow: ellipsis;
 }
 
+/* A hint along the bottom of a pane. Deliberately quiet: it is telling
+   somebody something useful at a moment they did not ask, so it must be
+   readable and easy to ignore, and it must never sit on top of the
+   thing it is explaining. */
+.pane-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  max-width: min(560px, 90%);
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel2, #1b1b1f);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  z-index: 8;
+  animation: pane-hint-in 180ms ease-out;
+}
+
+.pane-hint.leaving {
+  opacity: 0;
+  transition: opacity 380ms ease-out;
+}
+
+@keyframes pane-hint-in {
+  from { opacity: 0; transform: translate(-50%, 6px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pane-hint { animation: none; }
+  .pane-hint.leaving { transition: none; }
+}
+
+/* The key that does the same thing as the row, in its own column. */
+.menu-keys {
+  margin-left: auto;
+  padding-left: 18px;
+  color: var(--dim, #8a8a93);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .remote-who {
   display: flex;
   flex-direction: column;
