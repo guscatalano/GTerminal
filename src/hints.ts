@@ -87,11 +87,27 @@ export const SHIFT_HINT_TEXT =
 /// of output is a second problem. It is on screen for a few seconds and
 /// reaches no log - see uilog.ts, which exists so that what was copied
 /// stays out of files people are asked to send.
+/// The other half of the surprise.
+///
+/// Whoever reads this note has just lost a highlight to a gesture they
+/// expected to open a menu — and the menu is one modifier away, a fact
+/// that otherwise lives only in the settings page, which is not where
+/// they are. There are two settings for the right button: Menu, and the
+/// console's Copy / paste. Shift reaches the menu under both, which is
+/// why this is worth carrying to the moment somebody wants it rather
+/// than leaving it where it is true but unread.
+export const RIGHT_CLICK_MENU_NOTE = "Shift+right-click for the menu";
+
 export function copiedNote(text: string): string {
   const lines = text.split(/\r\n|\r|\n/);
   const chars = `${text.length} character${text.length === 1 ? "" : "s"}`;
-  if (lines.length > 1) return `Copied ${lines.length} lines, ${chars}`;
-  const one = lines[0].trim();
-  const shown = one.length > 40 ? `${one.slice(0, 40)}…` : one;
-  return `Copied ${chars}: ${shown}`;
+  let what: string;
+  if (lines.length > 1) {
+    what = `Copied ${lines.length} lines, ${chars}`;
+  } else {
+    const one = lines[0].trim();
+    const shown = one.length > 40 ? `${one.slice(0, 40)}…` : one;
+    what = `Copied ${chars}: ${shown}`;
+  }
+  return `${what} · ${RIGHT_CLICK_MENU_NOTE}`;
 }

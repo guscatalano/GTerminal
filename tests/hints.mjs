@@ -13,6 +13,7 @@
 import {
   SHIFT_HINT_LIMIT,
   SHIFT_HINT_TEXT,
+  RIGHT_CLICK_MENU_NOTE,
   copiedNote,
   shiftHintLearned,
   shouldOfferShiftHint,
@@ -98,29 +99,34 @@ check("so it does not read as a rule", /^Hold Shift/.test(SHIFT_HINT_TEXT), fals
 
 
 // ── saying that a copy happened ────────────────────────────────────────
+// Every one of these ends with the way back to the menu. The person
+// reading it has just lost a highlight to a gesture they expected to
+// open one, and the menu is a modifier away - a fact that otherwise
+// lives only in the settings page, which is not where they are.
+const withTail = (head) => `${head} · ${RIGHT_CLICK_MENU_NOTE}`;
 // The console's right button copies the selection and clears the
 // highlight. Reported as "I select, then right-click and it disappears"
 // - by somebody whose text had in fact been copied. A highlight that
 // vanishes with nothing said is indistinguishable from one that was
 // lost, so the pane says what went to the clipboard.
-check("one line is shown back, so it can be recognised", copiedNote("hello world"), "Copied 11 characters: hello world");
-check("a single character is not 1 characters", copiedNote("x"), "Copied 1 character: x");
+check("one line is shown back, so it can be recognised", copiedNote("hello world"), withTail("Copied 11 characters: hello world"));
+check("a single character is not 1 characters", copiedNote("x"), withTail("Copied 1 character: x"));
 // Long output is counted, not reprinted: a confirmation that puts a
 // page of text back on the screen is a second problem.
 check(
   "a long line is cut short",
   copiedNote("y".repeat(80)),
-  "Copied 80 characters: " + "y".repeat(40) + "…"
+  withTail("Copied 80 characters: " + "y".repeat(40) + "…")
 );
 check(
   "several lines are counted rather than shown",
   copiedNote("one\ntwo\nthree"),
-  "Copied 3 lines, 13 characters"
+  withTail("Copied 3 lines, 13 characters")
 );
 check(
   "and CRLF counts the same as LF — the shell writes one and the clipboard the other",
   copiedNote("one\r\ntwo"),
-  "Copied 2 lines, 8 characters"
+  withTail("Copied 2 lines, 8 characters")
 );
 // The count is of what was copied, not of what is shown: trimming is
 // for reading, and a report that disagreed with the clipboard would be
@@ -128,8 +134,12 @@ check(
 check(
   "leading space is trimmed from the preview but not from the count",
   copiedNote("   indented"),
-  "Copied 11 characters: indented"
+  withTail("Copied 11 characters: indented")
 );
+
+
+check("and the way to the menu is on the end of it", copiedNote("x").endsWith(RIGHT_CLICK_MENU_NOTE), true);
+check("which names shift, since that is what reaches the menu under either setting", /Shift/.test(RIGHT_CLICK_MENU_NOTE), true);
 
 if (failed) {
   console.log(`${failed} hint test(s) failed`);
