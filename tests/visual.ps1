@@ -1093,6 +1093,7 @@ function Seed-Daemon {
     if ($Typed) {
       $t = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $port)
       $tw = [System.IO.StreamWriter]::new($t.GetStream()); $tw.NewLine = "`n"; $tw.AutoFlush = $true
+      Greet $tw (Join-Path $scratch "GTerminal")
       $trd = [System.IO.StreamReader]::new($t.GetStream())
       $tw.WriteLine("{""cmd"":""attach"",""id"":$newId}")
       $null = $trd.ReadLine()

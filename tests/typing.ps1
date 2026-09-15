@@ -308,6 +308,7 @@ function Open-Shell {
   $script:dec = [System.Text.Encoding]::UTF8.GetDecoder()
   $script:w = [System.IO.StreamWriter]::new($script:stream)
   $script:w.NewLine = "`n"; $script:w.AutoFlush = $true
+  Greet $script:w "$env:LOCALAPPDATA\GTerminal"
   $script:w.WriteLine("{""cmd"":""attach"",""id"":$sid}")
   $null = Read-Event
   $script:w.WriteLine('{"cmd":"write","data":"\u001b[1;1R"}')   # ConPTY cursor query
@@ -597,6 +598,7 @@ $script:acc = ""
 $script:dec = [System.Text.Encoding]::UTF8.GetDecoder()
 $script:w = [System.IO.StreamWriter]::new($script:stream)
 $script:w.NewLine = "`n"; $script:w.AutoFlush = $true
+Greet $script:w "$env:LOCALAPPDATA\GTerminal"
 $script:w.WriteLine("{""cmd"":""attach"",""id"":$($det.Id)}")
 $null = Read-Event
 Start-Sleep -Seconds 2
@@ -883,6 +885,7 @@ function Test-DaemonResponsive {
     $st.WriteTimeout = $timeoutMs
     $st.ReadTimeout = $timeoutMs
     $sw = [System.IO.StreamWriter]::new($st); $sw.NewLine = "`n"; $sw.AutoFlush = $true
+    Greet $sw "$env:LOCALAPPDATA\GTerminal"
     $sr = [System.IO.StreamReader]::new($st)
     $sw.WriteLine('{"cmd":"list"}')
     $line = $sr.ReadLine()
