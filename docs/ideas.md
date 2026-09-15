@@ -130,11 +130,23 @@ Splits exist; typing the same thing into each is manual. tmux calls it
 synchronize-panes and Windows Terminal has it too. Worth it if you run
 agents side by side, which is what these panes are usually for.
 
-### 7. Find, properly
+### 7. Find, properly — *done, and the entry was mostly wrong*
 
-`addon-search` is wired up but the surface is thin: no regex, no case or
-whole-word toggles, and nothing that searches the history viewer's
-transcripts, which is where "what was that command last Tuesday" lives.
+Written up as "no regex, no case toggle, and nothing searches the
+transcripts". Two of those already existed and the third was half true:
+the history page did search transcript text, it just returned the
+*session* - a wall of output somebody then searched again by eye.
+Checking beat describing, for the second time on this list.
+
+What was actually missing: a whole-word toggle in the find bar, and
+*where* in a transcript a history search landed. The history page now
+lists the matching lines under each session, with line numbers and the
+match highlighted, capped at eight per session because a transcript
+that mentions the word four hundred times is one result with noise in
+it. Clicking a line opens the transcript with the search already primed
+so the viewer lands on it. Matching is case-insensitive and stays that
+way: "did I see this last week" is not a question anybody asks with the
+case they saw it in.
 
 ### 8. Export a block or a session
 

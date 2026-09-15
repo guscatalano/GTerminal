@@ -50,6 +50,7 @@ import type { DaemonInfo } from "./daemon";
 import { activates } from "./menus";
 import { visibilityReport } from "./controls";
 import { shouldSuggestThemes } from "./firstrun";
+import { excerpt, findHits, MAX_HITS_PER_SESSION } from "./histsearch";
 import {
   isPermissionGranted,
   requestPermission,
@@ -4009,8 +4010,10 @@ const findInput = document.getElementById("find-input") as HTMLInputElement;
 const findCount = document.getElementById("find-count")!;
 const findCaseBtn = document.getElementById("find-case")!;
 const findRegexBtn = document.getElementById("find-regex")!;
+const findWordBtn = document.getElementById("find-word")!;
 let findCase = false;
 let findRegex = false;
+let findWord = false;
 /// The pane being searched. Held so that closing the bar clears the
 /// highlights from the pane they were drawn in, even if focus has since
 /// moved somewhere else.
@@ -4020,6 +4023,7 @@ function findOptions() {
   return {
     caseSensitive: findCase,
     regex: findRegex,
+    wholeWord: findWord,
     decorations: {
       matchBackground: "#ffd54f55",
       matchBorder: "#ffd54f",
@@ -4105,6 +4109,7 @@ function initFind() {
     });
   toggle(findCaseBtn, () => findCase, (v) => (findCase = v));
   toggle(findRegexBtn, () => findRegex, (v) => (findRegex = v));
+  toggle(findWordBtn, () => findWord, (v) => (findWord = v));
   document.getElementById("find-prev")!.addEventListener("click", () => runFind(false, true));
   document.getElementById("find-next")!.addEventListener("click", () => runFind(false));
   document.getElementById("find-close")!.addEventListener("click", closeFind);
@@ -6093,16 +6098,23 @@ async function buildHistoryPage(filter?: string) {
   }
   const needle = filter?.trim().toLowerCase();
   const shown: HistoryEntry[] = [];
+  // Where in each transcript the search landed. A match used to return
+  // a session and nothing more, and the session was a wall of output
+  // somebody then searched again by eye - "what was that command last
+  // Tuesday" is answered by the line, not by the day.
+  const hits = new Map<string, ReturnType<typeof findHits>>();
   for (const en of entries) {
     if (needle) {
       let match = `${en.cwd} ${en.shell}`.toLowerCase().includes(needle);
-      if (!match) {
-        try {
-          const text = stripAnsiText(await invoke<string>("history_read", { stem: en.stem }));
-          match = text.toLowerCase().includes(needle);
-        } catch {
-          match = false;
+      try {
+        const text = stripAnsiText(await invoke<string>("history_read", { stem: en.stem }));
+        const found = findHits(text, needle);
+        if (found.length) {
+          hits.set(en.stem, found);
+          match = true;
         }
+      } catch {
+        // Unreadable transcript: the cwd/shell match, if any, stands.
       }
       if (!match) continue;
     }
@@ -6146,13 +6158,56 @@ async function buildHistoryPage(filter?: string) {
     }
     row.addEventListener("click", () => void openTranscript(en));
     list.appendChild(row);
+    // The lines that matched, under the row they belong to. Clicking one
+    // opens the transcript with the search already primed, so the viewer
+    // lands on it rather than at the top of ten thousand lines.
+    const found = hits.get(en.stem);
+    if (found && needle) {
+      const block = document.createElement("div");
+      block.className = "hist-hits";
+      for (const h of found) {
+        const line = document.createElement("div");
+        line.className = "hist-hit";
+        const no = document.createElement("span");
+        no.className = "hist-hit-line";
+        no.textContent = String(h.line + 1);
+        const txt = document.createElement("span");
+        txt.className = "hist-hit-text";
+        const shownText = excerpt(h, needle.length);
+        // Highlight the match inside the excerpt, without trusting any
+        // of it as HTML: the transcript is whatever a program printed.
+        const idx = shownText.toLowerCase().indexOf(needle);
+        if (idx >= 0) {
+          txt.append(
+            shownText.slice(0, idx),
+            Object.assign(document.createElement("mark"), { textContent: shownText.slice(idx, idx + needle.length) }),
+            shownText.slice(idx + needle.length)
+          );
+        } else {
+          txt.textContent = shownText;
+        }
+        line.append(no, txt);
+        line.addEventListener("click", (e) => {
+          e.stopPropagation();
+          void openTranscript(en, needle);
+        });
+        block.appendChild(line);
+      }
+      if (found.length >= MAX_HITS_PER_SESSION) {
+        const more = document.createElement("div");
+        more.className = "hist-hit hist-hit-more";
+        more.textContent = "and more — open it and use find";
+        block.appendChild(more);
+      }
+      list.appendChild(block);
+    }
   }
 }
 
 let viewerTerm: Terminal | null = null;
 let viewerFit: FitAddon | null = null;
 
-async function openTranscript(en: HistoryEntry) {
+async function openTranscript(en: HistoryEntry, primed?: string) {
   let data: string;
   try {
     data = await invoke<string>("history_read", { stem: en.stem });
@@ -6179,9 +6234,21 @@ async function openTranscript(en: HistoryEntry) {
   viewerTerm = term;
   viewerFit = new FitAddon();
   term.loadAddon(viewerFit);
+  // A find of its own, so a transcript opened from a search hit lands
+  // on the hit rather than at the top of ten thousand lines.
+  const viewerSearch = new SearchAddon();
+  term.loadAddon(viewerSearch);
   term.open(document.getElementById("history-term")!);
   viewerFit.fit();
-  term.write(data + VIEWER_MODE_RESET);
+  term.write(data + VIEWER_MODE_RESET, () => {
+    if (!primed) return;
+    // After the write has landed: searching a buffer that is still being
+    // parsed finds whatever happened to be there at the time.
+    viewerSearch.findNext(primed, {
+      caseSensitive: false,
+      decorations: findOptions().decorations,
+    });
+  });
 }
 
 function closeTranscriptTerm() {
