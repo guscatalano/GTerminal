@@ -248,10 +248,15 @@ interface AppConfig {
   close_action?: string;
   summon_animation?: string;
   restore_prompt?: boolean;
-  /// Whether a program may draw pictures (sixel). On by default: a
-  /// program that emits one and gets nothing looks broken, and it is
-  /// the terminal that is missing something. The budget below is what
-  /// keeps that from being a memory hole.
+  /// Whether a program may draw pictures (sixel).
+  ///
+  /// Off by default, and that is the opposite of what it was until the
+  /// consequence was measured. Loading the addon makes this terminal
+  /// answer a program's "what can you do?" with sixel support - the 4
+  /// in ESC[?62;4;9;22c - and ConPTY then drops the picture the program
+  /// sends in reply. A program that is told no draws ASCII instead; a
+  /// program that is told yes draws nothing at all. So claiming it while
+  /// nothing can carry it is worse than not having it.
   images?: boolean;
   /// How much decoded image data one tab may hold, in megabytes.
   images_storage_mb?: number;
@@ -4706,7 +4711,7 @@ async function createTab(
   //
   // The matching half of this is in the daemon: a picture is not
   // scrollback and does not go in the ring. See RingFilter in mux.rs.
-  if (config.images !== false) {
+  if (config.images === true) {
     term.loadAddon(
       new ImageAddon({
         sixelSupport: true,
@@ -8505,8 +8510,8 @@ function buildSettingsPage() {
   );
   settingRow(
     "Pictures in the terminal",
-    "Let programs draw images (sixel) — charts, previews, the occasional cat. Off makes a program that draws one print nothing at all, which is what this terminal did before and what makes such a program look broken.",
-    mkSelect([["on", "On"], ["off", "Off"]], config.images !== false ? "on" : "off", (v) => {
+    "Let programs draw images (sixel) — charts, previews, the occasional cat. It has no effect today: Windows drops pictures on the way from the program to this window, so turning it on only makes programs stop offering their text fallback and draw nothing instead. Here for the day that changes.",
+    mkSelect([["on", "On"], ["off", "Off"]], config.images === true ? "on" : "off", (v) => {
       config.images = v === "on";
       changed();
     })

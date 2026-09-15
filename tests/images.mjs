@@ -93,6 +93,25 @@ check(
   `loadAddon at ${loadAt}, open at ${openAt}`
 );
 
+
+// The part that makes this worse than absent while it cannot work.
+//
+// The addon answers Primary Device Attributes with ESC[?62;4;9;22c,
+// and the 4 is a claim to draw sixel. A program that asks and is told
+// yes sends a picture and draws nothing, because ConPTY eats it; a
+// program told no prints its ASCII fallback. So the capability must not
+// be claimed by default while nothing can carry it.
+check(
+  "the window does not load the addon unless it was deliberately turned on",
+  /if \(config\.images === true\)/.test(main),
+  "the default has to be off: a terminal that claims sixel and cannot receive it turns a working text fallback into an empty screen"
+);
+check(
+  "and the setting says so rather than promising pictures",
+  /no effect today/.test(main),
+  "the settings text must say the feature does nothing yet"
+);
+
 if (failed) {
   console.log(`${failed} image test(s) failed`);
   process.exit(1);

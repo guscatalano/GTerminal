@@ -39,6 +39,14 @@ directly — the picture `tests/fixtures/sixel.ps1` writes, which a
 program cannot get here through ConPTY. Kept because "it draws them,
 something else is in the way" is a claim worth being able to see.
 
+And it is worse than absent while that holds, which is the part worth
+knowing. The addon answers Primary Device Attributes with
+`ESC[?62;4;9;22c` — the `4` is a claim to draw sixel — so a program
+asks what the terminal can do, is told "pictures", sends one, and gets
+nothing. Told "no", the same program prints its ASCII fallback. So
+loading it turned a working fallback into an empty screen, and the
+default is off until something can carry the reply.
+
 So it ships inert, deliberately. `tests/images.mjs` proves our half
 against the real engine, including the load order, so the day conhost
 forwards DCS this works without anybody rediscovering how. Worth
