@@ -1,0 +1,222 @@
+<!doctype html>
+<!--
+  Selecting text while a program is reading the mouse.
+
+  Driven by tests/mouse.mjs. Reported from real use: copying out of an
+  agent TUI is impossible because the program "hijacks copying". It is
+  not a bug in the terminal and it is not something the terminal chose -
+  a full-screen program asks for mouse reporting (DECSET 1000/1002/1003,
+  usually with 1006 for the extended encoding), and from then on every
+  press, drag and release belongs to the program rather than to the
+  selection. That is how its own click targets work.
+
+  Which leaves one question worth testing: is there a way out, does it
+  work, and does the way out stop being needed when the program exits.
+
+  The events here are synthetic but they are real DOM events on the real
+  element xterm listens to, which is the part that matters: nothing here
+  asks xterm what it would do, it makes it do it.
+-->
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css" />
+<style>
+  body {
+    margin: 0;
+    background: #101014;
+  }
+  #host {
+    width: 720px;
+    height: 260px;
+  }
+  #out {
+    font: 12px monospace;
+    white-space: pre-wrap;
+    color: #000;
+    background: #fff;
+  }
+</style>
+<div id="host"></div>
+<pre id="out">PENDING</pre>
+<script type="module">
+  import { Terminal } from "../../node_modules/@xterm/xterm/lib/xterm.mjs";
+
+  const E = "\x1b";
+  const host = document.getElementById("host");
+  const out = document.getElementById("out");
+
+  /// A drag across one row, as the browser reports it.
+  ///
+  /// mousedown goes to the screen element, which is what xterm binds; the
+  /// move and the release go to the document, because that is where a
+  /// drag that leaves the element still ends up. Getting that wrong shows
+  /// as "selection never starts" and would look exactly like the bug
+  /// under test.
+  function drag(screen, fromCol, toCol, row, opts = {}) {
+    const r = screen.getBoundingClientRect();
+    const cw = r.width / 80;
+    const ch = r.height / 10;
+    const y = r.top + ch * (row + 0.5);
+    const at = (col) => ({
+      clientX: r.left + cw * (col + 0.5),
+      clientY: y,
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      buttons: 1,
+      shiftKey: !!opts.shift,
+    });
+    // detail: 1 - the click count. xterm switches on it to tell a single
+    // click from a double or a triple, and a synthetic MouseEvent
+    // defaults it to 0, which matches none of those branches: the press
+    // arrives, is reported to the program correctly, and starts no
+    // selection at all. That failure is indistinguishable from the bug
+    // this suite exists to measure, which is how it cost an hour.
+    screen.dispatchEvent(new MouseEvent("mousedown", { ...at(fromCol), detail: 1 }));
+    // Several moves, not one: a selection that only ever sees its end
+    // point is a different code path from one that is dragged.
+    //
+    // Sent to the element and to the document both. xterm binds the move
+    // and the release on the document that owns the element - a drag has
+    // to keep working once the pointer leaves the terminal - and sending
+    // only to the element produced a drag that reported mouse positions
+    // to the program perfectly while never selecting anything, which
+    // reads exactly like the bug this is meant to measure.
+    for (let c = fromCol + 1; c <= toCol; c++) {
+      screen.dispatchEvent(new MouseEvent("mousemove", at(c)));
+      document.dispatchEvent(new MouseEvent("mousemove", at(c)));
+    }
+    const up = { ...at(toCol), buttons: 0 };
+    screen.dispatchEvent(new MouseEvent("mouseup", up));
+    document.dispatchEvent(new MouseEvent("mouseup", up));
+  }
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  (async () => {
+    try {
+      const results = [];
+      const note = (name, fields) => results.push({ name, ...fields });
+
+      const term = new Terminal({
+        cols: 80,
+        rows: 10,
+        allowProposedApi: true,
+        fontSize: 14,
+        lineHeight: 1,
+      });
+      const div = document.createElement("div");
+      host.appendChild(div);
+      term.open(div);
+
+      // What the program would receive. Mouse reports arrive here the
+      // same way typed keys do.
+      let toApp = "";
+      term.onData((d) => {
+        toApp += d;
+      });
+
+      await new Promise((r) => term.write("SELECTABLE-TEXT-ON-ROW-ZERO", r));
+      await sleep(50);
+      const screen = div.querySelector(".xterm-screen");
+      if (!screen) throw new Error("no .xterm-screen to drag on");
+
+      // Before any of it: does selecting work here at all, and does the
+      // element have the size the coordinates are computed from? A probe
+      // that cannot tell "the drag is wrong" from "nothing can select"
+      // reports the same failure for both.
+      term.selectAll();
+      const byApi = term.getSelection();
+      term.clearSelection();
+      const rect = screen.getBoundingClientRect();
+      note("selecting works at all", {
+        selection: byApi,
+        toApp: "",
+        rect: `${Math.round(rect.width)}x${Math.round(rect.height)} at ${Math.round(rect.left)},${Math.round(rect.top)}`,
+      });
+
+      // 1. No program reading the mouse: a drag selects, which is the
+      //    baseline everything else is measured against.
+      //
+      // Reported step by step. A selection that never starts and one that
+      // starts and is thrown away on release are different faults with
+      // the same symptom, and only one of them is about the drag.
+      term.clearSelection();
+      toApp = "";
+      const trace = [];
+      const r0 = screen.getBoundingClientRect();
+      const cw0 = r0.width / 80;
+      const y0 = r0.top + (r0.height / 10) * 0.5;
+      const ev = (col, extra = {}) => ({
+        clientX: r0.left + cw0 * (col + 0.5),
+        clientY: y0,
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        button: 0,
+        buttons: 1,
+        ...extra,
+      });
+      screen.dispatchEvent(new MouseEvent("mousedown", ev(0, { detail: 1 })));
+      trace.push("afterDown:" + term.hasSelection());
+      for (const c of [4, 8, 12]) {
+        document.dispatchEvent(new MouseEvent("mousemove", ev(c)));
+      }
+      trace.push("afterMove:" + term.hasSelection() + ":" + JSON.stringify(term.getSelection()));
+      document.dispatchEvent(new MouseEvent("mouseup", ev(12, { buttons: 0 })));
+      trace.push("afterUp:" + term.hasSelection());
+      await sleep(30);
+      note("a drag selects when nothing is reading the mouse", {
+        selection: term.getSelection(),
+        toApp,
+        trace: trace.join(" | "),
+      });
+
+      // 2. The program asks for the mouse. This is the reported problem.
+      await new Promise((r) => term.write(`${E}[?1000h${E}[?1006h`, r));
+      term.clearSelection();
+      toApp = "";
+      drag(screen, 0, 12, 0);
+      await sleep(30);
+      note("with mouse reporting on, a plain drag goes to the program", {
+        selection: term.getSelection(),
+        toApp,
+      });
+
+      // 3. The way out. Shift is the convention every terminal uses for
+      //    "this gesture is mine, not the program's".
+      term.clearSelection();
+      toApp = "";
+      drag(screen, 0, 12, 0, { shift: true });
+      await sleep(30);
+      note("holding shift takes the drag back from the program", {
+        selection: term.getSelection(),
+        toApp,
+      });
+
+      // 4. And the program letting go puts it back, so the escape hatch
+      //    stops being needed rather than becoming permanent.
+      await new Promise((r) => term.write(`${E}[?1000l${E}[?1006l`, r));
+      term.clearSelection();
+      toApp = "";
+      drag(screen, 0, 12, 0);
+      await sleep(30);
+      note("and a plain drag works again once the program stops asking", {
+        selection: term.getSelection(),
+        toApp,
+      });
+
+      // 5. The other half of the report: selecting is not copying. What
+      //    the app binds for copy has to work while a program owns the
+      //    keyboard too - Ctrl+C cannot, it is the interrupt - so the
+      //    selection has to survive being read after the fact.
+      note("the selection is still readable after the gesture ends", {
+        selection: term.getSelection(),
+        toApp: "",
+      });
+
+      out.textContent = "RESULTS " + JSON.stringify(results);
+    } catch (e) {
+      out.textContent = "RESULTS-ERROR " + String(e && e.stack ? e.stack : e);
+    }
+  })();
+</script>
