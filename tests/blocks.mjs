@@ -118,6 +118,52 @@ const three = () => {
   check("only the failure is listed", t.failures().length, 1);
   check("and it is the right one", t.failures()[0].exit, 1);
   check("last closed is the newest", t.lastClosed().prompt.line, 30);
+
+  // Walking back through the failures. Only the middle command failed
+  // here, so there is exactly one to find and the edges are the
+  // interesting part.
+  check("from below it, the failure is found", t.prevFailure(35).prompt.line, 20);
+  check("from inside it, the walk keeps going rather than standing still", t.prevFailure(20), undefined);
+  check("from above it, there is nothing further back", t.prevFailure(5), undefined);
+  check("and the newest failure is what a wrap lands on", t.lastFailure().prompt.line, 20);
+}
+
+// A scrollback with no failure in it at all: the walk has to end in
+// "nothing", not in the newest *command*. Reaching for the last failure
+// and being given the last success would send somebody to a command
+// that worked and leave them to work out why.
+{
+  const t = new BlockTracker();
+  t.feed("A", mk(10));
+  t.feed("D;0", mk(20));
+  t.feed("A", mk(20));
+  t.feed("D;0", mk(30));
+  check("nothing failed, so nothing is found", t.prevFailure(99), undefined);
+  check("and there is nothing to wrap to either", t.lastFailure(), undefined);
+}
+
+// Two failures, which is where a wrap earns its place: from the oldest,
+// the next press goes back to the newest rather than stopping with the
+// answer still on screen further down.
+{
+  const t = new BlockTracker();
+  t.feed("A", mk(10));
+  t.feed("D;1", mk(20));
+  t.feed("A", mk(20));
+  t.feed("D;0", mk(30));
+  t.feed("A", mk(30));
+  t.feed("D;2", mk(40));
+  check("both failures are counted", t.failures().length, 2);
+  check("the walk starts at the newest", t.prevFailure(99).prompt.line, 30);
+  check("then goes to the older one", t.prevFailure(30).prompt.line, 10);
+  check("and stops there", t.prevFailure(10), undefined);
+  check("which is where the wrap sends it back to the newest", t.lastFailure().prompt.line, 30);
+  // An exit code that is unknown is not a failure - see failures(). A
+  // walk that stopped on "we don't know" would be answering a different
+  // question from the one the key asks.
+  t.feed("A", mk(40));
+  t.feed("D", mk(50));
+  check("an unknown exit is not somewhere the walk stops", t.prevFailure(99).prompt.line, 30);
 }
 
 // ── scrollback trimming ────────────────────────────────────────────────

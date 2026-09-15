@@ -45,6 +45,7 @@ import { visibilityReport } from "./controls";
 import { shouldSuggestThemes } from "./firstrun";
 import {
   MOUSE_SELECTION_NOTE,
+  NO_FAILURES_NOTE,
   SHIFT_HINT_TEXT,
   menuExplainsMissingCopy,
   copiedNote,
@@ -3561,6 +3562,29 @@ function jumpPrompt(dir: -1 | 1) {
   tab.term.scrollToLine(target);
 }
 
+/// Walk back through the commands that failed.
+///
+/// Each press goes to the newest failure above the view, and from the
+/// oldest it wraps to the newest - see `lastFailure`. A scrollback ten
+/// thousand lines deep can hold three failures and no way to find them
+/// that is not scrolling and reading, which is the whole reason the
+/// exit codes were parsed in the first place.
+function jumpFailure() {
+  const tab = activeId === null ? undefined : tabs.get(activeId);
+  if (!tab) return;
+  const from = tab.term.buffer.active.viewportY;
+  const target = tab.blocks.prevFailure(from) ?? tab.blocks.lastFailure();
+  if (!target) {
+    // Silence here would be indistinguishable from a key that is not
+    // bound to anything, which is the state this app has spent a week
+    // learning not to leave people in.
+    showPaneHint(tab.pane, NO_FAILURES_NOTE);
+    return;
+  }
+  tab.term.scrollToLine(target.prompt.line);
+  logUi("blocks.jumpFailure", { exit: target.exit ?? null });
+}
+
 /// Which buffer row a pointer is over. xterm does not expose this, so it
 /// comes from the row height and the scroll position.
 function lineAtPointer(tab: Tab, clientY: number): number | undefined {
@@ -4217,6 +4241,13 @@ function makeShortcutHandler(getId: () => number) {
     // Prompt-to-prompt navigation: skip a build log in one keystroke.
     if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
       jumpPrompt(e.key === "ArrowUp" ? -1 : 1);
+      return false;
+    }
+    // And straight to the ones that failed. E for error, next to the
+    // arrows that walk every prompt: the same gesture, filtered down to
+    // the prompts anybody goes looking for.
+    if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === "E" || e.key === "e")) {
+      jumpFailure();
       return false;
     }
     if (split && arrow && e.altKey && e.ctrlKey && e.shiftKey) {

@@ -81,6 +81,12 @@ export const SHORTCUTS: ShortcutGroup[] = [
     title: "Text",
     items: [
       { keys: "Ctrl+Shift+C", what: "Copy the selection", handler: "pushClip(sel)" },
+      {
+        keys: "Ctrl+Shift+E",
+        what: "Jump back through commands that failed",
+        handler: "jumpFailure()",
+        only: "where the shell reports exit codes — PowerShell and cmd both do",
+      },
       { keys: "Ctrl+Shift+V", what: "Paste", handler: "pasteClipboardInto" },
       {
         keys: "Ctrl+V",

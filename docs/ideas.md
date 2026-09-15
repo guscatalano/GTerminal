@@ -39,13 +39,17 @@ exit code. It is the "I started a build and wandered off" case, and it
 needs a notification permission and a threshold rather than any new
 understanding of the shell.
 
-### 3. Jump between prompts
+### 3. Jump between prompts — *done, and it was half-built already*
 
-The blocks are parsed and nothing navigates them. Previous and next
-prompt, and "take me to the last thing that failed", in a scrollback ten
-thousand lines deep. The data is already in `BlockTracker`; this is a
-keybinding, a scroll, and a decision about what to do when there is no
-next one.
+Written up as "the blocks are parsed and nothing navigates them", which
+was wrong: `prevPrompt`, `nextPrompt` and Ctrl+Shift+↑/↓ have been there
+all along. Checking beat describing, again.
+
+What was actually missing was the other half - walking back through the
+commands that *failed*, which `failures()` could answer and nothing
+asked. Ctrl+Shift+E now does it, wrapping from the oldest back to the
+newest, and saying so when a scrollback holds no failures at all rather
+than behaving like a key that is not bound.
 
 ## Argued for, not started
 

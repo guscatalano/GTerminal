@@ -117,6 +117,31 @@ export class BlockTracker {
     return this.all().filter((b) => b.closed && b.exit !== undefined && b.exit !== 0);
   }
 
+  /// The newest failure strictly above `line`, for walking back through
+  /// them. Strictly above for the same reason `prevPrompt` is: pressing
+  /// the key again from where it just landed has to keep going.
+  prevFailure(line: number): Block | undefined {
+    let best: Block | undefined;
+    for (const b of this.failures()) {
+      if (b.prompt.line < line) best = b;
+      else break;
+    }
+    return best;
+  }
+
+  /// The newest failure anywhere in the buffer.
+  ///
+  /// What the walk wraps to when there is nothing further back. Prompt
+  /// walking deliberately does not wrap - it is a way of moving through
+  /// the scrollback, and looping would lose your place. This is not
+  /// that: it is a way of asking "show me what went wrong", where
+  /// arriving at the oldest failure and being told nothing more would
+  /// be a dead end with the answer still on screen somewhere below.
+  lastFailure(): Block | undefined {
+    const bad = this.failures();
+    return bad.length ? bad[bad.length - 1] : undefined;
+  }
+
   /// The most recently closed block, for "copy the last command output".
   lastClosed(): Block | undefined {
     const live = this.all();

@@ -139,3 +139,16 @@ export const MOUSE_SELECTION_NOTE =
 export function menuExplainsMissingCopy(hasSelection: boolean, tracking: boolean): boolean {
   return !hasSelection && tracking;
 }
+
+/// When the jump-to-failure key has nothing to jump to.
+///
+/// Said rather than swallowed. A key that does nothing when pressed is
+/// indistinguishable from a key that is not bound, and somebody who has
+/// just learned this one exists will conclude it does not - which is a
+/// worse outcome than the empty answer it actually has.
+///
+/// It names what it looked for, because "nothing found" without that is
+/// ambiguous between "no failures" and "no marks to tell" - and the
+/// second really happens, in a shell whose prompt hook is not installed.
+export const NO_FAILURES_NOTE =
+  "No failed commands in this scrollback — nothing marked as having exited non-zero.";
