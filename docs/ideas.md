@@ -10,21 +10,33 @@ as one.
 The order is the order they were argued in, which is roughly value per
 unit of new machinery. It is not a queue.
 
-## Doing now
+## Done
 
-### 1. Inline images (sixel)
+### 1. Inline images (sixel) — *built, and blocked below us*
 
-`@xterm/addon-image` is not installed, so a program that draws a chart,
-a diagram or an image preview produces nothing here and something in
-Windows Terminal or WezTerm. That asymmetry is the worst kind: the
-program looks broken, and the terminal looks fine.
+The window draws them now: `@xterm/addon-image` is loaded before the
+terminal is opened (it registers its DCS handler on activate, so one
+loaded afterwards misses the picture — an hour, that), with a
+per-tab budget in megabytes because decoded image data is RGBA and a
+program in a loop is otherwise unbounded. The daemon refuses to keep
+them, like it refuses what a full-screen program draws: a sixel is tens
+or hundreds of kilobytes against a ring capped at 512KB, so one chart
+would evict every line of text in the session.
 
-The decision that comes with it is the scrollback. Image data is orders
-of magnitude larger than the text around it, and the ring is capped at
-512KB per session — see `RingFilter` in `mux.rs`, which already refuses
-to keep what a full-screen program draws for exactly this reason. Images
-should be treated the same way: rendered live, not preserved into a
-replay.
+**And none of it can be reached from a program today.** ConPTY parses
+what a console program writes and re-emits its own stream, and it drops
+DCS strings entirely. Measured, not assumed: `tests/fixtures/sixel.ps1`
+run in a real session, reading what arrived at the window — the text
+either side of the picture, and not one byte of the picture. The same
+shape as the mouse-mode finding next to it, and less fixable: a program
+can ask for mouse reporting by setting a console mode, and there is no
+console mode that means "pass my pictures through".
+
+So it ships inert, deliberately. `tests/images.mjs` proves our half
+against the real engine, including the load order, so the day conhost
+forwards DCS this works without anybody rediscovering how. Worth
+revisiting if the daemon ever grows a path that is not ConPTY, or when
+a Windows build starts passing them.
 
 ### 2. Say when a long command finishes — *done*
 

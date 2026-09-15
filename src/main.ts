@@ -17,6 +17,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { SearchAddon } from "@xterm/addon-search";
+import { ImageAddon } from "@xterm/addon-image";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { register, unregisterAll } from "@tauri-apps/plugin-global-shortcut";
 import {
@@ -247,6 +248,13 @@ interface AppConfig {
   close_action?: string;
   summon_animation?: string;
   restore_prompt?: boolean;
+  /// Whether a program may draw pictures (sixel). On by default: a
+  /// program that emits one and gets nothing looks broken, and it is
+  /// the terminal that is missing something. The budget below is what
+  /// keeps that from being a memory hole.
+  images?: boolean;
+  /// How much decoded image data one tab may hold, in megabytes.
+  images_storage_mb?: number;
   /// Saying that a long command finished while nobody was looking. Off
   /// unless asked for, and see src/notify.ts for when one is sent - the
   /// restraint is the whole feature.
@@ -3580,6 +3588,16 @@ function jumpPrompt(dir: -1 | 1) {
   tab.term.scrollToLine(target);
 }
 
+/// How much decoded image data one tab may hold.
+///
+/// Clamped rather than trusted: this is megabytes of RGBA per tab, and
+/// a config that says 4096 would be a way to exhaust the machine one
+/// picture at a time.
+function imageStorageMb(c: AppConfig): number {
+  const v = c.images_storage_mb;
+  return typeof v === "number" && v >= 1 && v <= 256 ? v : 32;
+}
+
 /// Say that a command finished, if saying so is worth an interruption.
 ///
 /// The judgement is in notify.ts and tested there; this is the part that
@@ -4675,6 +4693,30 @@ async function createTab(
   // which would replace the whole app with the page.
   if (config.clickable_links !== false) {
     term.loadAddon(new WebLinksAddon((_e, uri) => void openUrl(uri).catch(() => {})));
+  }
+  // Pictures, for the programs that draw them.
+  //
+  // A budget rather than a free hand. Decoded image data is held as
+  // RGBA, so a full-screen picture is a few megabytes and a program in
+  // a loop is an unbounded one; the addon evicts oldest-first once the
+  // limit is reached, which is the behaviour a scrollback should have
+  // anyway. The default here is deliberately modest - this is a
+  // terminal, and the case it serves is a chart or a preview, not an
+  // image viewer.
+  //
+  // The matching half of this is in the daemon: a picture is not
+  // scrollback and does not go in the ring. See RingFilter in mux.rs.
+  if (config.images !== false) {
+    term.loadAddon(
+      new ImageAddon({
+        sixelSupport: true,
+        storageLimit: imageStorageMb(config),
+        // Say that something was drawn and then evicted, rather than
+        // leaving a hole where a picture used to be. A blank gap is
+        // indistinguishable from a program that drew nothing.
+        showPlaceholder: true,
+      })
+    );
   }
   term.open(paneBody);
   // WebGL for every tab, background art or not.
@@ -8460,6 +8502,22 @@ function buildSettingsPage() {
         changed();
       }
     )
+  );
+  settingRow(
+    "Pictures in the terminal",
+    "Let programs draw images (sixel) — charts, previews, the occasional cat. Off makes a program that draws one print nothing at all, which is what this terminal did before and what makes such a program look broken.",
+    mkSelect([["on", "On"], ["off", "Off"]], config.images !== false ? "on" : "off", (v) => {
+      config.images = v === "on";
+      changed();
+    })
+  );
+  settingRow(
+    "…and how much to keep",
+    "Megabytes of decoded image per tab. Pictures are held as raw pixels, so this is the real cost of them; the oldest are dropped when the budget is full, and a dropped one leaves a marker rather than a hole.",
+    mkNumber(imageStorageMb(config), 1, 256, (v) => {
+      config.images_storage_mb = v;
+      changed();
+    })
   );
   settingRow(
     "Right-click",

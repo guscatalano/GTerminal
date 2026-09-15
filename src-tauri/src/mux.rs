@@ -299,10 +299,41 @@ fn strip_queries(s: &str) -> String {
 #[derive(Default)]
 struct RingFilter {
     in_alt: bool,
+    /// Held mid-picture. A DCS string can be longer than PENDING_MAX by
+    /// three orders of magnitude, so the usual "give up and keep it"
+    /// rule would emit half of one into the scrollback.
+    in_dcs: bool,
     /// An escape sequence split across two reads. Held until it can be
     /// judged, because deciding on half of one is how a filter starts
     /// eating output it meant to keep.
     pending: Vec<u8>,
+}
+
+/// Where a device control string ends, counted from its first byte
+/// after `ESC P`.
+///
+/// Either `ESC \` (the proper string terminator) or a bare BEL, which
+/// some programs use and every terminal accepts. Returns the index just
+/// past the terminator.
+fn find_st(buf: &[u8]) -> Option<usize> {
+    let mut i = 0;
+    while i < buf.len() {
+        if buf[i] == 0x07 {
+            return Some(i + 1);
+        }
+        if buf[i] == 0x1b {
+            // A lone ESC at the very end is undecidable until more
+            // arrives; anything else beginning with ESC is the end.
+            if i + 1 >= buf.len() {
+                return None;
+            }
+            if buf[i + 1] == b'\\' {
+                return Some(i + 2);
+            }
+        }
+        i += 1;
+    }
+    None
 }
 
 /// Longest sequence worth waiting for. Past this, whatever is being held
@@ -321,6 +352,25 @@ impl RingFilter {
     fn keep(&mut self, chunk: &[u8]) -> Vec<u8> {
         let mut input = std::mem::take(&mut self.pending);
         input.extend_from_slice(chunk);
+        // Still inside a picture from a previous read: swallow up to its
+        // terminator before anything else is looked at.
+        if self.in_dcs {
+            match find_st(&input) {
+                Some(end) => {
+                    input.drain(..end);
+                    self.in_dcs = false;
+                }
+                None => {
+                    // Keep only enough to recognise a terminator split
+                    // across the boundary. Holding the whole picture
+                    // would be storing the thing we are refusing to
+                    // store.
+                    let tail = input.len().saturating_sub(2);
+                    self.pending = input[tail..].to_vec();
+                    return Vec::new();
+                }
+            }
+        }
         let mut out = Vec::with_capacity(input.len());
         let mut i = 0;
         while i < input.len() {
@@ -345,6 +395,36 @@ impl RingFilter {
                     out.extend_from_slice(&input[i..]);
                 }
                 return out;
+            }
+            // DCS - a device control string, which on a terminal that
+            // draws pictures means a picture. Dropped from the ring
+            // entirely, for the same reason the alternate screen is: a
+            // sixel is tens or hundreds of kilobytes of pixel data
+            // against a ring capped at 512KB, so one chart would evict
+            // every line of text in the session and a replay would hand
+            // a fresh terminal a picture with no conversation around it.
+            //
+            // The window still draws it live - see the image addon in
+            // main.ts. What is refused here is keeping it, which is the
+            // same bargain full-screen programs get.
+            if input[i + 1] == b'P' {
+                match find_st(&input[i + 2..]) {
+                    Some(end) => {
+                        i = i + 2 + end;
+                        continue;
+                    }
+                    None => {
+                        // Not finished yet. A picture arrives over many
+                        // reads and the terminator may be thousands of
+                        // bytes away, so this is the one case that holds
+                        // more than PENDING_MAX - the alternative is
+                        // emitting half a sixel into the scrollback and
+                        // deciding about the other half later.
+                        self.pending = input[i..].to_vec();
+                        self.in_dcs = true;
+                        return out;
+                    }
+                }
             }
             if input[i + 1] != b'[' {
                 // Two-byte escapes: not a mode change, and short enough
@@ -724,6 +804,69 @@ mod ring_filter_tests {
             esc("[?1049l") + "after vim"
         );
         assert_eq!(keep_all(&[&session]), "before vimafter vim");
+    }
+
+    /// A picture is not scrollback either.
+    ///
+    /// Sixel data is tens or hundreds of kilobytes against a ring capped
+    /// at half a megabyte, so one chart would evict every line of text
+    /// in the session - and a replay would hand a fresh terminal a
+    /// picture with no conversation around it. The window still draws
+    /// it live; what is refused is keeping it.
+    #[test]
+    fn a_picture_is_not_kept() {
+        let drawn = format!("{}{}{}", "before ", esc("Pq#0;2;0;0;0#0~~~~") + &esc("\\"), "after");
+        assert_eq!(keep_all(&[&drawn]), "before after");
+    }
+
+    /// The other terminator. Some programs end a DCS with a bare BEL and
+    /// every terminal accepts it, so a filter that only knows ESC \
+    /// swallows the rest of the session waiting for one.
+    #[test]
+    fn a_picture_ended_with_bel_is_also_recognised() {
+        let drawn = format!("a{}\u{7}b", esc("Pq#0~~~~"));
+        assert_eq!(keep_all(&[&drawn]), "ab");
+    }
+
+    /// The case that makes this more than a one-line match: a picture
+    /// arrives over many reads, and its terminator can be a hundred
+    /// kilobytes from its start - far past the point where the filter
+    /// gives up on an ordinary sequence and keeps it.
+    #[test]
+    fn a_picture_split_across_many_reads_is_still_dropped() {
+        let mut f = RingFilter::default();
+        let mut out = Vec::new();
+        out.extend_from_slice(&f.keep(b"start"));
+        out.extend_from_slice(&f.keep(format!("{}Pq#0", ESC as char).as_bytes()));
+        for _ in 0..200 {
+            out.extend_from_slice(&f.keep(&vec![b'~'; 1024]));
+        }
+        out.extend_from_slice(&f.keep(format!("{}\\end", ESC as char).as_bytes()));
+        assert_eq!(String::from_utf8_lossy(&out), "startend");
+    }
+
+    /// And the terminator split down the middle, which is where a
+    /// "keep the last two bytes" rule earns its place.
+    #[test]
+    fn a_terminator_split_across_reads_is_still_found() {
+        let mut f = RingFilter::default();
+        let mut out = Vec::new();
+        out.extend_from_slice(&f.keep(format!("A{}Pq~~~~", ESC as char).as_bytes()));
+        out.extend_from_slice(&f.keep(&[ESC]));
+        out.extend_from_slice(&f.keep(b"\\B"));
+        assert_eq!(String::from_utf8_lossy(&out), "AB");
+    }
+
+    /// Text around a picture survives it. The failure this guards is a
+    /// filter that, having found a DCS, eats everything after it.
+    #[test]
+    fn what_comes_after_a_picture_is_still_scrollback() {
+        let s = format!(
+            "one{}two{}three",
+            esc("Pqpicture") + &esc("\\"),
+            esc("Pqanother") + &esc("\\")
+        );
+        assert_eq!(keep_all(&[&s]), "onetwothree");
     }
 
     /// The older spellings do the same thing and have to be recognised,

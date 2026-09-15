@@ -1,0 +1,96 @@
+<!doctype html>
+<!--
+  A picture, drawn by the same engine and addon the window loads.
+
+  Driven by tests/images.mjs. This is the half of sixel support that is
+  ours: given the bytes, does a picture appear. The other half is not -
+  ConPTY parses what a console program writes and re-emits its own
+  stream, and on this Windows it drops DCS strings entirely, so a
+  program's picture never reaches the terminal at all. Measured, not
+  assumed: see docs/ideas.md.
+
+  Which makes this the test that says the day conhost passes them
+  through, nothing here needs finding again.
+-->
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css" />
+<style>
+  body {
+    margin: 0;
+    background: #0d1117;
+  }
+  #term {
+    width: 760px;
+    height: 300px;
+  }
+  #out {
+    font: 12px monospace;
+    white-space: pre-wrap;
+    color: #000;
+    background: #fff;
+  }
+</style>
+<div id="term"></div>
+<pre id="out">PENDING</pre>
+<script type="module">
+  import { Terminal } from "../../node_modules/@xterm/xterm/lib/xterm.mjs";
+  import { ImageAddon } from "../../node_modules/@xterm/addon-image/lib/addon-image.mjs";
+
+  const E = "\x1b";
+
+  /// The same four bands tests/fixtures/sixel.ps1 writes, so the thing
+  /// proved here is the thing that would arrive if it could.
+  function bands(width) {
+    const colours = ["#0;2;90;20;20", "#1;2;20;80;35", "#2;2;20;40;90", "#3;2;90;75;20"];
+    let s = `${E}Pq` + colours.join("");
+    for (let b = 0; b < 4; b++) {
+      s += `#${b}!${width}~`;
+      if (b < 3) s += "-";
+    }
+    return s + `${E}\\`;
+  }
+
+  (async () => {
+    try {
+      const term = new Terminal({ cols: 80, rows: 14, allowProposedApi: true, fontSize: 14 });
+      const image = new ImageAddon({ sixelSupport: true, storageLimit: 32, showPlaceholder: true });
+      // The addon before the terminal is opened. It registers a DCS
+      // handler on activate, and a handler registered after the parser
+      // has already been handed a picture is a handler that missed it -
+      // which looks exactly like an addon that does not work.
+      term.loadAddon(image);
+      term.open(document.getElementById("term"));
+
+      await new Promise((r) => term.write("a picture follows:\r\n", r));
+      await new Promise((r) => term.write(bands(240), r));
+      await new Promise((r) => term.write("\r\nand text after it\r\n", r));
+      await new Promise((r) => setTimeout(r, 300));
+
+      // Where the picture landed, asked of the addon rather than of the
+      // pixels: it hands back the canvas holding the cell's image, and
+      // undefined for a cell that is only text.
+      const atPicture = image.getImageAtBufferCell(2, 1);
+      const atText = image.getImageAtBufferCell(2, 0);
+
+      // And that the row it occupies is not also holding characters -
+      // an image drawn *over* text would leave the text readable
+      // underneath and the buffer full of whatever the sixel bytes
+      // happened to look like.
+      const row1 = term.buffer.active.getLine(1)?.translateToString(true) ?? "";
+
+      document.getElementById("out").textContent =
+        "RESULTS " +
+        JSON.stringify({
+          drewSomething: !!atPicture,
+          pictureWidth: atPicture ? atPicture.width : 0,
+          pictureHeight: atPicture ? atPicture.height : 0,
+          textCellHasNoImage: atText === undefined,
+          rowUnderPicture: row1,
+          storageUsed: image.storageUsage,
+        });
+    } catch (e) {
+      document.getElementById("out").textContent =
+        "RESULTS-ERROR " + String(e && e.stack ? e.stack : e);
+    }
+  })();
+</script>
