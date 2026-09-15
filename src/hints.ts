@@ -72,6 +72,17 @@ export function shiftHintLearned(g: ShiftHintGesture): boolean {
 export const SHIFT_HINT_TEXT =
   "This program is using the mouse, so the drag went to it. Try holding Shift to select — then Ctrl+Shift+C to copy.";
 
+/// The other half of the surprise.
+///
+/// Whoever reads this note has just lost a highlight to a gesture they
+/// expected to open a menu — and the menu is one modifier away, a fact
+/// that otherwise lives only in the settings page, which is not where
+/// they are. There are two settings for the right button: Menu, and the
+/// console's Copy / paste. Shift reaches the menu under both, which is
+/// why this is worth carrying to the moment somebody wants it rather
+/// than leaving it where it is true but unread.
+export const RIGHT_CLICK_MENU_NOTE = "Shift+right-click for the menu";
+
 /// What was just copied, in a form that can be checked at a glance.
 ///
 /// The console's right button copies the selection and clears the
@@ -87,17 +98,6 @@ export const SHIFT_HINT_TEXT =
 /// of output is a second problem. It is on screen for a few seconds and
 /// reaches no log - see uilog.ts, which exists so that what was copied
 /// stays out of files people are asked to send.
-/// The other half of the surprise.
-///
-/// Whoever reads this note has just lost a highlight to a gesture they
-/// expected to open a menu — and the menu is one modifier away, a fact
-/// that otherwise lives only in the settings page, which is not where
-/// they are. There are two settings for the right button: Menu, and the
-/// console's Copy / paste. Shift reaches the menu under both, which is
-/// why this is worth carrying to the moment somebody wants it rather
-/// than leaving it where it is true but unread.
-export const RIGHT_CLICK_MENU_NOTE = "Shift+right-click for the menu";
-
 export function copiedNote(text: string): string {
   const lines = text.split(/\r\n|\r|\n/);
   const chars = `${text.length} character${text.length === 1 ? "" : "s"}`;
@@ -111,3 +111,20 @@ export function copiedNote(text: string): string {
   }
   return `${what} · ${RIGHT_CLICK_MENU_NOTE}`;
 }
+
+/// Why there is no Copy in this menu.
+///
+/// The transient hint teaches; this answers. They are needed at
+/// different moments and the second one is the moment somebody has
+/// already gone looking: the drag selected nothing, so they right-click
+/// expecting Copy, and it is not there. A menu that simply omits the
+/// item leaves them to work out why - and the log of the session that
+/// produced this shows exactly that, six menus in thirty-five seconds
+/// with no Copy and, by then, no hint left to explain it, because the
+/// hint had used up its two showings on the first two attempts.
+///
+/// So the menu says it, every time, for as long as it is true. There is
+/// no counter on this one: it is not advice being volunteered, it is
+/// the answer to the question the right-click just asked.
+export const MOUSE_SELECTION_NOTE =
+  "Nothing selected — this program is using the mouse. Shift+drag to select.";

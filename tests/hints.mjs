@@ -13,6 +13,7 @@
 import {
   SHIFT_HINT_LIMIT,
   SHIFT_HINT_TEXT,
+  MOUSE_SELECTION_NOTE,
   RIGHT_CLICK_MENU_NOTE,
   copiedNote,
   shiftHintLearned,
@@ -140,6 +141,21 @@ check(
 
 check("and the way to the menu is on the end of it", copiedNote("x").endsWith(RIGHT_CLICK_MENU_NOTE), true);
 check("which names shift, since that is what reaches the menu under either setting", /Shift/.test(RIGHT_CLICK_MENU_NOTE), true);
+
+
+// ── why Copy is not in this menu ───────────────────────────────────────
+// The hint teaches and is rationed; this answers and is not. The log of
+// the session that prompted it shows why both are needed: two hint
+// showings spent on the first two drags, then six menus in thirty-five
+// seconds with no Copy in them and nothing left to say why.
+check("the note says what is missing first", /^Nothing selected/.test(MOUSE_SELECTION_NOTE), true);
+check("then why", /using the mouse/.test(MOUSE_SELECTION_NOTE), true);
+check("then what to do instead", /Shift\+drag/.test(MOUSE_SELECTION_NOTE), true);
+// It is not the hint. The hint suggests, because how much shift takes
+// back is between the terminal and the program; this one states a fact
+// about why an item is absent, and hedging it would leave somebody
+// wondering whether the menu was broken.
+check("and it is not just the hint again", MOUSE_SELECTION_NOTE === SHIFT_HINT_TEXT, false);
 
 if (failed) {
   console.log(`${failed} hint test(s) failed`);

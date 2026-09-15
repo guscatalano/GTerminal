@@ -44,6 +44,7 @@ import { activates } from "./menus";
 import { visibilityReport } from "./controls";
 import { shouldSuggestThemes } from "./firstrun";
 import {
+  MOUSE_SELECTION_NOTE,
   SHIFT_HINT_TEXT,
   copiedNote,
   shiftHintLearned,
@@ -4956,6 +4957,14 @@ async function createTab(
           },
         });
       }
+      // No selection, because a program has the mouse and took the
+      // drag. Say so here rather than leaving a menu that is missing the
+      // item somebody opened it for: the hint that explains this has a
+      // lifetime limit and the session that prompted all of this spent
+      // both showings before the person stopped trying.
+      if (!sel && term.modes.mouseTrackingMode !== "none") {
+        items.push({ note: MOUSE_SELECTION_NOTE }, "sep");
+      }
       // Focus returns to the terminal after every menu action so typing
       // (especially right after a paste) lands where it belongs.
       const writePaste = (text: string) => {
@@ -5891,6 +5900,10 @@ function closeViewer() {
 /// list is where they go once they already suspect it.
 type CtxItem =
   | { label: string; action: () => void; color?: string; confirm?: boolean; keys?: string }
+  /// A line that is not a choice: it explains why the choice somebody
+  /// came for is not on the list. Nothing happens when it is clicked,
+  /// and it is the only kind of row here that does nothing on purpose.
+  | { note: string }
   | "sep";
 function showContextMenu(x: number, y: number, items: CtxItem[]) {
   ctxMenu.innerHTML = "";
@@ -5899,6 +5912,13 @@ function showContextMenu(x: number, y: number, items: CtxItem[]) {
       const s = document.createElement("div");
       s.className = "menu-sep";
       ctxMenu.appendChild(s);
+      continue;
+    }
+    if ("note" in it) {
+      const n = document.createElement("div");
+      n.className = "menu-note";
+      n.textContent = it.note;
+      ctxMenu.appendChild(n);
       continue;
     }
     let row: HTMLElement;

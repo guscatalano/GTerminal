@@ -858,6 +858,18 @@ button.armed,
   .pane-hint.leaving { transition: none; }
 }
 
+/* A line in a menu that is not a choice. Quieter than a row and not
+   hoverable, so it never looks like something that failed to work. */
+.menu-note {
+  padding: 7px 12px;
+  max-width: 260px;
+  color: var(--dim, #8a8a93);
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: normal;
+  cursor: default;
+}
+
 /* The key that does the same thing as the row, in its own column. */
 .menu-keys {
   margin-left: auto;
