@@ -1931,6 +1931,8 @@ if (-not $Only -or $Only -eq "tuicopy") {
     $script:copied = try { Get-Clipboard -Raw } catch { "" }
 
     # 4. And the menu, which should now be offering Copy.
+    #    (The program's own count of what it received is read after it
+    #    exits, below - it prints it on the way out.)
     Right-Click $h26 500 420
     Start-Sleep -Seconds 2
     $opened = @(Ui-Events "menu.open")
@@ -1967,6 +1969,23 @@ if (-not $Only -or $Only -eq "tuicopy") {
   # correct copy of what was selected and would fail a whole-marker
   # match. Aiming at column zero instead would be a test that passes
   # because of the pane's padding.
+  # That the press was *sent to the shell* rather than kept for the
+  # selection, which is the half everything above infers.
+  #
+  # Read from the window's own log rather than from the program. The
+  # program was asked first and answered zero, and the reason is its
+  # reading and not the terminal's writing: a console app on Windows is
+  # handed mouse input as console records unless it is in raw VT input
+  # mode, and getting PowerShell to read a byte stream in that state is
+  # a fixture problem standing between this test and the thing it is
+  # about. What the terminal sent is a fact the window already records,
+  # in hex, for every byte that goes to the shell - 1b 5b 3c is ESC [ <,
+  # the start of an SGR mouse report.
+  $sent = @(Ui-Events "pty.reply" | Where-Object { $_.hex -and $_.hex.StartsWith("1b 5b 3c") })
+  if ($sent.Count -ge 2) { Pass "and the press went to the program, not to the selection ($($sent.Count) mouse reports sent)" }
+  elseif ($sent.Count -eq 1) { Fail "tuicopy" "only one mouse report was sent - a press with no release is half a drag" }
+  else { Fail "tuicopy" "no mouse report was sent to the shell at all, so the drag never reached the terminal and nothing above is measuring what it claims" }
+
   if ($copied -match "IF-YOU-CAN line \d+") { Pass "and Ctrl+Shift+C puts it on the clipboard" }
   elseif ($copied -match "nothing-copied-yet") { Fail "tuicopy" "the clipboard never changed" }
   else { Fail "tuicopy" "something else was copied: $($copied -replace '\s+', ' ')" }

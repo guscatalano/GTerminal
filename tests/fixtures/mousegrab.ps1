@@ -63,6 +63,13 @@ try {
   }
   [Console]::WriteLine("MOUSEGRAB-READY")
   if ($Seconds -gt 0) {
+    # Just wait. Counting what arrives was tried and is a fixture
+    # problem rather than a terminal one: a console app on Windows is
+    # handed mouse input as console records, not as bytes on stdin,
+    # unless it is in raw VT input mode - and reading that from
+    # PowerShell answered zero while the terminal was demonstrably
+    # sending reports. The scene checks what the window sent instead,
+    # which it logs in hex for every byte that goes to the shell.
     Start-Sleep -Seconds $Seconds
   } else {
     [Console]::WriteLine("Press any key to give the mouse back.")
