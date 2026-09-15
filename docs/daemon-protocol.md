@@ -80,6 +80,17 @@ A daemon too old for either answers `{"ok":false,"error":"bad request"}`
 and keeps the connection, which is the behaviour this whole document is
 about. The caller reports that rather than swallowing it.
 
+## A command on create
+
+`create` takes an optional `command`. It is held in the session's
+`pending_input` and written the moment the shell's prompt hook reports
+a working directory - the first point at which the shell can take
+input, since bytes written while ConPTY is still initialising are
+dropped. It is executed, not pre-typed: a carriage return is appended.
+Blank is ignored. Tested in `tests/lifecycle.ps1`, where the marker has
+to appear twice - once echoed as the command, once printed as its
+output - because once means it was typed and never ran.
+
 ## The token
 
 Every connection presents the daemon's token once, on its first line,

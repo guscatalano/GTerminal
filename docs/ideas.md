@@ -167,11 +167,18 @@ Not done: exporting one *block*. The pane menu already copies a block's
 text; saving it as a file is the same thing with a dialog in front, and
 was not worth its own button until somebody asks for it.
 
-### 9. Auto-run a command in a new shell
+### 9. Auto-run a command in a new shell — *done*
 
 Offered once and never built: a `command` field on a session template,
 delivered through the daemon's `pending_input` so it lands after the
 first prompt rather than into a shell that is still starting.
+
+Done. A "Run on open" field on each template; the daemon holds the
+command until the prompt hook reports a cwd and then executes it - not
+pre-types it, because a command sitting at a prompt is one keystroke
+from either running or being erased, which is worse than either. The
+lifecycle test waits for the marker to appear *twice*, echoed and then
+printed, since once means typed and never run.
 
 ### 10. A screen-reader mode
 

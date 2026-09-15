@@ -181,6 +181,10 @@ interface SessionTemplate {
   shell?: string;
   cwd?: string;
   title?: string;
+  /// Run this once the shell is up. A template called "dev server" that
+  /// opens a shell in the right folder and then waits for you to type
+  /// `npm run dev` is a template that did half the job.
+  command?: string;
 }
 
 // A workspace is a named list of template names, launched together via
@@ -4642,7 +4646,12 @@ async function createTab(
   /// and clicking a row to see what was in it should not start a
   /// process. Pass false where the user has already said they want it
   /// running — the boot restore, where they ticked it in the picker.
-  preview?: boolean
+  preview?: boolean,
+  /// A command to run once the shell has drawn its prompt. Only for a
+  /// new session - a restored one already has a history, and a command
+  /// typed into that is not what anybody meant by "run on open". Last,
+  /// because four callers pass `preview` by position.
+  command?: string
 ): Promise<number | undefined> {
   const pane = document.createElement("div");
   pane.className = "pane";
@@ -4881,6 +4890,7 @@ async function createTab(
         rows: term.rows,
         shell: shell ?? config.default_shell ?? null,
         cwd: cwd ?? null,
+        command: command ?? null,
       });
     }
   } catch (err) {
@@ -5750,7 +5760,7 @@ async function openWorkspaceFromArgs(args: string[]) {
     const t = (config.templates ?? []).find(
       (x) => x.name.trim().toLowerCase() === tplName.trim().toLowerCase()
     );
-    if (t) await createTab(undefined, t.shell, t.cwd, t.title);
+    if (t) await createTab(undefined, t.shell, t.cwd, t.title, undefined, undefined, t.command);
   }
 }
 
@@ -9152,6 +9162,14 @@ function buildSettingsPage() {
         t.title = v || undefined;
         saveConfig();
       });
+      // The command, run once the shell is up. The daemon holds it
+      // until the prompt hook reports a cwd, which is the moment the
+      // shell can actually take input - typing it any earlier is typing
+      // it into nothing.
+      const command = mkTplInput("Run on open (blank = nothing)", t.command ?? "", (v) => {
+        t.command = v.trim() || undefined;
+        saveConfig();
+      });
       const del = document.createElement("button");
       del.className = "tpl-del";
       del.textContent = "✕";
@@ -9162,7 +9180,7 @@ function buildSettingsPage() {
         saveConfig();
         renderTemplates();
       });
-      row.append(name, shellSel, cwdCell, title, del);
+      row.append(name, shellSel, cwdCell, title, command, del);
       tplBlock.appendChild(row);
     });
     const add = document.createElement("button");
@@ -9181,7 +9199,7 @@ function buildSettingsPage() {
   renderTemplates();
   settingRow(
     "Templates",
-    "Named presets for new tabs — shell, start folder, and tab title. Right-click the + button to open one.",
+    "Named presets for new tabs — shell, start folder, tab title, and a command to run once the shell is up. Right-click the + button to open one. The command is executed, not just typed: a template called \"dev server\" that leaves you to press Enter is a template that did half the job.",
     tplBlock
   );
 
@@ -10556,7 +10574,7 @@ async function main() {
     if (tpls.length) {
       items.push("sep");
       for (const t of tpls) {
-        items.push({ label: t.name, action: () => createTab(undefined, t.shell, t.cwd, t.title) });
+        items.push({ label: t.name, action: () => createTab(undefined, t.shell, t.cwd, t.title, undefined, undefined, t.command) });
       }
     }
     items.push("sep");

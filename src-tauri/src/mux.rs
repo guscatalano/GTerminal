@@ -625,6 +625,21 @@ pub enum Request {
         /// config.default_cwd. Falls back to home if not a directory.
         #[serde(default)]
         cwd: Option<String>,
+        /// A command to run once the shell has drawn its first prompt.
+        ///
+        /// Delivered through pending_input, which is what makes it land:
+        /// bytes written into a shell that is still starting are
+        /// dropped while ConPTY initialises, so "type it immediately"
+        /// is "type it into nothing" about half the time. The prompt
+        /// hook's cwd report is the signal the shell is ready - the
+        /// same one the Claude Code resume already waits for.
+        ///
+        /// Executed, not pre-typed: a template that says `npm run dev`
+        /// means run it, and a command sitting typed-but-not-run at a
+        /// prompt is one keystroke from either running or being erased,
+        /// which is worse than either.
+        #[serde(default)]
+        command: Option<String>,
     },
     Kill { id: u32 },
     Attach { id: u32 },
@@ -2556,7 +2571,7 @@ fn conn_loop(
                     }),
                 )?;
             }
-            Request::Create { cols, rows, shell, cwd } => {
+            Request::Create { cols, rows, shell, cwd, command } => {
                 let id = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
                 // Start directory precedence: request cwd (templates), then
                 // config.default_cwd, then home. start_session additionally
@@ -2576,7 +2591,16 @@ fn conn_loop(
                     });
                 let shell = shell.unwrap_or_else(|| "auto".into());
                 match start_session(sessions, id, &start_dir, cols, rows, Vec::new(), now_ms(), &shell) {
-                    Ok(()) => write_line(&mut out, &json!({"ok": true, "id": id}))?,
+                    Ok(()) => {
+                        if let Some(cmd) = command.filter(|c| !c.trim().is_empty()) {
+                            if let Some(s) = sessions.lock().unwrap().live.get_mut(&id) {
+                                let mut bytes = cmd.trim_end().as_bytes().to_vec();
+                                bytes.push(b'\r');
+                                s.pending_input = Some(bytes);
+                            }
+                        }
+                        write_line(&mut out, &json!({"ok": true, "id": id}))?
+                    }
                     Err(e) => write_line(&mut out, &json!({"ok": false, "error": e}))?,
                 }
             }

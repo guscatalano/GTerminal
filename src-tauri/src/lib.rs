@@ -138,8 +138,9 @@ fn create_session(
     rows: u16,
     shell: Option<String>,
     cwd: Option<String>,
+    command: Option<String>,
 ) -> Result<u32, String> {
-    let v = mux::client::control(&Request::Create { cols, rows, shell, cwd })?;
+    let v = mux::client::control(&Request::Create { cols, rows, shell, cwd, command })?;
     let id = v.get("id").and_then(Value::as_u64).ok_or("bad response")? as u32;
     attach_internal(&app, &state, id, Some(window.label()))?;
     Ok(id)

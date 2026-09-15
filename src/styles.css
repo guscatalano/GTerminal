@@ -1837,7 +1837,7 @@ input.set-control {
 
 .tpl-row {
   display: grid;
-  grid-template-columns: 1fr 160px 1.4fr 1fr 26px;
+  grid-template-columns: 1fr 140px 1.3fr 0.9fr 1.1fr 26px;
   gap: 6px;
   align-items: center;
 }

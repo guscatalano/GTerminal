@@ -1249,6 +1249,46 @@ $sd2Meta = @(Get-ChildItem "$env:LOCALAPPDATA\GTerminal\sessions" -Filter *.json
 if ($sd2Meta.Count -ge 1) { Pass "and wrote its sessions to disk before exiting" }
 else { Fail "shutdown" "no session checkpoint was written on shutdown" }
 
+# ════ a command that runs once the shell is up ════
+#
+# A template can carry a command to run on open. It goes through the
+# daemon's pending_input, which holds it until the shell's prompt hook
+# reports a cwd - the moment the shell can take input. Typing it any
+# earlier is typing it into nothing: bytes written into a shell that is
+# still starting are dropped while ConPTY initialises, about half the
+# time, which is a flake that would look like the feature not working.
+$runPort = Start-Daemon
+$runMade = Request2 $runPort '{"cmd":"create","cols":100,"rows":30,"command":"echo RAN-ON-OPEN-8642"}'
+$runId = $runMade.id
+$runWin = New-Conn $runPort
+$runWin.Writer.WriteLine('{"cmd":"attach","id":' + $runId + '}')
+# The shell first, the way every other test here readies one: it asks
+# where the cursor is and starts nothing until answered. The command is
+# delivered when the prompt hook reports a cwd, which is after that -
+# so "wait for the marker" alone waits for something that cannot happen
+# until the query is answered, and the first version of this test did
+# exactly that and called it a feature failure.
+$runSaw = Wait-Ready-Answering $runWin
+$runDeadline = (Get-Date).AddSeconds(30)
+while ((Get-Date) -lt $runDeadline) {
+  $runSaw += Drain2 $runWin 400
+  if (([regex]::Matches($runSaw, "RAN-ON-OPEN-8642")).Count -ge 2) { break }
+}
+# The marker appears twice when it works - once echoed as the command,
+# once as its output - and the output is the one that proves it ran
+# rather than merely being typed. It follows a newline; the echo does
+# not.
+$ranCount = ([regex]::Matches($runSaw, "RAN-ON-OPEN-8642")).Count
+if ($ranCount -ge 2) { Pass "a command given at create runs once the shell is up (seen $ranCount times: typed, then printed)" }
+elseif ($ranCount -eq 1) { Fail "autorun" "the command was typed but never ran - it is sitting at the prompt" }
+else { Fail "autorun" "the command never reached the shell" }
+
+# And a blank one is nothing, not an Enter into a fresh prompt.
+$blankMade = Request2 $runPort '{"cmd":"create","cols":100,"rows":30,"command":"   "}'
+if ($blankMade.ok) { Pass "a blank command is accepted and ignored" }
+else { Fail "autorun" "a blank command was refused: $($blankMade | ConvertTo-Json -Compress)" }
+$runWin.Client.Close()
+
 # ════ typing into a session without taking it ════
 #
 # `write` goes to whatever the connection attached to, and attaching
