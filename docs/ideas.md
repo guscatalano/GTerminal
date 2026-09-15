@@ -32,6 +32,13 @@ shape as the mouse-mode finding next to it, and less fixable: a program
 can ask for mouse reporting by setting a console mode, and there is no
 console mode that means "pass my pictures through".
 
+![Four bands of sixel drawn by the terminal](img/sixel-rendered.png)
+
+That is the engine and the addon this app loads, given the bytes
+directly — the picture `tests/fixtures/sixel.ps1` writes, which a
+program cannot get here through ConPTY. Kept because "it draws them,
+something else is in the way" is a claim worth being able to see.
+
 So it ships inert, deliberately. `tests/images.mjs` proves our half
 against the real engine, including the load order, so the day conhost
 forwards DCS this works without anybody rediscovering how. Worth
