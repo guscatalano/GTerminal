@@ -106,6 +106,21 @@ const got = (name) => results.get(name) ?? { selection: "<case never ran>", toAp
   );
 }
 
+// Reported as "holding shift to select doesn't work, but without it it
+// does" - which is true, in a shell where nothing is reading the mouse.
+// There, selection is already yours and shift means *extend it*, so with
+// no selection to extend it does nothing. This is why the hint must not
+// appear in a plain shell: advice that does nothing when followed is
+// worse than no advice.
+{
+  const r = got("shift with nothing reading the mouse extends rather than starts");
+  check(
+    "shift alone does not start a selection when nothing is reading the mouse",
+    r.selection === "",
+    `selection was ${JSON.stringify(r.selection)} — if this starts working, the hint can be shown more widely`
+  );
+}
+
 // The reported problem, stated as the behaviour it actually is.
 {
   const r = got("with mouse reporting on, a plain drag goes to the program");
@@ -136,6 +151,28 @@ const got = (name) => results.get(name) ?? { selection: "<case never ran>", toAp
   );
 }
 
+// The modes real programs use. 1000 is presses only; anything with a
+// cursor or a hover state asks for 1002 or 1003, so an escape hatch that
+// only works against 1000 works against nothing anybody runs.
+for (const label of ["button-drag tracking (1002)", "any-motion tracking (1003)"]) {
+  const r = got(`shift takes the drag back from ${label}`);
+  check(
+    `a plain drag goes to the program under ${label}`,
+    r.plainSelection === "",
+    `selection was ${JSON.stringify(r.plainSelection)}`
+  );
+  check(
+    `and shift takes it back from ${label}`,
+    r.selection.includes("SELECTABLE"),
+    `selection was ${JSON.stringify(r.selection)}`
+  );
+  check(
+    `without telling ${label} about it`,
+    r.toApp === "",
+    `the program received ${JSON.stringify(r.toApp)}`
+  );
+}
+
 // And it is a loan, not a surrender.
 {
   const r = got("and a plain drag works again once the program stops asking");
@@ -160,6 +197,9 @@ const got = (name) => results.get(name) ?? { selection: "<case never ran>", toAp
 for (const name of results.keys()) {
   const asserted = [
     "selecting works at all",
+    "shift with nothing reading the mouse extends rather than starts",
+    "shift takes the drag back from button-drag tracking (1002)",
+    "shift takes the drag back from any-motion tracking (1003)",
     "a drag selects when nothing is reading the mouse",
     "with mouse reporting on, a plain drag goes to the program",
     "holding shift takes the drag back from the program",

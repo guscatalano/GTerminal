@@ -4986,11 +4986,6 @@ async function createTab(
           items.push({ label: `Paste: ${clipPreview(t)}`, action: () => writePaste(t) });
         }
       }
-      items.push("sep");
-      items.push({
-        label: "Reopen elevated…",
-        action: () => void openElevated(id),
-      });
       items.push("sep", { label: "Clipboard history…", action: () => openClipViewer(id, term) });
       items.push({
         label: "Select all",
@@ -6087,6 +6082,19 @@ function showTabContextMenu(x: number, y: number, id: number) {
         const info = lastInfo.get(id);
         void createTab(undefined, info?.shell, info?.cwd, customTitles[id]);
       },
+    },
+    {
+      // Here rather than in the terminal's own menu, where it was.
+      //
+      // That menu is about the text: copy what is selected, paste,
+      // reach the clipboard history. Opening a second window running as
+      // administrator is not about the text, and it sat one row above
+      // Clipboard history where a right-click aimed at a selection could
+      // reach it. This menu is the one about the tab as a thing - what
+      // it is called, whether it exists, where it goes - which is the
+      // right neighbourhood for "open this again, elevated".
+      label: "Reopen elevated…",
+      action: () => void openElevated(id),
     },
     { label: "Hide tab", action: () => hideTab(id) },
     { label: "Close tab", action: () => closeTab(id), confirm: true },

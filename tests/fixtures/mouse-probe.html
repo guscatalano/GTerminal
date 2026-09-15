@@ -171,6 +171,25 @@
         trace: trace.join(" | "),
       });
 
+      // 1b. Shift with nothing reading the mouse. Reported as "holding
+      //     shift to select doesn't work, but without it it does", and
+      //     that is exactly right: with the selection enabled, shift is
+      //     *extend the selection*, which needs one to extend. There
+      //     being no selection yet, it does nothing at all.
+      //
+      //     Worth a case of its own because it is the reason the hint
+      //     has to be careful about when it appears: told to hold shift
+      //     in a shell that is not reading the mouse, somebody tries it,
+      //     nothing happens, and the advice is worse than none.
+      term.clearSelection();
+      toApp = "";
+      drag(screen, 0, 12, 0, { shift: true });
+      await sleep(30);
+      note("shift with nothing reading the mouse extends rather than starts", {
+        selection: term.getSelection(),
+        toApp,
+      });
+
       // 2. The program asks for the mouse. This is the reported problem.
       await new Promise((r) => term.write(`${E}[?1000h${E}[?1006h`, r));
       term.clearSelection();
@@ -192,6 +211,32 @@
         selection: term.getSelection(),
         toApp,
       });
+
+      // 3b. The modes real programs actually use. 1000 reports presses
+      //     only; an editor or an agent TUI wants motion too and asks
+      //     for 1002 (drag) or 1003 (any movement). The escape hatch has
+      //     to work against all three or it works against the one nobody
+      //     runs.
+      for (const [mode, label] of [
+        ["1002", "button-drag tracking (1002)"],
+        ["1003", "any-motion tracking (1003)"],
+      ]) {
+        await new Promise((r) => term.write(`${E}[?1000l${E}[?${mode}h${E}[?1006h`, r));
+        term.clearSelection();
+        toApp = "";
+        drag(screen, 0, 12, 0);
+        const plain = { selection: term.getSelection(), toApp };
+        term.clearSelection();
+        toApp = "";
+        drag(screen, 0, 12, 0, { shift: true });
+        note(`shift takes the drag back from ${label}`, {
+          selection: term.getSelection(),
+          toApp,
+          plainSelection: plain.selection,
+          plainToApp: plain.toApp,
+        });
+        await new Promise((r) => term.write(`${E}[?${mode}l`, r));
+      }
 
       // 4. And the program letting go puts it back, so the escape hatch
       //    stops being needed rather than becoming permanent.

@@ -85,9 +85,15 @@ check(
 // instruction, and it has to name the key that copies, because
 // selecting and copying are two different problems and the second one
 // is the one they came for.
-check("the hint explains before instructing", /using the mouse/.test(SHIFT_HINT_TEXT), true);
+check("the hint explains before it suggests", /using the mouse/.test(SHIFT_HINT_TEXT), true);
 check("names the key that selects", /Shift/.test(SHIFT_HINT_TEXT), true);
 check("and the key that copies", /Ctrl\+Shift\+C/.test(SHIFT_HINT_TEXT), true);
+// Suggested, not ordered. How much Shift takes back is between the
+// terminal and the program - one that does its own selection may not
+// give the drag up at all - and an instruction that does nothing when
+// followed is worse than no instruction.
+check("and suggests rather than instructs", / Try /.test(SHIFT_HINT_TEXT), true);
+check("so it does not read as a rule", /^Hold Shift/.test(SHIFT_HINT_TEXT), false);
 
 if (failed) {
   console.log(`${failed} hint test(s) failed`);

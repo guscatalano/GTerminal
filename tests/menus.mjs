@@ -9,6 +9,9 @@
 // that. The last argument is what separates the two: how far the press
 // had to travel from the point the menu opened at.
 import { activates } from "../src/menus.ts";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 
 let failed = 0;
 function check(name, got, want) {
@@ -51,6 +54,50 @@ check("an unarmed menu still works", activates(true, Number.NaN, 60), true);
 check("and an unarmed menu still needs a press", activates(false, Number.NaN, 60), false);
 check("an unanchored menu is not judged on travel", activates(true, 900, Number.NaN), true);
 check("and an unanchored menu still needs a press", activates(false, 900, Number.NaN), false);
+
+
+// ── which menu an item belongs in ──────────────────────────────────────
+// There are two menus and they are about different things. The one in
+// the terminal is about the text: copy what is selected, paste, reach
+// the clipboard history. The one on a tab is about the tab as a thing:
+// what it is called, whether it exists, where it goes.
+//
+// "Reopen elevated…" was in the first, one row above Clipboard history,
+// where a right-click aimed at a selection could reach it - and where
+// adding it silently moved the row a visual scene was clicking, which
+// cost a day of chasing a phantom. Opening a second window running as
+// administrator is not an operation on the selected text.
+const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "main.ts"), "utf8");
+
+/// The body of a top-level function, by name. Crude on purpose: a real
+/// parser here would be a dependency and a brace at column zero is how
+/// this file is written.
+function bodyOf(name) {
+  const start = src.indexOf(`function ${name}(`);
+  if (start < 0) return "";
+  const end = src.indexOf(String.fromCharCode(10) + "}", start);
+  return src.slice(start, end < 0 ? undefined : end);
+}
+
+// Matched on the label a row is built with, not on the words: the
+// story of how this went wrong is written in a comment a few hundred
+// lines away, and a check that reads comments is a check that fails
+// when somebody explains something.
+const tabMenu = bodyOf("showTabContextMenu");
+check("the tab menu exists to be checked", tabMenu.length > 0, true);
+check("reopening elevated is a tab action", tabMenu.includes('label: "Reopen elevated'), true);
+check("so is duplicating", tabMenu.includes('label: "Duplicate tab'), true);
+
+// And the terminal's own menu, which is everything between the
+// contextmenu listener and the end of the items it builds.
+const paneMenu = src.slice(
+  src.indexOf('pane.addEventListener("contextmenu"'),
+  src.indexOf("function placeFloating")
+);
+check("the terminal menu exists to be checked", paneMenu.length > 0, true);
+check("and it does not offer to open an elevated window", paneMenu.includes('label: "Reopen elevated'), false);
+check("while it does offer the clipboard history", paneMenu.includes("Clipboard history"), true);
+check("and Copy, with the key that does it", paneMenu.includes('keys: "Ctrl+Shift+C"'), true);
 
 if (failed) {
   console.log(`${failed} menu test(s) failed`);

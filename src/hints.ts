@@ -60,5 +60,14 @@ export function shiftHintLearned(g: ShiftHintGesture): boolean {
 /// select" on its own reads as an arbitrary rule; saying the program is
 /// using the mouse explains why the drag did nothing, which is the
 /// question actually being asked at that moment.
+///
+/// Suggested rather than instructed, and that is not politeness. Shift
+/// is the terminal's way of taking a gesture back from a program that
+/// asked for the mouse, and how much it takes back is between the
+/// terminal and that program - a program can be reading the mouse
+/// without wanting a drag, and one that does its own selection may
+/// still not give this one up. An instruction that does nothing when
+/// followed is worse than no instruction; a suggestion that does
+/// nothing is a suggestion that did not suit.
 export const SHIFT_HINT_TEXT =
-  "This program is using the mouse. Hold Shift to select text — then Ctrl+Shift+C to copy.";
+  "This program is using the mouse, so the drag went to it. Try holding Shift to select — then Ctrl+Shift+C to copy.";
