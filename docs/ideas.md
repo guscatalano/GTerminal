@@ -223,7 +223,29 @@ as its own line, turning one command into a smear of half-typed copies
 in the results; a bare carriage return is now read as "the line so far
 is replaced", which is what the screen showed.
 
-### 16. Does a session survive the app crashing, not just rebooting
+### 16. Does a session survive the app crashing, not just rebooting — *yes, measured*
+
+Every restore scene tested the reboot - kill the app and the daemon
+together, start again on the same state. Nobody had tested the other
+case, the app dying and the daemon not, and it is the one that happens
+more: a window crashes far more often than Windows does.
+
+The part worth worrying about was not whether the shell survives (the
+daemon owns it) but whether the *next* window can take it. The daemon
+permits one attacher, and a fresh window refuses to adopt a session
+another window already has - so a crashed window's attachment
+lingering would make the next launch see every session as "open
+elsewhere" and offer to restore nothing, which looks exactly like the
+crash having lost them.
+
+It does not linger. The lifecycle suite now kills the client socket
+with no detach, which is what a dead process looks like to the daemon,
+and times how long until the session reads as free: **under a
+quarter-second**. The shell is still running, the scrollback is
+intact, and a new attach gets the replay. Windows closes a dead
+process's sockets, the daemon's read loop ends, the attachment is
+released in the cleanup that follows - the path that was there all
+along, now proven rather than assumed.
 
 ## Known and deliberate
 

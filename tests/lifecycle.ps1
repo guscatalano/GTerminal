@@ -1530,6 +1530,74 @@ if ($afterCmd.Contains('\u001b]133;D')) { Pass "and closes the block when the co
 if ($afterCmd -notmatch [regex]::Escape('\u001b]133;D;')) { Pass "with no exit code, honestly, since cmd's prompt has none to give" }
 else { Fail "cmd-marks" "cmd reported an exit code its prompt cannot know" }
 
+# ════ the app crashing, as opposed to rebooting ════
+#
+# The daemon outlives the app by design, and every restore scene tests
+# the reboot: kill app and daemon together, start again on the same
+# state. Nobody had tested the other case - the app dying and the daemon
+# not - and it is the one that happens more, because a window crashes
+# far more often than Windows does.
+#
+# What has to be true: the sessions are still there, and the *next*
+# window can take them. The second half is the interesting one. The
+# daemon permits one attacher, and a fresh window will not adopt a
+# session another window already has - so if a crashed window's
+# attachment lingers, the next launch sees every session as "open
+# elsewhere" and offers to restore nothing. Which would look exactly
+# like the crash having lost them.
+#
+# The crash is a client whose socket vanishes without a detach, which
+# is what a killed process looks like to the daemon. Nothing here is a
+# real window; the wire is the same.
+$crashPort = Start-Daemon
+$crashMade = Request2 $crashPort '{"cmd":"create","cols":100,"rows":30}'
+$crashId = $crashMade.id
+$crashWin = New-Conn $crashPort
+$crashWin.Writer.WriteLine('{"cmd":"attach","id":' + $crashId + '}')
+$null = Wait-Ready-Answering $crashWin
+$crashWin.Writer.WriteLine('{"cmd":"write","data":"echo SURVIVED-THE-CRASH-1357\r"}')
+Start-Sleep -Seconds 3
+$null = Drain2 $crashWin 500
+
+$beforeCrash = @((Request2 $crashPort '{"cmd":"list"}').sessions | Where-Object { $_.id -eq $crashId })[0]
+if ($beforeCrash -and $beforeCrash.attached) { Pass "a window has the session, as the daemon sees it" }
+else { Fail "crash" "setup: the session was not attached before the crash" }
+
+# The crash. No detach, no goodbye - the socket is simply gone, which is
+# what Windows does to a process's sockets when the process dies.
+$crashWin.Client.Client.Close()
+$crashWin.Client.Dispose()
+
+# How long until the daemon notices. Measured rather than slept past:
+# the number is the answer to "how soon after a crash can I relaunch",
+# and a fixed sleep would hide it.
+$noticed = $false
+$sw = [Diagnostics.Stopwatch]::StartNew()
+while ($sw.Elapsed.TotalSeconds -lt 20) {
+  $now = @((Request2 $crashPort '{"cmd":"list"}').sessions | Where-Object { $_.id -eq $crashId })[0]
+  if ($now -and -not $now.attached) { $noticed = $true; break }
+  Start-Sleep -Milliseconds 250
+}
+$took = [Math]::Round($sw.Elapsed.TotalSeconds, 1)
+if ($noticed) { Pass "after the window dies, the daemon releases the session (took ${took}s)" }
+else { Fail "crash" "20s after the window died the daemon still shows the session attached - the next window would refuse to adopt it" }
+
+# The session is intact: still alive, still holding what was typed.
+$afterCrash = @((Request2 $crashPort '{"cmd":"list"}').sessions | Where-Object { $_.id -eq $crashId })[0]
+if ($afterCrash -and $afterCrash.alive) { Pass "and the shell in it is still running" }
+else { Fail "crash" "the session died with the window" }
+$peek = Request2 $crashPort ('{"cmd":"peek","id":' + $crashId + '}')
+if ($peek.data -like "*SURVIVED-THE-CRASH-1357*") { Pass "with its scrollback intact" }
+else { Fail "crash" "the scrollback did not survive the window dying" }
+
+# And the next window takes it - attaches, and gets the replay.
+$nextWin = New-Conn $crashPort
+$nextWin.Writer.WriteLine('{"cmd":"attach","id":' + $crashId + '}')
+$replay = Drain2 $nextWin 3000
+if ($replay -like "*SURVIVED-THE-CRASH-1357*") { Pass "and a new window attaches and sees what was there" }
+else { Fail "crash" "a new window attached but the replay did not carry the old output" }
+$nextWin.Client.Close()
+
 # ════ cleanup ════
 foreach ($d in $script:daemons) {
   if (Get-Process -Id $d -ErrorAction SilentlyContinue) { Stop-DaemonTree $d }
