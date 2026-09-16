@@ -2480,6 +2480,26 @@ function effXtermTheme(): ITheme {
 }
 
 /// Push current appearance settings into every open terminal, switching
+/// Keep a tab drawing when its WebGL context is lost - a GPU reset, an
+/// RDP reconnect, a driver recycle, each common on the VMs and remote
+/// desktops this runs on. xterm fires onContextLoss and then draws
+/// nothing, freezing on the last frame until something forces a repaint
+/// - the "gets stuck on old output, comes back on resize" report, said
+/// exactly. Dropping the addon reverts the terminal to the DOM renderer,
+/// so it keeps drawing on its own (slower, but drawing). This is the
+/// recovery the render-stall watch could until now only report.
+function guardWebglContext(tab: Tab) {
+  const addon = tab.webgl;
+  if (!addon) return;
+  addon.onContextLoss(() => {
+    logUi("render.contextloss", { id: tab.id });
+    addon.dispose();
+    if (tab.webgl === addon) tab.webgl = undefined; // xterm falls back to DOM.
+    // Draw now, so recovery is immediate rather than waiting on new output.
+    if (tab.id === activeId) tab.term.refresh(0, tab.term.rows - 1);
+  });
+}
+
 /// renderers live when the renderer setting changes.
 function applyAppearance() {
   applyBackground();
@@ -2501,6 +2521,7 @@ function applyAppearance() {
       try {
         tab.webgl = new WebglAddon();
         tab.term.loadAddon(tab.webgl);
+        guardWebglContext(tab);
       } catch {
         tab.webgl = undefined;
       }
@@ -4966,6 +4987,7 @@ async function createTab(
   }
 
   const tab: Tab = { id, term, fit, pane, button, label, icon, shellB, webgl, search, blocks };
+  guardWebglContext(tab);
   // The oldest open report about this terminal is that a full-screen
   // program "gets stuck on old output" - it repaints and the screen keeps
   // showing the frame before. Every theory about it so far has been a

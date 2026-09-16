@@ -1,0 +1,115 @@
+<!doctype html>
+<!--
+  Does a tab recover when its WebGL context is lost?
+
+  Driven by tests/contextloss.mjs. A GPU reset, an RDP reconnect or a driver
+  recycle - all common on the VMs and remote desktops this app runs on -
+  takes the WebGL context away mid-session. xterm then draws nothing and the
+  screen freezes on its last frame until something forces a repaint, which is
+  the "gets stuck on old output, comes back on resize" report. The fix, in
+  main.ts as guardWebglContext, is to drop the addon on loss so the terminal
+  reverts to the DOM renderer and keeps drawing. This exercises that shape.
+
+  It asserts on data, not paint: the loss event fired, the addon was
+  disposed, its canvas is gone, and the buffer still takes writes. Whether
+  the DOM renderer then actually paints is the tui-dom scene's job - rAF
+  starves under the virtual time this runs in.
+-->
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css" />
+<style>
+  html,
+  body {
+    margin: 0;
+    background: #101020;
+  }
+  #term {
+    width: 640px;
+    height: 200px;
+  }
+  #verdict {
+    font: 14px monospace;
+    color: #000;
+    background: #fff;
+  }
+</style>
+<div id="term"></div>
+<div id="verdict">RESULT pending</div>
+<script type="module">
+  import { Terminal } from "../../node_modules/@xterm/xterm/lib/xterm.mjs";
+  import { WebglAddon } from "../../node_modules/@xterm/addon-webgl/lib/addon-webgl.mjs";
+
+  const report = (t) => {
+    document.getElementById("verdict").textContent = t;
+  };
+  window.addEventListener("error", (e) => report(`RESULT threw ${e.message}`));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  (async () => {
+    const term = new Terminal({ cols: 40, rows: 8, fontFamily: "monospace", fontSize: 16 });
+    term.open(document.getElementById("term"));
+
+    let webgl;
+    try {
+      webgl = new WebglAddon(true);
+      term.loadAddon(webgl);
+    } catch (e) {
+      return report(`RESULT no-webgl ${e.message}`);
+    }
+
+    // The recovery under test, the same shape as guardWebglContext(): on
+    // context loss, drop the addon so xterm reverts to the DOM renderer.
+    let lossFired = false;
+    let disposed = false;
+    webgl.onContextLoss(() => {
+      if (disposed) return;
+      lossFired = true;
+      try {
+        webgl.dispose();
+        disposed = true;
+      } catch (e) {
+        report(`RESULT dispose-threw ${e}`);
+      }
+    });
+
+    term.write("BEFORE-LOSS");
+    await sleep(300);
+    const hadCanvas = document.querySelectorAll("#term canvas").length > 0;
+
+    // Take the context away the way a GPU reset would. The addon owns one
+    // of the canvases under #term and listens on it for "webglcontextlost";
+    // dispatch that event on the GL canvas to drive its onContextLoss - the
+    // same signal a real loss raises, and the one our recovery hangs off.
+    // (A software GL headless does not always fire it from loseContext(),
+    // and it is our handler, not the browser's event, that is under test.)
+    // The addon does not fire onContextLoss at once: it preventDefaults and
+    // waits 3s for a "webglcontextrestored" that never comes here, then
+    // fires. So dispatch only the loss event - a real loseContext() could
+    // auto-restore and cancel that timer - and wait past the 3s.
+    let forced = "none";
+    for (const c of document.querySelectorAll("#term canvas")) {
+      const g = c.getContext("webgl2") || c.getContext("webgl");
+      if (!g) continue;
+      c.dispatchEvent(new Event("webglcontextlost", { cancelable: true }));
+      forced = "event";
+      break;
+    }
+    await sleep(3500);
+
+    // It must still take writes afterwards - onto the DOM renderer now.
+    term.write(" AFTER-LOSS");
+    await sleep(300);
+
+    const canvasGone = document.querySelectorAll("#term canvas").length === 0;
+    let buf = "";
+    for (let y = 0; y < term.buffer.active.length; y++) {
+      buf += term.buffer.active.getLine(y)?.translateToString(true) ?? "";
+    }
+    const bufferKept = buf.includes("BEFORE-LOSS") && buf.includes("AFTER-LOSS");
+
+    report(
+      `RESULT loss=${lossFired} disposed=${disposed} hadCanvas=${hadCanvas} ` +
+        `canvasGone=${canvasGone} bufferKept=${bufferKept} forced=${forced}`
+    );
+  })();
+</script>
