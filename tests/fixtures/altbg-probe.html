@@ -1,0 +1,97 @@
+<!doctype html>
+<!--
+  Does the background art show through a full-screen TUI, and only where the
+  app leaves the cell background alone?
+
+  Driven by tests/altbg.mjs. Background art shows because main.ts sets the
+  cell background fully transparent (#00000000) when a theme's art is active;
+  a cell the program paints with its own background (SGR 48) is opaque and
+  hides the art. This drives a program onto the alternate screen - where full
+  TUIs live - and fills it, once leaving the default background (the art must
+  show) and once painting an explicit one (the art must not). The page behind
+  is a flat colour standing in for the art; on the canvas a transparent cell
+  reads as alpha 0.
+-->
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css" />
+<style>
+  html,
+  body {
+    margin: 0;
+    background: #ff00ff;
+  }
+  #term {
+    width: 640px;
+    height: 200px;
+  }
+  #verdict {
+    font: 14px monospace;
+    color: #000;
+    background: #fff;
+  }
+</style>
+<div id="term"></div>
+<div id="verdict">RESULT pending</div>
+<script type="module">
+  import { Terminal } from "../../node_modules/@xterm/xterm/lib/xterm.mjs";
+  import { WebglAddon } from "../../node_modules/@xterm/addon-webgl/lib/addon-webgl.mjs";
+
+  const report = (t) => {
+    document.getElementById("verdict").textContent = t;
+  };
+  window.addEventListener("error", (e) => report(`RESULT threw ${e.message}`));
+
+  try {
+    const fill = new URLSearchParams(location.search).get("fill") || "default";
+    const term = new Terminal({
+      fontFamily: "Consolas, monospace",
+      fontSize: 16,
+      cols: 40,
+      rows: 8,
+      allowTransparency: true,
+      // What main.ts uses with art active: fully transparent cells.
+      theme: { background: "#00000000", foreground: "#ffffff" },
+    });
+    term.open(document.getElementById("term"));
+    term.loadAddon(new WebglAddon(true));
+
+    // A full-screen program: enter the alt screen, clear, fill every row.
+    const row =
+      fill === "explicit"
+        ? "\x1b[48;2;16;16;32m" + "M".repeat(40) + "\x1b[0m"
+        : "M".repeat(40);
+    let out = "\x1b[?1049h\x1b[2J\x1b[H";
+    for (let r = 0; r < 8; r++) out += row + (r < 7 ? "\r\n" : "");
+    term.write(out);
+
+    setTimeout(() => {
+      try {
+        const canvases = [...document.querySelectorAll("#term canvas")];
+        if (!canvases.length) return report("RESULT no-canvas");
+        const { width, height } = canvases[0];
+        const outc = document.createElement("canvas");
+        outc.width = width;
+        outc.height = height;
+        const ctx = outc.getContext("2d");
+        for (const cv of canvases) ctx.drawImage(cv, 0, 0);
+        const data = ctx.getImageData(0, 0, width, height).data;
+        let clear = 0;
+        let opaque = 0;
+        let glyph = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i + 3] === 0) {
+            clear++;
+            continue;
+          }
+          opaque++;
+          if (data[i + 3] > 200 && data[i] > 200 && data[i + 1] > 200 && data[i + 2] > 200) glyph++;
+        }
+        report(`RESULT fill=${fill} clear=${clear} opaque=${opaque} glyph=${glyph}`);
+      } catch (e) {
+        report(`RESULT threw ${e}`);
+      }
+    }, 1200);
+  } catch (e) {
+    report(`RESULT threw ${e}`);
+  }
+</script>
