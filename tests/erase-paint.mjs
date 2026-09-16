@@ -46,11 +46,6 @@ if (!edge) {
   process.exit(0);
 }
 
-// A directory per launch, not per suite. Two of these suites start Edge
-// twice, and the second found the first's profile still locked - which is
-// why naming it after the fixture and the pid fixed nothing.
-let launches = 0;
-
 let failed = 0;
 function check(name, ok, detail = "") {
   console.log(`${ok ? "PASS" : "FAIL"} ${name}${ok ? "" : `: ${detail}`}`);
@@ -59,11 +54,18 @@ function check(name, ok, detail = "") {
 
 function probe(renderer) {
   const url = `${pathToFileURL(fixture).href}?renderer=${renderer}`;
-  const dom = execFileSync(
-    process.execPath,
-    [renderScript, edge, url, "90000"],
-    { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 180_000 }
-  );
+  // The DOM renderer draws on requestAnimationFrame, which virtual time
+  // starves - so read it on the real clock, where it paints. WebGL is read
+  // under virtual time as before. Same fixture, same checks, both modes.
+  const args =
+    renderer === "dom"
+      ? [renderScript, edge, url, "5000", "rt"]
+      : [renderScript, edge, url, "90000"];
+  const dom = execFileSync(process.execPath, args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+    timeout: 180_000,
+  });
   // The output element specifically. The script that fills it lives in the
   // same document and contains the word RESULTS in its own source, so a
   // loose match reads the program instead of its answer.
@@ -118,31 +120,14 @@ for (const renderer of ["webgl", "dom"]) {
   const altDrew = r.altOnTop > 0 && r.altOnBottom > 0;
   const altRepainted = r.altOffTop + r.altOffBottom <= budget;
 
-  if (renderer === "dom") {
-    // Reported, not asserted - the same call paint.mjs makes about this
-    // renderer, for the same reason. The DOM renderer builds its rows on a
-    // requestAnimationFrame, and headless Chromium runs on virtual time
-    // where rAF has no real cadence: it routinely sits on the frame it
-    // last built - the fill - for the whole poll and never shows the erase
-    // at all. That is the harness, not a clear that failed, and asserting
-    // on it here would fail green code at random. The DOM renderer's actual
-    // clearing is covered where it can be seen: the tui-dom visual scene
-    // drives this same renderer through a real compositor.
-    if (r.beforeTop > 0 && cleared && survived && fullyCleared && elCleared && altDrew && altRepainted) {
-      console.log(`NOTE dom: every erase, the EL, and the alt-screen exit all reached the rows DOM this run`);
-    } else {
-      console.log(
-        `NOTE dom: the rows DOM did not settle on the cleared state (virtual time starves its ` +
-          `rAF - not a failure here; the tui-dom scene covers the DOM renderer with a real compositor)`
-      );
-    }
-    continue;
-  }
-
-  // WebGL, which getImageData can read straight off the canvas and which
-  // does land its frames headless (webgl.mjs and paint.mjs both rely on
-  // that), so it can be asserted - and it is the renderer the app prefers
-  // and the one a one-machine GPU bug would live in.
+  // Both renderers, held to the same checks below. WebGL is read under
+  // virtual time, which it lands its frames under; the DOM renderer is
+  // read on the real clock (probe() runs it in rt mode) because virtual
+  // time starves its requestAnimationFrame - the reason this used to be a
+  // NOTE and read like the "it only clears when I resize" report. On the
+  // real clock it clears, repaints and leaves the alt screen the way WebGL
+  // does, so the assertions run for both. The tui-dom scene still drives
+  // the DOM renderer through a real compositor as the higher-fidelity check.
 
   // The control both assertions below stand on: the fill actually put
   // glyphs on the screen, in both halves. Without this a renderer that

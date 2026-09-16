@@ -21,8 +21,13 @@ import { mkdtempSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const [edge, url, budgetArg] = process.argv.slice(2);
+const [edge, url, budgetArg, mode] = process.argv.slice(2);
 const budget = Number(budgetArg || "8000");
+// "vt" (default) advances a virtual-time budget and reads once it drains -
+// deterministic, but it starves requestAnimationFrame, so the DOM renderer
+// never paints. "rt" runs the real clock and waits `budget` real ms, which
+// is how the DOM renderer gets to draw and be read back like WebGL is.
+const realtime = mode === "rt";
 if (!edge || !url) {
   console.error("edge-render: usage: edge-render.mjs <edge> <url> [budgetMs]");
   process.exit(2);
@@ -178,25 +183,32 @@ async function main() {
     });
 
   await send("Page.enable");
-  // Freeze the clock first, or the instant about:blank load spends the whole
-  // budget before we have navigated and the expiry fires on an empty page.
-  // Then arm the expiry, navigate, and grant the budget: with the clock
-  // released as pauseIfNetworkFetchesPending, virtual time holds while the
-  // page and its modules are still loading, then advances timers up to the
-  // budget and fires the expiry - by which point the page has run to its end.
-  // That is the contract --virtual-time-budget gave --dump-dom. The real-time
-  // cap is only a backstop; virtual time drains as fast as the loop allows.
-  await send("Emulation.setVirtualTimePolicy", { policy: "pause" });
-  const expired = waitFor(
-    "Emulation.virtualTimeBudgetExpired",
-    Math.min(Math.max(budget * 2, 30000), 120000)
-  ).catch(() => {});
-  await send("Page.navigate", { url });
-  await send("Emulation.setVirtualTimePolicy", {
-    policy: "pauseIfNetworkFetchesPending",
-    budget,
-  });
-  await expired;
+  if (realtime) {
+    // Let the real clock run so requestAnimationFrame fires and the DOM
+    // renderer actually paints; wait `budget` real ms for the page to finish.
+    await send("Page.navigate", { url });
+    await new Promise((r) => setTimeout(r, Math.min(Math.max(budget, 500), 30000)));
+  } else {
+    // Freeze the clock first, or the instant about:blank load spends the whole
+    // budget before we have navigated and the expiry fires on an empty page.
+    // Then arm the expiry, navigate, and grant the budget: with the clock
+    // released as pauseIfNetworkFetchesPending, virtual time holds while the
+    // page and its modules are still loading, then advances timers up to the
+    // budget and fires the expiry - by which point the page has run to its end.
+    // That is the contract --virtual-time-budget gave --dump-dom. The real-time
+    // cap is only a backstop; virtual time drains as fast as the loop allows.
+    await send("Emulation.setVirtualTimePolicy", { policy: "pause" });
+    const expired = waitFor(
+      "Emulation.virtualTimeBudgetExpired",
+      Math.min(Math.max(budget * 2, 30000), 120000)
+    ).catch(() => {});
+    await send("Page.navigate", { url });
+    await send("Emulation.setVirtualTimePolicy", {
+      policy: "pauseIfNetworkFetchesPending",
+      budget,
+    });
+    await expired;
+  }
 
   // Read the live DOM through the DOM domain, not Runtime.evaluate: after a
   // navigation the default JS execution context is torn down and replaced,

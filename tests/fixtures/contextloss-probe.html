@@ -86,13 +86,25 @@
     // waits 3s for a "webglcontextrestored" that never comes here, then
     // fires. So dispatch only the loss event - a real loseContext() could
     // auto-restore and cancel that timer - and wait past the 3s.
+    // scenario=lose (default): the loss is permanent, so the addon fires
+    // onContextLoss after its 3s window and we fall back to the DOM
+    // renderer. scenario=restore: the context comes back inside that
+    // window, so the addon clears its timer, keeps WebGL, and onContextLoss
+    // never fires - recovery, not fallback.
+    const scenario = new URLSearchParams(location.search).get("scenario") || "lose";
     let forced = "none";
+    let glCanvas = null;
     for (const c of document.querySelectorAll("#term canvas")) {
       const g = c.getContext("webgl2") || c.getContext("webgl");
       if (!g) continue;
+      glCanvas = c;
       c.dispatchEvent(new Event("webglcontextlost", { cancelable: true }));
       forced = "event";
       break;
+    }
+    if (scenario === "restore" && glCanvas) {
+      await sleep(500);
+      glCanvas.dispatchEvent(new Event("webglcontextrestored"));
     }
     await sleep(3500);
 
@@ -109,7 +121,8 @@
 
     report(
       `RESULT loss=${lossFired} disposed=${disposed} hadCanvas=${hadCanvas} ` +
-        `canvasGone=${canvasGone} bufferKept=${bufferKept} forced=${forced}`
+        `canvasGone=${canvasGone} bufferKept=${bufferKept} forced=${forced} ` +
+        `scenario=${scenario}`
     );
   })();
 </script>

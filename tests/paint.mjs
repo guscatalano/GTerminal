@@ -35,11 +35,6 @@ if (!edge) {
   process.exit(0);
 }
 
-// A directory per launch, not per suite. Two of these suites start
-// Edge twice, and the second found the first's profile still locked -
-// which is why naming it after the fixture and the pid fixed nothing.
-let launches = 0;
-
 let failed = 0;
 function check(name, ok, detail = "") {
   console.log(`${ok ? "PASS" : "FAIL"} ${name}${ok ? "" : `: ${detail}`}`);
@@ -48,11 +43,18 @@ function check(name, ok, detail = "") {
 
 function probe(renderer) {
   const url = `${pathToFileURL(fixture).href}?renderer=${renderer}`;
-  const dom = execFileSync(
-    process.execPath,
-    [renderScript, edge, url, "90000"],
-    { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 180_000 }
-  );
+  // The DOM renderer draws on requestAnimationFrame, which virtual time
+  // starves - so read it on the real clock, where it paints, and read WebGL
+  // under virtual time as before. Same fixture, same assertions, both modes.
+  const args =
+    renderer === "dom"
+      ? [renderScript, edge, url, "5000", "rt"]
+      : [renderScript, edge, url, "90000"];
+  const dom = execFileSync(process.execPath, args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+    timeout: 180_000,
+  });
   // The output element specifically. The script that fills it lives in
   // the same document and contains the word RESULTS in its own source, so
   // a loose match reads the program instead of its answer.
@@ -83,40 +85,16 @@ for (const renderer of ["webgl", "dom"]) {
     ? `frame ${r.firstMiss.frame} wanted ${r.firstMiss.wanted} and the screen still showed ${r.firstMiss.saw} after 4s`
     : `${r.missed} frames never arrived`;
 
-  if (renderer === "webgl") {
-    // The assertion: every time the buffer changed, the picture followed.
-    // A screen that sticks shows up as a frame that never arrived, with
-    // what it was still showing instead.
-    check(`${renderer}: every buffer change reached the screen`, r.missed === 0, detail);
-  } else {
-    // Reported, not asserted - and now known to be the harness.
-    //
-    // The DOM renderer misses frames here, typically five of twelve,
-    // sitting on the previous fill for the full four seconds, while WebGL
-    // lands all twelve in the same run, same page, same clock. That
-    // differential looked like the oldest report about this terminal, and
-    // it was written up as the likely cause of it.
-    //
-    // It was not. tui-dom drives the same fixture through a real window
-    // with a real compositor, and the DOM renderer passes it: 73% of the
-    // screen changing on the first frame and 72% on each redraw after,
-    // which is what WebGL scores on the same scene. The misses here are
-    // virtual time starving requestAnimationFrame, which is exactly the
-    // reason this was never asserted on, and the reason a differential
-    // between two things measured in the same broken clock is still not
-    // evidence about either of them.
-    //
-    // Kept, because a change in the number is still worth seeing, and
-    // because the day it starts missing on WebGL too - which is asserted
-    // - this line is what says whether that is new or normal.
-    if (r.missed > 0) {
-      console.log(`NOTE ${renderer}: ${r.missed} of ${r.frames} buffer changes did not reach the screen`);
-      console.log(`     ${detail}`);
-      console.log(`     not a failure here - see the comment in this file, and the tui-dom scene`);
-    } else {
-      console.log(`NOTE ${renderer}: all ${r.frames} buffer changes reached the screen`);
-    }
-  }
+  // Both renderers, one assertion: every time the buffer changed, the
+  // picture followed - a screen that sticks is a frame that never
+  // arrived, with what it was still showing instead. WebGL is read under
+  // virtual time; the DOM renderer is read on the real clock (see
+  // probe()), because virtual time starves its requestAnimationFrame -
+  // which for years made this a NOTE and read like the oldest "sticks on
+  // old output" report about this terminal. On the real clock it lands
+  // every frame too, so both are held to the same bar and a regression
+  // in either renderer shows which.
+  check(`${renderer}: every buffer change reached the screen`, r.missed === 0, detail);
 
   // And it was not instant every time by accident of the screen already
   // being that colour: the two frames are opposite, so each one had to be
