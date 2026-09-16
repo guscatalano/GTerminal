@@ -1,0 +1,53 @@
+# The render suites read back real pixels from a real browser, so they are
+# the one part of the suite an engine change can break without us touching a
+# line - which is exactly what happened when Edge removed --dump-dom. The
+# app renders in WebView2, Chromium that auto-updates on the user's machine,
+# so "does the current engine still render us right" is a question only a
+# real browser can answer, and the answer changes over time on its own.
+#
+# This job sweeps the render suites across pinned Chrome for Testing channels
+# (Chromium, the same engine family as Edge/WebView2). On a push or PR it
+# guards the change against Stable and Beta; on a daily schedule it re-fetches
+# the newest of each channel, so an upstream regression is caught here - on
+# our terms, with a green-to-red we can bisect - rather than in the wild.
+# Dev is the early warning and does not gate: it runs ahead of what users
+# have and its own churn should not turn the tree red.
+name: Browser matrix
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  render:
+    name: render (${{ matrix.channel }})
+    runs-on: windows-latest
+    continue-on-error: ${{ matrix.channel == 'Dev' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: [Stable, Beta, Dev]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # Prints the path to the downloaded chrome.exe on stdout; point every
+      # render suite at it. GT_BROWSER is the override tests/run-render.mjs
+      # and each suite honour in place of the system Edge they find by default.
+      - name: Get Chrome for Testing (${{ matrix.channel }})
+        shell: bash
+        run: echo "GT_BROWSER=$(node tools/get-chrome.mjs ${{ matrix.channel }})" >> "$GITHUB_ENV"
+
+      - name: Render suites
+        run: node tests/run-render.mjs

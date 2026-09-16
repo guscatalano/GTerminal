@@ -18,6 +18,7 @@
     "test:visual": "pwsh -NoProfile -File tests/visual.ps1",
     "test:mutate": "pwsh -NoProfile -File tests/mutate.ps1",
     "test:node": "node tests/run-node.mjs",
+    "test:render": "node tests/run-render.mjs",
     "coverage": "pwsh -NoProfile -File tests/coverage.ps1"
   },
   "dependencies": {

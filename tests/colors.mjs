@@ -37,7 +37,7 @@ const EDGES = [
   "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
   "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
 ];
-const edge = EDGES.find((p) => existsSync(p));
+const edge = process.env.GT_BROWSER || EDGES.find((p) => existsSync(p));
 if (!edge) {
   console.log("SKIP colors: no Edge found — this needs the engine the app renders in");
   process.exit(0);
