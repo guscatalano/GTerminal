@@ -42,11 +42,17 @@ const child = spawn(
     // ES modules over file:// are a cross-origin load to Chromium, and
     // without this the fixture never runs - it just reports "pending".
     "--allow-file-access-from-files",
-    // Software WebGL, so the WebGL renderer the app uses gets a context on
-    // a machine with no GPU - a headless CI runner. Recent Chromium will
-    // not fall back to SwiftShader without being told to, and returns a
-    // null WebGL2 context instead ("WebGL2 not supported"); with a real GPU
-    // this changes nothing, the hardware path still wins.
+    // Software WebGL, deterministically, on every machine. --disable-gpu
+    // takes the missing-GPU negotiation off the table - on a GPU-less runner
+    // some Chrome builds otherwise crash the launch outright rather than fall
+    // back - and --enable-unsafe-swiftshader is what still grants a WebGL2
+    // context once the hardware path is gone (without it the renderer gets
+    // null: "WebGL2 not supported"). The pair is the standard headless recipe:
+    // SwiftShader is a conformant GL, so the colours and glyphs the suites
+    // read back are the same everywhere, and the same the app draws - it just
+    // stops depending on whatever GPU the machine under the test happens to
+    // have, which is where render tests go flaky.
+    "--disable-gpu",
     "--enable-unsafe-swiftshader",
     "--remote-debugging-port=0",
     // Modern Chromium refuses a CDP websocket whose Origin it does not
