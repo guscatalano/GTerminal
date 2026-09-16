@@ -49,5 +49,14 @@ jobs:
         shell: bash
         run: echo "GT_BROWSER=$(node tools/get-chrome.mjs ${{ matrix.channel }})" >> "$GITHUB_ENV"
 
+      # TEMP diagnostic: the suites swallow edge-render's stderr, so run it
+      # directly once and surface why it exits, to see the crash on the
+      # GPU-less runner. Remove once the render step is green.
+      - name: Diagnose edge-render
+        continue-on-error: true
+        shell: bash
+        run: |
+          node -e "const{pathToFileURL}=require('url');const{join}=require('path');const{spawnSync}=require('child_process');const u=pathToFileURL(join(process.cwd(),'tests','fixtures','webgl-probe.html')).href+'?transparent=0';const r=spawnSync(process.execPath,['tests/edge-render.mjs',process.env.GT_BROWSER,u,'8000'],{encoding:'utf8'});console.log('EXIT',r.status,'errObj',r.error&&r.error.message);console.log('STDOUT bytes',(r.stdout||'').length);console.log('STDERR:\n'+(r.stderr||'(none)'));"
+
       - name: Render suites
         run: node tests/run-render.mjs
