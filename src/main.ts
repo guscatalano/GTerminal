@@ -46,6 +46,7 @@ import {
 import type { SessionState } from "./restore";
 import { SHORTCUTS } from "./shortcuts";
 import { daemonAction, shellsAtRisk, daemonNotice } from "./daemon";
+import { chromiumMajor, shouldWarnOldWebview, MIN_WEBVIEW } from "./webview";
 import type { DaemonInfo } from "./daemon";
 import { activates } from "./menus";
 import { visibilityReport } from "./controls";
@@ -272,6 +273,12 @@ interface AppConfig {
   editor_command?: string;
   /// Whether paths in the output are clickable at all.
   file_links?: boolean;
+  /// Warn when the WebView2 engine is too old to render correctly
+  /// (below MIN_WEBVIEW). On by default; see src/webview.ts.
+  warn_old_webview?: boolean;
+  /// The engine major already dismissed, so the warning shows once per
+  /// old version rather than on every launch.
+  webview_warn_dismissed?: number;
   /// Whether a program may draw pictures (sixel).
   ///
   /// Off by default, and that is the opposite of what it was until the
@@ -5611,6 +5618,50 @@ async function checkDaemonVersion(sessions: SessionInfo[]) {
   document.getElementById("main")?.prepend(bar);
 }
 
+/// One word when the engine is too old to draw the app correctly.
+///
+/// The window renders in WebView2, and below MIN_WEBVIEW the CSS the
+/// themes lean on (color-mix) is dropped and the window paints without
+/// its backgrounds. Almost nobody meets this - Evergreen keeps the
+/// runtime current - so it is a quiet, dismissible bar, not a dialog,
+/// and it remembers the version it was dismissed for. A #main bar, like
+/// the daemon notice, so it never shifts the tab row the scenes measure.
+function warnOldWebviewOnce() {
+  const major = chromiumMajor(navigator.userAgent);
+  if (
+    !shouldWarnOldWebview({
+      major,
+      enabled: config.warn_old_webview !== false,
+      dismissed: config.webview_warn_dismissed,
+    })
+  )
+    return;
+  logUi("webview.old", { major, min: MIN_WEBVIEW });
+
+  const bar = document.createElement("div");
+  bar.className = "daemon-notice";
+  const note = document.createElement("span");
+  note.className = "daemon-note";
+  note.textContent = `This window's engine is old (Chromium ${major}). GTerminal needs ${MIN_WEBVIEW} or newer to draw correctly — update Microsoft Edge or the WebView2 runtime to fix it.`;
+  const go = document.createElement("button");
+  go.className = "set-control";
+  go.textContent = "How to update";
+  go.addEventListener("click", () => {
+    void openUrl("https://developer.microsoft.com/microsoft-edge/webview2/").catch(() => {});
+  });
+  const later = document.createElement("button");
+  later.className = "set-control";
+  later.textContent = "Dismiss";
+  later.addEventListener("click", () => {
+    config.webview_warn_dismissed = major ?? undefined;
+    saveConfig();
+    logUi("webview.old.dismiss", { major });
+    bar.remove();
+  });
+  bar.append(note, go, later);
+  document.getElementById("main")?.prepend(bar);
+}
+
 /// Point out the themes, once, on a genuinely new install.
 ///
 /// A window that opens plain and stays plain is a window nobody knows is
@@ -9511,6 +9562,31 @@ function buildSettingsPage() {
     })()
   );
 
+  settingRow(
+    "Rendering engine",
+    "GTerminal's window is drawn by the WebView2 runtime — Chromium, kept current on your machine by Microsoft Edge.",
+    (() => {
+      const where = document.createElement("div");
+      where.className = "setting-status";
+      const major = chromiumMajor(navigator.userAgent);
+      where.textContent =
+        major == null
+          ? "Version unknown."
+          : major < MIN_WEBVIEW
+            ? `Chromium ${major} — older than ${MIN_WEBVIEW}, some theming will not render correctly.`
+            : `Chromium ${major}.`;
+      return where;
+    })()
+  );
+  settingRow(
+    "Warn about an old engine",
+    `Show a bar when the WebView2 runtime is older than Chromium ${MIN_WEBVIEW}, below which the app does not draw correctly. Turning it back on also clears a past dismissal.`,
+    mkSelect([["on", "On"], ["off", "Off"]], config.warn_old_webview === false ? "off" : "on", (v) => {
+      config.warn_old_webview = v === "on";
+      if (v === "on") config.webview_warn_dismissed = undefined;
+      saveConfig();
+    })
+  );
   buildRemoteSection();
   buildWeatherSection();
   buildShortcutsSection();
@@ -11120,6 +11196,7 @@ async function main() {
   // Last, and never blocking: the window works, one thing in it may not.
   void checkDaemonVersion(sessions);
   suggestThemesOnce(freshInstall);
+  warnOldWebviewOnce();
 }
 
 main();
