@@ -438,6 +438,7 @@ const SHELL_CHOICES: Array<[string, string]> = [
   ["pwsh", "PowerShell 7"],
   ["powershell", "Windows PowerShell"],
   ["cmd", "Command Prompt"],
+  ["wsl", "WSL (default distro)"],
 ];
 let config: AppConfig = {};
 
@@ -587,6 +588,8 @@ function shellDisplayName(id: number): string {
   switch (lastInfo.get(id)?.shell) {
     case "cmd":
       return "Command Prompt";
+    case "wsl":
+      return "WSL";
     case "powershell":
       return "Windows PowerShell";
     default:

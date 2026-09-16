@@ -3008,11 +3008,58 @@ fn start_session(
     };
     let build_cmd_exe = || {
         let mut cmd = CommandBuilder::new("cmd.exe");
-        // cmd's prompt can emit escapes: $E]9;9;$P$E\ is the same OSC 9;9
-        // cwd report the PowerShell prompt hook produces.
-        cmd.args(["/K", "prompt $E]9;9;$P$E\\$P$G"]);
+        // Everything cmd's prompt can carry, which is nearly everything
+        // PowerShell's hook does. $E is ESC, so a prompt string can emit
+        // the same OSC marks: 133;A before the prompt, 9;9 with the
+        // folder, 133;B where typing starts. Until now cmd got the cwd
+        // and nothing else - so no command blocks, no jump-to-failure and
+        // no finish notification in a cmd tab, and every one of those
+        // looked like a feature that only worked in one shell.
+        //
+        // What it cannot carry is the exit code. There is no prompt
+        // escape for ERRORLEVEL, so 133;D goes out bare: the block
+        // closes, the notification fires, and the code is unknown - which
+        // blocks.ts already treats as "not a failure" rather than as
+        // success, so the scrollbar stays honest.
+        //
+        // The D is emitted at the start of every prompt, which puts one
+        // above the first command; feed() ignores a D with no open block,
+        // so the phantom costs nothing.
+        cmd.args(["/K", "prompt $E]133;D$E\\$E]133;A$E\\$E]9;9;$P$E\\$P$G$E]133;B$E\\"]);
         cmd.cwd(&cwd);
         cmd.env("TERM", "xterm-256color");
+        cmd.env_remove("NO_COLOR");
+        cmd
+    };
+    // WSL: an interactive bash in the default distro, with the same marks
+    // added through BASH_ENV - a file bash sources at startup - so the
+    // user's own .bashrc runs first and untouched, and the marks are put
+    // on afterwards. The same "wrap, do not replace" the PowerShell hook
+    // does. WSLENV with /p forwards the variable across the boundary with
+    // its path translated.
+    //
+    // The folder is reported as the Linux path, which is where the shell
+    // actually is; a Windows-side reader that wants \\wsl$\... can
+    // translate, and the daemon does not guess.
+    //
+    // Untested on the machine this was written on, which has no WSL. The
+    // marks are the bytes cmd and pwsh already send, so the reading side
+    // is covered; whether this survives a user's .bashrc is the question
+    // tests/prompt.ps1 answers for PowerShell and would answer here given
+    // a distro to ask.
+    let build_wsl = || {
+        let hook_path = state_dir().join("wsl-hook.sh");
+        let hook = "# Written by GTerminal. Emits the prompt marks the window reads.\n\
+__gt_prompt() { printf '\\033]133;D;%s\\007\\033]133;A\\007\\033]9;9;%s\\007' \"$?\" \"$PWD\"; }\n\
+PROMPT_COMMAND=\"__gt_prompt${PROMPT_COMMAND:+; $PROMPT_COMMAND}\"\n\
+PS1=\"${PS1}\\[\\033]133;B\\007\\]\"\n";
+        let _ = std::fs::write(&hook_path, hook);
+        let mut cmd = CommandBuilder::new("wsl.exe");
+        cmd.args(["--", "bash", "-i"]);
+        cmd.cwd(&cwd);
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("BASH_ENV", hook_path.to_string_lossy().to_string());
+        cmd.env("WSLENV", "BASH_ENV/p");
         cmd.env_remove("NO_COLOR");
         cmd
     };
@@ -3020,6 +3067,10 @@ fn start_session(
         "cmd" => pair
             .slave
             .spawn_command(build_cmd_exe())
+            .map_err(|e| e.to_string())?,
+        "wsl" => pair
+            .slave
+            .spawn_command(build_wsl())
             .map_err(|e| e.to_string())?,
         "powershell" => pair
             .slave

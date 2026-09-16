@@ -1487,6 +1487,49 @@ $tokenText = (Get-Content "$env:LOCALAPPDATA\GTerminal\daemon.token" -Raw).Trim(
 if ($tokenText.Length -ge 32) { Pass "and it is long enough to be worth checking ($($tokenText.Length) characters)" }
 else { Fail "auth" "the token is $($tokenText.Length) characters, which is not a secret" }
 
+# ════ the marks in a cmd session ════
+#
+# The prompt marks are what every feature of the last two days hangs
+# off - blocks, jump-to-failure, finish notifications, run-on-open - and
+# cmd only ever sent the cwd. Its prompt string can carry the rest, and
+# this is the check that it does: a cmd session, a command, and the
+# bytes the window would read.
+#
+# The exit code is the one thing cmd's prompt cannot carry (there is no
+# escape for ERRORLEVEL), so the D mark is expected bare - and a bare D
+# is the case blocks.ts already treats as "unknown", not as success.
+$cmdPort = Start-Daemon
+$cmdMade = Request2 $cmdPort '{"cmd":"create","cols":100,"rows":30,"shell":"cmd"}'
+$cmdWin = New-Conn $cmdPort
+$cmdWin.Writer.WriteLine('{"cmd":"attach","id":' + $cmdMade.id + '}')
+# The first version of this said "cmd draws its prompt without a cursor
+# query" and waited for the A mark without answering one. It does ask -
+# ConPTY asks on the shell's behalf, whatever the shell - and a query
+# unanswered is a shell that never starts. Wait-Ready-Answering is what
+# every other session in this file uses, and it is what this uses now.
+$cmdSeen = Wait-Ready-Answering $cmdWin
+$cmdWin.Writer.WriteLine('{"cmd":"write","data":"echo CMD-MARKS-7531\r"}')
+$cmdDeadline = (Get-Date).AddSeconds(20)
+while ((Get-Date) -lt $cmdDeadline) {
+  $cmdSeen += Drain2 $cmdWin 400
+  if (([regex]::Matches($cmdSeen, "CMD-MARKS-7531")).Count -ge 2 -and ([regex]::Matches($cmdSeen, [regex]::Escape('\u001b]133;A'))).Count -ge 2) { break }
+}
+$cmdWin.Client.Close()
+# What the session actually said, when it did not say what was expected.
+if (-not $cmdSeen.Contains('\u001b]133;A')) {
+  Write-Host ("  cmd session sent {0} chars; first 300: {1}" -f $cmdSeen.Length, ($cmdSeen.Substring(0, [Math]::Min(300, $cmdSeen.Length)) -replace "`n", " ")) -ForegroundColor DarkGray
+}
+
+if ($cmdSeen.Contains('\u001b]133;A')) { Pass "cmd marks where its prompt begins" } else { Fail "cmd-marks" "no 133;A from cmd" }
+if ($cmdSeen.Contains('\u001b]133;B')) { Pass "and where typing starts" } else { Fail "cmd-marks" "no 133;B from cmd" }
+if ($cmdSeen.Contains('\u001b]9;9;')) { Pass "and still reports its folder" } else { Fail "cmd-marks" "cmd stopped reporting its cwd" }
+# D after the command: the second prompt carries it, and it has to be
+# bare - a made-up code would be a lie the scrollbar then tells.
+$afterCmd = $cmdSeen.Substring([Math]::Max(0, $cmdSeen.IndexOf("CMD-MARKS-7531")))
+if ($afterCmd.Contains('\u001b]133;D')) { Pass "and closes the block when the command ends" } else { Fail "cmd-marks" "no 133;D after the command ran" }
+if ($afterCmd -notmatch [regex]::Escape('\u001b]133;D;')) { Pass "with no exit code, honestly, since cmd's prompt has none to give" }
+else { Fail "cmd-marks" "cmd reported an exit code its prompt cannot know" }
+
 # ════ cleanup ════
 foreach ($d in $script:daemons) {
   if (Get-Process -Id $d -ErrorAction SilentlyContinue) { Stop-DaemonTree $d }

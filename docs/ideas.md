@@ -185,6 +185,33 @@ printed, since once means typed and never run.
 xterm has one and nothing exposes it. A checkbox and a line of settings
 text, and the only reason it is not higher is that nobody has asked.
 
+### 12. Shell integration for cmd and WSL — *done for cmd; WSL built blind*
+
+cmd got the cwd and nothing else, so no command blocks, no
+jump-to-failure and no finish notification in a cmd tab - every one of
+those looked like a feature that worked in one shell. Its prompt string
+carries the rest now: A before the prompt, 9;9 with the folder, B where
+typing starts, and D at the start of the next prompt. Six lifecycle
+checks read the bytes off a real cmd session.
+
+The one thing it cannot carry is an exit code - cmd's prompt has no
+escape for ERRORLEVEL - so D goes out bare. blocks.ts already treats a
+bare D as "unknown" rather than as success, which is why that rule was
+written the way it was.
+
+WSL is a shell option now, with the same marks put on through
+BASH_ENV so the user's .bashrc runs first and untouched. **Untested.**
+The machine this was built on has no WSL installed, and a distro is the
+only thing that can answer whether the hook survives a real .bashrc -
+the question tests/prompt.ps1 answers for PowerShell. Built rather than
+left out because the reading side is the same bytes cmd sends and is
+proven, and the launch is one env var and one file; if it fails on a
+real distro the failure will be in those twelve lines.
+
+### 13. Search every open tab
+
+### 16. Does a session survive the app crashing, not just rebooting
+
 ## Known and deliberate
 
 ### 11. The daemon socket — *the hole is closed; the pipe is not built*

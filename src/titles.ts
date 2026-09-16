@@ -5,7 +5,7 @@
 // home directory, is anything actually running — and every one of them
 // is visible on screen, on every tab, all the time.
 
-export const SHELLS = /^(pwsh|powershell|cmd|conhost)$/i;
+export const SHELLS = /^(pwsh|powershell|cmd|conhost|wsl|bash)$/i;
 
 /// Titles a shell sets for itself that say nothing a user wants on a tab:
 /// its own name, or the path it is sitting in, which the folder label
