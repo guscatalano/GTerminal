@@ -2936,6 +2936,132 @@ fn shell_init_for(prediction: &str, history: bool, dir: &str) -> String {
     ps_init
 }
 
+// Standard base64 with padding. Ships the WSL rcfile through wsl.exe and
+// bash -c by value, where only [A-Za-z0-9+/=] appear so no quoting or
+// path translation can bite.
+fn b64(data: &[u8]) -> String {
+    const T: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(T[((n >> 18) & 63) as usize] as char);
+        out.push(T[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            T[((n >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            T[(n & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+// The rcfile GTerminal hands an interactive WSL bash: source the user's
+// own ~/.bashrc untouched, then append the prompt marks the window reads.
+// bash --rcfile does NOT also read ~/.bashrc, so sourcing it explicitly is
+// what keeps the user's shell. BASH_ENV is read only by non-interactive
+// bash - which is exactly why an earlier BASH_ENV attempt emitted nothing
+// and the marks must ride here instead (proven on a real WSL2 Ubuntu).
+fn wsl_rc() -> &'static str {
+    "[ -f ~/.bashrc ] && source ~/.bashrc\n\
+__gt_prompt() { printf '\\033]133;D;%s\\007\\033]133;A\\007\\033]9;9;%s\\007' \"$?\" \"$PWD\"; }\n\
+PROMPT_COMMAND=\"__gt_prompt${PROMPT_COMMAND:+; $PROMPT_COMMAND}\"\n\
+PS1=\"${PS1}\\[\\033]133;B\\007\\]\"\n"
+}
+
+// The command wsl.exe runs: decode the rcfile (by value, base64) into the
+// Linux home, then exec interactive bash against it. See tests/wsl-rcfile.md.
+fn wsl_boot() -> String {
+    format!(
+        "printf %s '{}' | base64 -d > \"$HOME/.gterminal-rc\" && \
+         exec bash --rcfile \"$HOME/.gterminal-rc\" -i",
+        b64(wsl_rc().as_bytes())
+    )
+}
+
+#[cfg(test)]
+mod wsl_boot_tests {
+    use super::{b64, wsl_boot, wsl_rc};
+
+    #[test]
+    fn base64_matches_the_rfc_vectors() {
+        // A broken encoder must not ship a garbage rcfile silently.
+        assert_eq!(b64(b""), "");
+        assert_eq!(b64(b"f"), "Zg==");
+        assert_eq!(b64(b"fo"), "Zm8=");
+        assert_eq!(b64(b"foo"), "Zm9v");
+        assert_eq!(b64(b"foob"), "Zm9vYg==");
+        assert_eq!(b64(b"fooba"), "Zm9vYmE=");
+        assert_eq!(b64(b"foobar"), "Zm9vYmFy");
+    }
+
+    /// The bug this guards: BASH_ENV is ignored by interactive bash, so the
+    /// hook must load via --rcfile and BASH_ENV must not come back.
+    #[test]
+    fn boot_loads_the_hook_via_rcfile_not_bash_env() {
+        let boot = wsl_boot();
+        assert!(boot.contains("--rcfile"), "hook must load via --rcfile: {boot}");
+        assert!(!boot.contains("BASH_ENV"), "BASH_ENV does not reach interactive bash");
+        assert!(boot.contains("exec bash"), "should exec, not nest, the real shell");
+    }
+
+    /// Decode the embedded base64 the way the Linux side will, and check the
+    /// rcfile arrives intact: it sources the user's rc first, then adds every
+    /// mark the window reads, wrapping rather than replacing PS1.
+    #[test]
+    fn boot_carries_the_whole_rcfile() {
+        let boot = wsl_boot();
+        let start = boot.find('\'').unwrap() + 1;
+        let end = boot[start..].find('\'').unwrap() + start;
+        let rc = String::from_utf8(b64_decode(&boot[start..end])).unwrap();
+        assert_eq!(rc, wsl_rc());
+        assert!(rc.contains("source ~/.bashrc"));
+        assert!(rc.contains("]133;A"));
+        assert!(rc.contains("]133;B"));
+        assert!(rc.contains("]133;D"));
+        assert!(rc.contains("]9;9;"));
+        assert!(rc.contains("${PS1}"), "must wrap, not replace, the user PS1");
+    }
+
+    // A minimal decoder, only for the round-trip test above.
+    fn b64_decode(s: &str) -> Vec<u8> {
+        fn val(c: u8) -> i32 {
+            match c {
+                b'A'..=b'Z' => (c - b'A') as i32,
+                b'a'..=b'z' => (c - b'a' + 26) as i32,
+                b'0'..=b'9' => (c - b'0' + 52) as i32,
+                b'+' => 62,
+                b'/' => 63,
+                _ => -1,
+            }
+        }
+        let mut out = Vec::new();
+        let mut acc = 0i32;
+        let mut bits = 0;
+        for &c in s.as_bytes() {
+            let v = val(c);
+            if v < 0 {
+                continue;
+            }
+            acc = (acc << 6) | v;
+            bits += 6;
+            if bits >= 8 {
+                bits -= 8;
+                out.push((acc >> bits) as u8);
+            }
+        }
+        out
+    }
+}
+
 fn start_session(
     sessions: &Sessions,
     id: u32,
@@ -3031,35 +3157,18 @@ fn start_session(
         cmd.env_remove("NO_COLOR");
         cmd
     };
-    // WSL: an interactive bash in the default distro, with the same marks
-    // added through BASH_ENV - a file bash sources at startup - so the
-    // user's own .bashrc runs first and untouched, and the marks are put
-    // on afterwards. The same "wrap, do not replace" the PowerShell hook
-    // does. WSLENV with /p forwards the variable across the boundary with
-    // its path translated.
-    //
-    // The folder is reported as the Linux path, which is where the shell
-    // actually is; a Windows-side reader that wants \\wsl$\... can
+    // WSL: interactive bash in the default distro, carrying the same prompt
+    // marks via a --rcfile bootstrap. See wsl_boot()/wsl_rc() above for why
+    // --rcfile and not BASH_ENV, and tests/wsl-rcfile.md for the sandbox
+    // proof. The folder is reported as the Linux path, which is where the
+    // shell actually is; a Windows-side reader that wants \\wsl$\... can
     // translate, and the daemon does not guess.
-    //
-    // Untested on the machine this was written on, which has no WSL. The
-    // marks are the bytes cmd and pwsh already send, so the reading side
-    // is covered; whether this survives a user's .bashrc is the question
-    // tests/prompt.ps1 answers for PowerShell and would answer here given
-    // a distro to ask.
     let build_wsl = || {
-        let hook_path = state_dir().join("wsl-hook.sh");
-        let hook = "# Written by GTerminal. Emits the prompt marks the window reads.\n\
-__gt_prompt() { printf '\\033]133;D;%s\\007\\033]133;A\\007\\033]9;9;%s\\007' \"$?\" \"$PWD\"; }\n\
-PROMPT_COMMAND=\"__gt_prompt${PROMPT_COMMAND:+; $PROMPT_COMMAND}\"\n\
-PS1=\"${PS1}\\[\\033]133;B\\007\\]\"\n";
-        let _ = std::fs::write(&hook_path, hook);
+        let boot = wsl_boot();
         let mut cmd = CommandBuilder::new("wsl.exe");
-        cmd.args(["--", "bash", "-i"]);
+        cmd.args(["--", "bash", "-c", &boot]);
         cmd.cwd(&cwd);
         cmd.env("TERM", "xterm-256color");
-        cmd.env("BASH_ENV", hook_path.to_string_lossy().to_string());
-        cmd.env("WSLENV", "BASH_ENV/p");
         cmd.env_remove("NO_COLOR");
         cmd
     };

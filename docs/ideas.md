@@ -185,7 +185,7 @@ printed, since once means typed and never run.
 xterm has one and nothing exposes it. A checkbox and a line of settings
 text, and the only reason it is not higher is that nobody has asked.
 
-### 12. Shell integration for cmd and WSL — *done for cmd; WSL built blind*
+### 12. Shell integration for cmd and WSL — *done; WSL tested on a real distro*
 
 cmd got the cwd and nothing else, so no command blocks, no
 jump-to-failure and no finish notification in a cmd tab - every one of
@@ -199,14 +199,21 @@ escape for ERRORLEVEL - so D goes out bare. blocks.ts already treats a
 bare D as "unknown" rather than as success, which is why that rule was
 written the way it was.
 
-WSL is a shell option now, with the same marks put on through
-BASH_ENV so the user's .bashrc runs first and untouched. **Untested.**
-The machine this was built on has no WSL installed, and a distro is the
-only thing that can answer whether the hook survives a real .bashrc -
-the question tests/prompt.ps1 answers for PowerShell. Built rather than
-left out because the reading side is the same bytes cmd sends and is
-proven, and the launch is one env var and one file; if it fails on a
-real distro the failure will be in those twelve lines.
+WSL is a shell option now, carrying the same marks. It was first built
+blind - no WSL on the build machine - through BASH_ENV, and that was
+wrong: **BASH_ENV is read only by non-interactive bash**, so an
+interactive login sourced it never and emitted no marks at all. A
+Windows sandbox with a real WSL2 Ubuntu proved it (all marks false) and
+proved the fix: `bash --rcfile <file>`, where the file sources the
+user's own ~/.bashrc first - untouched - then appends the marks, the
+same "wrap, do not replace" the PowerShell hook does. --rcfile does not
+also read ~/.bashrc, so sourcing it explicitly is what keeps the user's
+shell. The rcfile rides in by value as base64 through `wsl.exe -- bash
+-c`, so no distro is named and no Windows→WSL path has to be translated.
+On the real distro every mark arrives, the exit code comes with the D
+(cmd cannot manage that), and a custom PS1/PROMPT_COMMAND survives. The
+sandbox procedure and results are checked in at tests/wsl-rcfile.md;
+`cargo test wsl_boot` guards the mechanism on CI without needing WSL.
 
 ### 13. Search every open tab — *done*
 
