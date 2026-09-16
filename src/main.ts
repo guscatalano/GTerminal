@@ -6081,9 +6081,17 @@ function historyOpen(): boolean {
 }
 
 function openHistory() {
+  logUi("history.open");
   app.classList.remove("settings-on");
   app.classList.add("history-on");
   void buildHistoryPage();
+  // The search box takes focus, as the settings page's does. Without
+  // this the terminal kept it, and the first thing typed on a page that
+  // is about searching went into the shell - found by a scene, and
+  // exactly the kind of thing a person shrugs at and retypes.
+  const box = document.getElementById("history-search") as HTMLInputElement | null;
+  box?.focus();
+  box?.select();
 }
 
 function closeHistory() {
@@ -6101,6 +6109,56 @@ function closeHistory() {
   }
 }
 
+/// The lines a search landed on, under the row they belong to.
+///
+/// One function for the open tabs and the ended sessions, because the
+/// two halves of the page were rendering hits with two copies of this
+/// and the copies had already started to differ in what "and more"
+/// told people to do. The match is highlighted from text nodes, never
+/// from markup: a transcript is whatever a program printed.
+function renderHits(
+  found: ReturnType<typeof findHits>,
+  needle: string,
+  onHit: (h: (typeof found)[0]) => void,
+  moreText: string
+): HTMLElement {
+  const block = document.createElement("div");
+  block.className = "hist-hits";
+  for (const h of found) {
+    const line = document.createElement("div");
+    line.className = "hist-hit";
+    const no = document.createElement("span");
+    no.className = "hist-hit-line";
+    no.textContent = String(h.line + 1);
+    const txt = document.createElement("span");
+    txt.className = "hist-hit-text";
+    const shownText = excerpt(h, needle.length);
+    const idx = shownText.toLowerCase().indexOf(needle);
+    if (idx >= 0) {
+      txt.append(
+        shownText.slice(0, idx),
+        Object.assign(document.createElement("mark"), { textContent: shownText.slice(idx, idx + needle.length) }),
+        shownText.slice(idx + needle.length)
+      );
+    } else {
+      txt.textContent = shownText;
+    }
+    line.append(no, txt);
+    line.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onHit(h);
+    });
+    block.appendChild(line);
+  }
+  if (found.length >= MAX_HITS_PER_SESSION) {
+    const more = document.createElement("div");
+    more.className = "hist-hit hist-hit-more";
+    more.textContent = moreText;
+    block.appendChild(more);
+  }
+  return block;
+}
+
 async function buildHistoryPage(filter?: string) {
   const list = document.getElementById("history-list")!;
   list.innerHTML = "";
@@ -6111,6 +6169,64 @@ async function buildHistoryPage(filter?: string) {
     console.error("history_list failed:", err);
   }
   const needle = filter?.trim().toLowerCase();
+  let openHits = 0;
+  // The tabs that are open right now, first. History search found
+  // transcripts of *ended* sessions; the tab you are in, with the error
+  // from ten minutes ago, was not searchable except by Ctrl+F in that
+  // one tab. Its scrollback is a buffer the window already holds, so
+  // asking it is a loop over the tabs and no round trip at all.
+  if (needle) {
+    const openHead = document.createElement("div");
+    openHead.className = "hist-section";
+    openHead.textContent = "Open now";
+    let anyOpen = false;
+    for (const [tabId, tab] of tabs) {
+      const buf = tab.term.buffer.active;
+      const lines: string[] = [];
+      for (let i = 0; i < buf.length; i++) lines.push(buf.getLine(i)?.translateToString(true) ?? "");
+      const found = findHits(lines.join("\n"), needle);
+      if (!found.length) continue;
+      if (!anyOpen) {
+        list.appendChild(openHead);
+        anyOpen = true;
+      }
+      openHits++;
+      const row = document.createElement("div");
+      row.className = "hist-row hist-row-open";
+      const name = document.createElement("span");
+      name.className = "hist-cwd";
+      name.textContent = titleOf(tabId);
+      const live = document.createElement("span");
+      live.className = "hist-live";
+      live.textContent = "● open";
+      row.append(name, live);
+      row.addEventListener("click", () => {
+        closeHistory();
+        setActive(tabId);
+      });
+      list.appendChild(row);
+      // Straight to the line: the tab is live, so it can be scrolled to
+      // rather than searched again.
+      list.appendChild(
+        renderHits(
+          found,
+          needle,
+          (h) => {
+            closeHistory();
+            setActive(tabId);
+            tab.term.scrollToLine(h.line);
+          },
+          "and more — switch to it and use Ctrl+Shift+F"
+        )
+      );
+    }
+    if (anyOpen) {
+      const endedHead = document.createElement("div");
+      endedHead.className = "hist-section";
+      endedHead.textContent = "Ended";
+      list.appendChild(endedHead);
+    }
+  }
   const shown: HistoryEntry[] = [];
   // Where in each transcript the search landed. A match used to return
   // a session and nothing more, and the session was a wall of output
@@ -6177,45 +6293,15 @@ async function buildHistoryPage(filter?: string) {
     // lands on it rather than at the top of ten thousand lines.
     const found = hits.get(en.stem);
     if (found && needle) {
-      const block = document.createElement("div");
-      block.className = "hist-hits";
-      for (const h of found) {
-        const line = document.createElement("div");
-        line.className = "hist-hit";
-        const no = document.createElement("span");
-        no.className = "hist-hit-line";
-        no.textContent = String(h.line + 1);
-        const txt = document.createElement("span");
-        txt.className = "hist-hit-text";
-        const shownText = excerpt(h, needle.length);
-        // Highlight the match inside the excerpt, without trusting any
-        // of it as HTML: the transcript is whatever a program printed.
-        const idx = shownText.toLowerCase().indexOf(needle);
-        if (idx >= 0) {
-          txt.append(
-            shownText.slice(0, idx),
-            Object.assign(document.createElement("mark"), { textContent: shownText.slice(idx, idx + needle.length) }),
-            shownText.slice(idx + needle.length)
-          );
-        } else {
-          txt.textContent = shownText;
-        }
-        line.append(no, txt);
-        line.addEventListener("click", (e) => {
-          e.stopPropagation();
-          void openTranscript(en, needle);
-        });
-        block.appendChild(line);
-      }
-      if (found.length >= MAX_HITS_PER_SESSION) {
-        const more = document.createElement("div");
-        more.className = "hist-hit hist-hit-more";
-        more.textContent = "and more — open it and use find";
-        block.appendChild(more);
-      }
-      list.appendChild(block);
+      list.appendChild(
+        renderHits(found, needle, () => void openTranscript(en, needle), "and more — open it and use find")
+      );
     }
   }
+  // What the search found, for the scene that drives it and for anybody
+  // asking why a search came back empty. Counts only - the query is
+  // whatever somebody typed and does not belong in a log.
+  if (needle) logUi("history.search", { open: openHits, ended: hits.size });
 }
 
 let viewerTerm: Terminal | null = null;
@@ -10658,6 +10744,23 @@ async function main() {
     openSettings("Remote control");
   });
   watchRemote();
+  // Where the bar's buttons are, in client coordinates, for the visual
+  // suite - which clicks what the window says is there rather than a
+  // coordinate somebody memorised, since the day one memorised
+  // coordinate opened an elevated window instead of a menu. Logged once
+  // the layout has settled; a button measured before then is at 0,0.
+  window.setTimeout(() => {
+    const at = (id: string) => {
+      const b = document.getElementById(id)?.getBoundingClientRect();
+      return b ? { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) } : null;
+    };
+    logUi("bar.buttons", {
+      history: at("historybtn"),
+      settings: at("settingsbtn"),
+      newtab: at("newtab"),
+      restore: at("restore"),
+    });
+  }, 1500);
   // Custom window controls (native title bar is off). Close detaches —
   // the daemon keeps every session running, same as before.
   const win = getCurrentWindow();

@@ -35,7 +35,15 @@ export function findHits(text: string, needle: string): HistoryHit[] {
   const n = needle.trim().toLowerCase();
   if (!n) return [];
   const out: HistoryHit[] = [];
-  const lines = text.split(/\r\n|\r|\n/);
+  // A bare carriage return is a repaint of the line so far, not a line.
+  // PSReadLine redraws the command as it is typed, and reading each frame
+  // as its own line turned "echo NEEDLE" into "…Oecho NEEDLE-IN-OPecho
+  // NEEDLE-IN-OPEecho…" in the results. Keep what was on the line after
+  // the last repaint, which is what the screen showed.
+  const lines = text.split(/\r\n|\n/).map((l) => {
+    const cr = l.lastIndexOf("\r");
+    return cr < 0 ? l : l.slice(cr + 1);
+  });
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].replace(/\s+$/, "");
     const at = line.toLowerCase().indexOf(n);

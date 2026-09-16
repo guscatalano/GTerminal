@@ -35,6 +35,14 @@ check("and so does the needle's own whitespace", findHits(transcript, "  cargo  
 check("nothing for nothing", findHits(transcript, "   "), []);
 check("nothing for a word that is not there", findHits(transcript, "zebra"), []);
 check("CRLF and LF split the same", findHits("a\r\nb\nc", "c")[0].line, 2);
+// A bare CR is a repaint, not a line. PSReadLine redraws the command as
+// it is typed, and reading each frame as a line turned one command into
+// a smear of half-typed copies in the results.
+check(
+  "a repainted line is read as its last frame",
+  findHits("PS> e\rPS> ec\rPS> echo NEEDLE\nNEEDLE", "needle").map((h) => [h.line, h.text]),
+  [[0, "PS> echo NEEDLE"], [1, "NEEDLE"]]
+);
 
 // A session mentioning the word four hundred times is one result with
 // noise in it, not four hundred results.

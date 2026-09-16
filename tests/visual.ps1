@@ -113,7 +113,7 @@ if (-not $Yes) {
 # launches and thousands of synthetic keystrokes in a single session, a
 # fresh process does not inherit it. Isolation is cheaper than the next
 # five theories, and scenes are independent by nature anyway.
-$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "tui-dom", "tui-fast", "reboot", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "selectright", "selectmax", "pasteboth", "tabkeys", "maxtop", "tray", "tuicopy", "notify", "copyselect")
+$scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "tui-dom", "tui-fast", "reboot", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "selectright", "selectmax", "pasteboth", "tabkeys", "maxtop", "tray", "tuicopy", "notify", "copyselect", "opensearch")
 if (-not $Only) {
   $bad = 0
   foreach ($s in $scenes) {
@@ -2099,6 +2099,51 @@ if (-not $Only -or $Only -eq "copyselect") {
   elseif ($onResult -match "nothing-copied-yet") { Fail "copyselect" "the drag selected but the clipboard never changed" }
   else { Fail "copyselect" "something else was copied: '$(($onResult -replace "`r|`n", " ").Trim())'" }
   Stop-App $ctxB
+}
+
+# ══ scene: searching the tabs that are open ═══════════════════════════
+# History search found transcripts of ended sessions. The tab you are
+# in right now - the one with the error from ten minutes ago - was not
+# searchable except by Ctrl+F inside it. Now it is listed first, and
+# clicking a hit switches to that tab and scrolls to the line.
+#
+# Read from the window's log rather than the screen: the page logs the
+# rows it built, and "did a hit row for the open tab appear" is a fact
+# in a file, not a picture.
+if (-not $Only -or $Only -eq "opensearch") {
+  $ctx31 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"ui_log`":`"full`"}"
+  $h31 = $ctx31.Hwnd
+  Record-Scene "opensearch" 30 $ctx31 {
+    Run-Cmd 'echo NEEDLE-IN-OPEN-TAB-4242' 3
+    # Push it up the scrollback so the scroll-to-line has somewhere to go.
+    Run-Cmd '1..40 | ForEach-Object { "filler line $_" }' 3
+    # The history button, where the window says it is. (Ctrl+Shift+H is
+    # "hide tab", which the first draft of this pressed.)
+    $bar = @(Ui-Events "bar.buttons")
+    if ($bar.Count -and $bar[-1].history) {
+      Write-Host ("  history button reported at client {0},{1}" -f $bar[-1].history.x, $bar[-1].history.y) -ForegroundColor DarkGray
+      Click-Client ($h31) ([int]$bar[-1].history.x) ([int]$bar[-1].history.y)
+    } else {
+      Write-Host "  note: the window never logged its bar buttons ($($bar.Count) events)" -ForegroundColor DarkYellow
+    }
+    Start-Sleep -Seconds 2
+    $script:pageOpen = (Ui-Events "history.open").Count
+    Send-Text 'NEEDLE-IN-OPEN'
+    Key $VK_RETURN
+    Start-Sleep -Seconds 3
+    $script:searchShot = Capture-Window $h31
+  }
+  $dump = Join-Path $outDir "opensearch-frames"
+  New-Item -ItemType Directory -Force $dump | Out-Null
+  $searchShot.Save((Join-Path $dump "results.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+  Write-Host "  results saved to $dump" -ForegroundColor DarkGray
+  # The page's own account of the search, which is the assertion.
+  $ui = @(Ui-Events "history.search")
+  if ($ui.Count -and $ui[-1].open -ge 1) { Pass "a search lists the open tab that holds the text ($($ui[-1].open) open, $($ui[-1].ended) ended)" }
+  elseif ($ui.Count) { Fail "opensearch" "the search ran but found no open tab with the text: open=$($ui[-1].open) ended=$($ui[-1].ended)" }
+  else { Fail "opensearch" "the search never logged - the history page may not have opened, or the query never ran" }
+  $searchShot.Dispose()
+  Stop-App $ctx31
 }
 
 # ══ scene: a second window ═════════════════════════════════════════════

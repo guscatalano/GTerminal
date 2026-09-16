@@ -208,7 +208,20 @@ left out because the reading side is the same bytes cmd sends and is
 proven, and the launch is one env var and one file; if it fails on a
 real distro the failure will be in those twelve lines.
 
-### 13. Search every open tab
+### 13. Search every open tab — *done*
+
+The history page's search now lists the tabs that are open first,
+under their own heading, with the same numbered hits the ended sessions
+get. Clicking a hit switches to the tab and scrolls to the line - the
+tab is live, so it can be scrolled to rather than searched again.
+
+Two things it found on the way. Opening the history page left focus
+in the terminal, so the first thing typed on a page that is about
+searching went into the shell; it focuses its search box now, as
+settings does. And the transcript search read every PSReadLine repaint
+as its own line, turning one command into a smear of half-typed copies
+in the results; a bare carriage return is now read as "the line so far
+is replaced", which is what the screen showed.
 
 ### 16. Does a session survive the app crashing, not just rebooting
 
