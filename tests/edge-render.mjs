@@ -108,11 +108,32 @@ function activePort(timeoutMs) {
   });
 }
 
+// The page target (its websocket is what CDP commands ride) can lag the
+// debugging port's arrival; poll /json/list until it is there.
+async function pageTarget(port, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let last = "empty list";
+  while (Date.now() < deadline) {
+    try {
+      const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+      const page = list.find((t) => t.type === "page" && t.webSocketDebuggerUrl);
+      if (page) return page;
+      last = `${list.length} target(s), none a page with a socket`;
+    } catch (e) {
+      last = e.message;
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error("Edge exposed no page target (" + last + ")");
+}
+
 async function main() {
   const port = await activePort(20000);
-  const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-  const page = list.find((t) => t.type === "page") || list[0];
-  if (!page || !page.webSocketDebuggerUrl) throw new Error("Edge exposed no page target");
+  // The debugging port is up before the initial page target is registered,
+  // and by how much varies with the build - Chrome 153/154 on a GPU-less
+  // runner lost this race where 155 won it, then threw "no page target" on
+  // an empty list. Poll until the page target with its websocket is there.
+  const page = await pageTarget(port, 15000);
 
   ws = new WebSocket(page.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => {
