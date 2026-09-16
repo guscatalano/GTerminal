@@ -1,0 +1,233 @@
+<!doctype html>
+<!--
+  After an erase, does the renderer actually paint the cleared cells?
+
+  Driven by tests/erase-paint.mjs. This is the one gap redraw.mjs cannot
+  reach. redraw.mjs reads term.buffer - what xterm *thinks* is on screen -
+  and every erase case there passes as long as the buffer is right. But
+  "output does not get cleared as expected" is a report about pixels, and
+  a renderer can hold the correct buffer and still leave stale glyphs lit:
+  a frame that was never scheduled, a GPU quirk, a dirty-region it did not
+  repaint. That is the shape of a bug that reproduces on one machine only,
+  because it lives in the renderer and the driver, not in the buffer.
+
+  So this fills the screen with glyphs, reads the renderer's own output
+  back, erases part of it, and reads again - the erased region must go to
+  background and the untouched region must not. Under BOTH renderers,
+  because the app can be on either and they are different code with the
+  same job: WebGL reads back as canvas pixels, the DOM renderer as the
+  text of the rows it built.
+
+  The partial erase is the honest part. If it only cleared the whole
+  screen and checked "is it blank", a renderer that drew nothing at all
+  would pass. Clearing the bottom half and requiring the top half to
+  survive is what proves the probe can tell a cleared region from an
+  uncleared one - and therefore that a pass means the clear was painted,
+  not that the frame was empty.
+-->
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css" />
+<style>
+  body {
+    margin: 0;
+    background: #101014;
+  }
+  #term {
+    width: 640px;
+    height: 200px;
+  }
+  #out {
+    font: 12px monospace;
+    white-space: pre-wrap;
+    color: #000;
+    background: #fff;
+  }
+</style>
+<div id="term"></div>
+<pre id="out">PENDING</pre>
+<script type="module">
+  import { Terminal } from "../../node_modules/@xterm/xterm/lib/xterm.mjs";
+  import { WebglAddon } from "../../node_modules/@xterm/addon-webgl/lib/addon-webgl.mjs";
+
+  const ESC = "\x1b";
+  const COLS = 40;
+  const ROWS = 8;
+  const PATIENCE_MS = 4000;
+
+  const useWebgl = new URLSearchParams(location.search).get("renderer") !== "dom";
+  const out = document.getElementById("out");
+  const host = document.getElementById("term");
+
+  // An import or a setup error throws outside the async body below, where
+  // the try/catch cannot see it, and leaves the page reading PENDING - a
+  // silent failure that looks like a renderer that drew nothing. Surface
+  // it as a reported error instead.
+  window.addEventListener("error", (e) => {
+    out.textContent = "RESULTS-ERROR " + (e.message || e.error || "unknown");
+  });
+
+  // A full screen the way a program draws one: every row filled edge to
+  // edge with a bright glyph on a dark ground, so a lit cell and a cleared
+  // cell are unmistakable both as pixels and as text.
+  function fill(ch) {
+    let s = `${ESC}[H`;
+    for (let r = 1; r <= ROWS; r++) s += `${ESC}[${r};1H${ch.repeat(COLS)}`;
+    return s;
+  }
+
+  // What the renderer has actually produced, split into the top half and
+  // the bottom half of the viewport. For WebGL that is a count of bright
+  // pixels per half of the canvas; for the DOM renderer it is a count of
+  // glyph characters in the top rows versus the bottom rows. Either way
+  // the unit is "how much is lit here", and the erase has to drive one
+  // half of it to nothing while leaving the other alone.
+  function painted() {
+    if (useWebgl) {
+      const canvases = [...host.querySelectorAll("canvas")];
+      if (!canvases.length) return { kind: "none", top: 0, bottom: 0 };
+      const { width, height } = canvases[0];
+      const snap = document.createElement("canvas");
+      snap.width = width;
+      snap.height = height;
+      const ctx = snap.getContext("2d");
+      for (const c of canvases) ctx.drawImage(c, 0, 0);
+      const d = ctx.getImageData(0, 0, width, height).data;
+      const mid = Math.floor(height / 2);
+      let top = 0;
+      let bottom = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        // A bright, solid pixel is a glyph pixel. The dark ground and a
+        // cleared cell both read as not-bright, which is exactly the
+        // distinction the erase is supposed to create.
+        if (d[i + 3] > 200 && d[i] > 150 && d[i + 1] > 150 && d[i + 2] > 150) {
+          const y = Math.floor(i / 4 / width);
+          if (y < mid) top++;
+          else bottom++;
+        }
+      }
+      return { kind: "pixels", top, bottom };
+    }
+    const rowEls = [...host.querySelectorAll(".xterm-rows > div")];
+    const glyphs = (el) => ((el?.textContent ?? "").match(/#/g) ?? []).length;
+    let top = 0;
+    let bottom = 0;
+    for (let r = 0; r < rowEls.length; r++) {
+      if (r < ROWS / 2) top += glyphs(rowEls[r]);
+      else bottom += glyphs(rowEls[r]);
+    }
+    return { kind: "text", top, bottom };
+  }
+
+  // Poll until the screen satisfies a predicate, or give up. The whole
+  // instrument is a poll, not a sample on a clock: headless Chromium runs
+  // on virtual time where requestAnimationFrame has no real cadence, so
+  // the only honest question is the outcome, asked until it settles.
+  async function waitUntil(predicate) {
+    const started = Date.now();
+    for (;;) {
+      const p = painted();
+      if (predicate(p)) return p;
+      if (Date.now() - started > PATIENCE_MS) return p;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  }
+
+  (async () => {
+    try {
+      const term = new Terminal({
+        cols: COLS,
+        rows: ROWS,
+        // The options main.ts builds a terminal with that can change what
+        // reaches the renderer, plus an opaque dark theme so a cleared
+        // cell is dark rather than transparent - the point here is the
+        // glyphs going away, and a solid ground makes that unambiguous.
+        allowProposedApi: true,
+        allowTransparency: true,
+        minimumContrastRatio: 4.5,
+        theme: { background: "#101020", foreground: "#ffffff" },
+      });
+      term.open(host);
+      if (useWebgl) {
+        // preserveDrawingBuffer only so the frame can be read back; it
+        // changes nothing about whether or how a frame is drawn.
+        term.loadAddon(new WebglAddon(true));
+      }
+
+      // Fill, and wait for the glyphs to actually appear. This doubles as
+      // the control the assertions lean on: if the renderer never brought
+      // a frame up (an empty WebGL context - the failure webgl.mjs retries
+      // around), both halves read zero here and the suite throws the run
+      // away rather than reading a cleared region into it.
+      await new Promise((resolve) => term.write(fill("#"), resolve));
+      const before = await waitUntil((p) => p.top > 0 && p.bottom > 0);
+
+      // Erase from row 5 downward: the bottom half must go to background,
+      // the top half must be left exactly as it was. A renderer that holds
+      // stale pixels in the cleared band keeps `partial.bottom` lit; one
+      // that over-clears drops `partial.top`. Both are the reported bug,
+      // and this is the case that can see either.
+      await new Promise((resolve) => term.write(`${ESC}[5;1H${ESC}[0J`, resolve));
+      const partial = await waitUntil((p) => p.bottom <= before.bottom / 8);
+
+      // And the whole screen: refill, then ESC[2J, and nothing may remain
+      // lit anywhere.
+      await new Promise((resolve) => term.write(fill("#"), resolve));
+      await waitUntil((p) => p.top > 0 && p.bottom > 0);
+      await new Promise((resolve) => term.write(`${ESC}[2J`, resolve));
+      const full = await waitUntil((p) => p.top + p.bottom <= (before.top + before.bottom) / 8);
+
+      // A partial-LINE erase, ESC[K (EL), on each of the bottom four rows.
+      // EL is a different renderer path from the ED erase above and the
+      // more common one - a status line rewriting itself, a prompt redraw -
+      // and the reported "it doesn't clear until I resize the window" is a
+      // renderer that computed the cleared cells but never marked those rows
+      // dirty, so the pixels stay until a resize forces a full repaint. This
+      // reads the pixels after the EL, with no resize, so a row left un-
+      // repainted stays lit and is caught here.
+      await new Promise((resolve) => term.write(fill("#"), resolve));
+      await waitUntil((p) => p.top > 0 && p.bottom > 0);
+      await new Promise((resolve) =>
+        term.write(`${ESC}[5;1H${ESC}[K${ESC}[6;1H${ESC}[K${ESC}[7;1H${ESC}[K${ESC}[8;1H${ESC}[K`, resolve)
+      );
+      const el = await waitUntil((p) => p.bottom <= before.bottom / 8);
+
+      // The alternate screen entered and left. This is the TUI case in the
+      // report literally: a full-screen program takes the alt screen, draws
+      // it edge to edge, and on ESC[?1049l the renderer must repaint the
+      // main screen it switched back to. If it does not, the program's last
+      // frame stays lit as a ghost - the thing that "fixes itself on resize".
+      // The main screen is blanked first so that, after the switch back,
+      // anything still lit is the alt screen's pixels that were never
+      // cleared. altOn is the control: the alt screen has to have actually
+      // been drawn, or altOff going dark would prove nothing.
+      await new Promise((resolve) => term.write(`${ESC}[2J`, resolve));
+      await waitUntil((p) => p.top + p.bottom <= (before.top + before.bottom) / 8);
+      await new Promise((resolve) => term.write(`${ESC}[?1049h${fill("#")}`, resolve));
+      const altOn = await waitUntil((p) => p.top > 0 && p.bottom > 0);
+      await new Promise((resolve) => term.write(`${ESC}[?1049l`, resolve));
+      const altOff = await waitUntil((p) => p.top + p.bottom <= (before.top + before.bottom) / 8);
+
+      out.textContent =
+        "RESULTS " +
+        JSON.stringify({
+          renderer: useWebgl ? "webgl" : "dom",
+          kind: before.kind,
+          beforeTop: before.top,
+          beforeBottom: before.bottom,
+          partialTop: partial.top,
+          partialBottom: partial.bottom,
+          fullTop: full.top,
+          fullBottom: full.bottom,
+          elTop: el.top,
+          elBottom: el.bottom,
+          altOnTop: altOn.top,
+          altOnBottom: altOn.bottom,
+          altOffTop: altOff.top,
+          altOffBottom: altOff.bottom,
+        });
+      term.dispose();
+    } catch (e) {
+      out.textContent = "RESULTS-ERROR " + String(e);
+    }
+  })();
+</script>

@@ -104,6 +104,23 @@ const EXPECTED = {
   "synchronised output still draws": ["FRAME-A", "ROW-TWO"],
   "wide characters advance two cells": ["日本 X"],
   "attributes reset": ["RED PLAIN"],
+  // ESC[1J clears from the top through the cursor: row one gone, row two
+  // gone up to the parked cursor, and row three left standing.
+  "erase above the cursor": ["", "", "CCC"],
+  // After ESC[?1049l only the main screen is left, and it holds what it
+  // held before - none of the program's GARBAGE survives the restore.
+  "the main screen returns after the alternate screen is left": ["MAIN"],
+  // The band (rows three to five) scrolled to its last three lines while
+  // the header on row one and the footer on row eight never moved.
+  "a scroll region keeps a footer below it": ["HEAD", "", "CC", "DD", "EE", "", "", "FOOT"],
+  // rowsOf reads from the top of the buffer, scrollback included, so these
+  // two show the difference 3J makes directly: with the scrollback intact
+  // the oldest lines are still held above the viewport (line0..line7), and
+  // after 3J they are gone and only the eight on screen remain. The
+  // buffer-length check below is what pins that, since the viewport itself
+  // reads line12..line19 either way.
+  "lines fill the scrollback": ["line0", "line1", "line2", "line3", "line4", "line5", "line6", "line7"],
+  "erase scrollback with 3J": ["line12", "line13", "line14", "line15", "line16", "line17", "line18", "line19"],
 };
 
 for (const [name, want] of Object.entries(EXPECTED)) {
@@ -130,6 +147,29 @@ if (wrap) {
     "a full-width write leaves the cursor on the next row only after one more character",
     wrap.cursorY === 1,
     `cursor ended on row ${wrap.cursorY}`
+  );
+}
+
+// ESC[3J erases the scrollback. The visible rows are identical with it and
+// without it, so the assertion is on the buffer: how many lines the
+// terminal is still holding, and how far the viewport sits below the top of
+// them. The "lines fill" case is the control - it proves twenty lines really
+// did push twelve into the scrollback, so that "length 8, baseY 0" after 3J
+// means the scrollback was emptied rather than never having been there. A
+// terminal that ignored 3J leaves both at their filled values, and the old
+// screens stay scrollable above what looked like a clear.
+const fill = results.get("lines fill the scrollback");
+const cleared = results.get("erase scrollback with 3J");
+if (fill && cleared) {
+  check(
+    "twenty lines built a scrollback to clear",
+    fill.length > 8 && fill.baseY > 0,
+    `filled buffer holds only ${fill.length} lines at baseY ${fill.baseY} - nothing scrolled off, so the 3J case proves nothing`
+  );
+  check(
+    "ESC[3J empties the scrollback",
+    cleared.length === 8 && cleared.baseY === 0,
+    `after 3J the buffer still holds ${cleared.length} lines at baseY ${cleared.baseY}, so the earlier screens are still scrollable above the clear`
   );
 }
 

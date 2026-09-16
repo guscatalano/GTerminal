@@ -97,6 +97,45 @@
 
     // Attributes must not leak out of the region they were set for.
     { name: "attributes reset", data: `${ESC}[31mRED${ESC}[0m PLAIN` },
+
+    // Erase-in-display, the other direction. ESC[J (0J) above clears
+    // from the cursor down; ESC[1J clears from the top of the screen
+    // down through the cursor and must leave everything below it alone.
+    // The two together pin both halves of ED - a terminal that cleared
+    // the wrong side, or the whole screen for either, is the not-cleared
+    // report in miniature. The cursor is parked past the B's so the whole
+    // of row two goes and row three must survive.
+    { name: "erase above the cursor", data: `AAA\r\nBBB\r\nCCC${ESC}[2;4H${ESC}[1J` },
+
+    // The alternate screen handed back. A full-screen program draws on it
+    // and, on the way out, ESC[?1049l must restore the main screen exactly
+    // as it was - not the program's last frame. "Ghosts of the TUI after
+    // it exits" is precisely this restore going wrong, and the ring filter
+    // in mux.rs and MODE_RESET both lean on it working.
+    { name: "the main screen returns after the alternate screen is left", data: `MAIN${ESC}[?1049hGARBAGE${ESC}[2;1HMORE-GARBAGE${ESC}[?1049l` },
+
+    // A scrolling region with content above AND below it. DECSTBM sets a
+    // top and a bottom margin; scrolling inside the band must move only the
+    // band and leave both the header and the footer where they are. The
+    // header case above only pins the top margin - a terminal that ignored
+    // the bottom margin would let the band scroll the footer away and still
+    // pass it. Five lines into a three-row band leaves the last three; the
+    // header on row one and the footer on row eight must not move.
+    {
+      name: "a scroll region keeps a footer below it",
+      data: `${ESC}[HHEAD${ESC}[8;1HFOOT${ESC}[3;5r${ESC}[3;1HAA\r\nBB\r\nCC\r\nDD\r\nEE${ESC}[r`,
+    },
+
+    // ESC[3J erases the scrollback, not the visible screen. It is what
+    // clear(1) sends after ESC[2J so that scrolling up afterwards shows
+    // nothing - and a terminal that drops it leaves the old screens
+    // reachable above, which reads exactly as "the clear did not take".
+    // Twenty lines into an eight-row screen builds a scrollback; the first
+    // case is the control that proves it exists, the second that 3J empties
+    // it. The assertions are on buffer.length/baseY, in the test, since the
+    // visible rows are identical either way.
+    { name: "lines fill the scrollback", data: Array.from({ length: 20 }, (_, i) => `line${i}`).join("\r\n") },
+    { name: "erase scrollback with 3J", data: Array.from({ length: 20 }, (_, i) => `line${i}`).join("\r\n") + `${ESC}[3J` },
   ];
 
   const out = document.getElementById("out");
@@ -131,7 +170,7 @@
         host.appendChild(div);
         term.open(div);
         await new Promise((resolve) => term.write(c.data, resolve));
-        results.push({ name: c.name, rows: rowsOf(term), cursorX: term.buffer.active.cursorX, cursorY: term.buffer.active.cursorY });
+        results.push({ name: c.name, rows: rowsOf(term), cursorX: term.buffer.active.cursorX, cursorY: term.buffer.active.cursorY, length: term.buffer.active.length, baseY: term.buffer.active.baseY });
         term.dispose();
         div.remove();
       }
