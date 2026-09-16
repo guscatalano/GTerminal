@@ -30,11 +30,11 @@
 import { execFileSync } from "child_process";
 import { existsSync } from "fs";
 import { fileURLToPath, pathToFileURL } from "url";
-import { dirname, join, basename } from "path";
-import { tmpdir } from "os";
+import { dirname, join } from "path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "erase-paint-probe.html");
+const renderScript = join(here, "edge-render.mjs");
 
 const EDGES = [
   "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
@@ -60,21 +60,8 @@ function check(name, ok, detail = "") {
 function probe(renderer) {
   const url = `${pathToFileURL(fixture).href}?renderer=${renderer}`;
   const dom = execFileSync(
-    edge,
-    [
-      "--headless=new",
-      "--no-sandbox",
-      // Its own profile directory. Several suites here drive headless Edge,
-      // and without this they share one - where a second instance can
-      // attach to the first, or find it locked, and exit having rendered
-      // nothing. webgl.mjs passes alone and failed in the batch exactly
-      // once, which is the shape that has cost this project four days.
-      `--user-data-dir=${join(tmpdir(), "gterm-headless-" + basename(fixture) + "-" + process.pid + "-" + (launches++))}`,
-      "--allow-file-access-from-files",
-      "--virtual-time-budget=90000",
-      "--dump-dom",
-      url,
-    ],
+    process.execPath,
+    [renderScript, edge, url, "90000"],
     { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 180_000 }
   );
   // The output element specifically. The script that fills it lives in the

@@ -21,11 +21,11 @@
 import { execFileSync } from "child_process";
 import { existsSync } from "fs";
 import { fileURLToPath, pathToFileURL } from "url";
-import { dirname, join, basename } from "path";
-import { tmpdir } from "os";
+import { dirname, join } from "path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "mouse-probe.html");
+const renderScript = join(here, "edge-render.mjs");
 
 const EDGES = [
   "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
@@ -44,19 +44,8 @@ function check(name, ok, detail = "") {
 }
 
 const dom = execFileSync(
-  edge,
-  [
-    "--headless=new",
-    "--no-sandbox",
-    // Its own profile directory, per launch. Four suites here drive
-    // headless Edge and a shared profile lets a second instance attach
-    // to the first, or find it locked, and exit having rendered nothing.
-    `--user-data-dir=${join(tmpdir(), "gterm-headless-" + basename(fixture) + "-" + process.pid)}`,
-    "--allow-file-access-from-files",
-    "--virtual-time-budget=20000",
-    "--dump-dom",
-    pathToFileURL(fixture).href,
-  ],
+  process.execPath,
+  [renderScript, edge, pathToFileURL(fixture).href, "20000"],
   { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 180_000 }
 );
 
