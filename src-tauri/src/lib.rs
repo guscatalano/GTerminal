@@ -265,7 +265,7 @@ fn wsl_list_has_distro(status_ok: bool, stdout: &[u8]) -> bool {
 }
 
 #[cfg(windows)]
-#[tauri::command]
+#[tauri::command(async)]
 fn wsl_available() -> bool {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -280,7 +280,7 @@ fn wsl_available() -> bool {
 }
 
 #[cfg(not(windows))]
-#[tauri::command]
+#[tauri::command(async)]
 fn wsl_available() -> bool {
     false
 }

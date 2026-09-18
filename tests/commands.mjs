@@ -54,6 +54,9 @@ const OFF_UI_THREAD = new Set([
   "open_elevated_window",
   // Reads and deletes a file at startup.
   "take_handoff",
+  // Spawns wsl.exe --list to see whether a distro is installed - a process
+  // start, so off the UI thread.
+  "wsl_available",
   "open_folder",
   // Spawns an editor, which is a process start and everything that
   // comes with it - and is reached from a click, so the UI thread is
