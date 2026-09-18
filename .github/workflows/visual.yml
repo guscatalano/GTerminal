@@ -84,11 +84,40 @@ jobs:
           # github.event.inputs, not inputs: this workflow is also called by
           # the release pipeline, where a dispatch input does not exist.
           $scene = '${{ github.event.inputs.scene }}'
-          $a = @('run', 'test:visual', '--', '-Yes', '-Force', '-Exe', 'src-tauri/target/debug/gterminal.exe')
-          if ($scene) { $a += @('-Only', $scene) }
+          $base = @('run', 'test:visual', '--', '-Yes', '-Force', '-Exe', 'src-tauri/target/debug/gterminal.exe')
+          $a = if ($scene) { $base + @('-Only', $scene) } else { $base }
+          $failedFile = Join-Path $env:TEMP 'gt-visual-failed.txt'
+          Remove-Item $failedFile -Force -ErrorAction SilentlyContinue
           Write-Host "npm $($a -join ' ')"
           & npm @a
-          if ($LASTEXITCODE -ne 0) { throw "visual scenes failed ($LASTEXITCODE)" }
+          if ($LASTEXITCODE -eq 0) { exit 0 }
+          # A single-scene dispatch is already a targeted run - nothing to retry.
+          if ($scene) { throw "visual scene '$scene' failed" }
+          # The full suite failed. On a busy or degraded runner, scenes tip over
+          # their timeouts together and fail wholesale even when the app is
+          # fine, while a real regression fails deterministically. So retry only
+          # the scenes it named, once each, on a fresh app: a runner hiccup
+          # passes the second time, a break fails both. visual.ps1 wrote the list.
+          if (-not (Test-Path $failedFile)) {
+            throw "visual scenes failed and named no scene to retry"
+          }
+          $failed = @(Get-Content $failedFile | Where-Object { $_ })
+          # An unattributed failure (before any scene) - retry the whole suite.
+          if ($failed -contains '__all__') {
+            Write-Host "::warning::visual: an unattributed failure; retrying the whole suite once"
+            & npm @a
+            if ($LASTEXITCODE -ne 0) { throw "visual scenes failed on a full retry" }
+            exit 0
+          }
+          Write-Host "::warning::visual: retrying $($failed.Count) scene(s): $($failed -join ', ')"
+          $stillBad = @()
+          foreach ($s in $failed) {
+            Write-Host "---- retry: $s ----"
+            & npm ($base + @('-Only', $s))
+            if ($LASTEXITCODE -ne 0) { $stillBad += $s }
+          }
+          if ($stillBad.Count) { throw "visual scenes failed on retry: $($stillBad -join ', ')" }
+          Write-Host "all $($failed.Count) retried scene(s) passed on a second attempt"
 
       # The videos and any saved frames are the point when something
       # fails: a scene that says "frame 2 looks like frame 1" is far

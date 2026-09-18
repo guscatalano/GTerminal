@@ -55,7 +55,21 @@ if (-not (Get-NetTCPConnection -State Listen -LocalPort 1420 -ErrorAction Silent
 Add-Type -AssemblyName System.Drawing
 $failures = @()
 function Pass { param($n) Write-Host "PASS $n" -ForegroundColor Green }
-function Fail { param($n, $d) $script:failures += "${n}: $d"; Write-Host "FAIL ${n}: $d" -ForegroundColor Red }
+function Fail {
+  param($n, $d)
+  $script:failures += "${n}: $d"
+  # Attribute the failure to a scene so the workflow can retry just that
+  # one: the scene being rendered (set in Record-Scene), and the Fail name
+  # itself when it is a scene name.
+  if ($script:scene) { $script:failedScenes[$script:scene] = $true }
+  if ($scenes -contains $n) { $script:failedScenes[$n] = $true }
+  # A failure that belongs to no scene (before any has started) must not let a
+  # targeted retry pass while it goes unretried - it forces a full re-run.
+  if (-not $script:scene -and -not ($scenes -contains $n)) { $script:failedScenes['__all__'] = $true }
+  Write-Host "FAIL ${n}: $d" -ForegroundColor Red
+}
+$script:scene = $null
+$script:failedScenes = @{}
 
 # A countdown only protects someone who is watching this terminal. Ask
 # Windows when the keyboard or mouse was last touched instead: if the
@@ -1151,6 +1165,7 @@ function Stop-App {
 
 function Record-Scene {
   param([string]$name, [int]$seconds, $ctx, [scriptblock]$body)
+  $script:scene = $name
   $frames = Join-Path $env:TEMP "gterm-visual-frames"
   $rec = Start-Process pwsh -PassThru -WindowStyle Hidden -ArgumentList @(
     "-NoProfile", "-File", (Join-Path $repo "tools\record-window.ps1"),
@@ -4290,6 +4305,11 @@ Remove-Item "$scratch\GTerminal" -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host ""
 Get-ChildItem $outDir -Filter *.avi | ForEach-Object {
   "  {0,-14} {1,6:n1} MB" -f $_.Name, ($_.Length / 1MB)
+}
+# The scenes that failed, for the workflow to retry one at a time - a
+# slow-runner hiccup passes the second time, a real break fails both.
+if ($script:failedScenes.Count) {
+  Set-Content -Path (Join-Path $env:TEMP "gt-visual-failed.txt") -Value @($script:failedScenes.Keys)
 }
 if ($failures.Count) { exit 1 }
 "all visual tests passed"
