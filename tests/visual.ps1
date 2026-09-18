@@ -1563,8 +1563,28 @@ if (-not $Only -or $Only -eq "restore-again") {
   $tookCount = @(Daemon-Sessions | Where-Object { $seed.Ids -contains $_.id -and $_.attached }).Count
   if ($tookAll) { Pass "first run restores all five" }
   else { Fail "restore-again" "first run attached $tookCount of 5 within 60s" }
+  # Stand the daemon down cleanly instead of leaving it to Stop-Apps hard
+  # kill. A hard kill leaves persistence to the flush threads last pass
+  # (every few seconds), and on a busy runner a just-restored session can
+  # miss that window - so the second run finds nothing to restore and the
+  # clicks below land in the terminal (the "0 restorable" flake). The
+  # shutdown verb is "checkpoint everything and exit" (mux.rs Request), the
+  # same one lifecycle.ps1 checks writes a checkpoint, so every restored
+  # session is on disk before the process goes.
+  try {
+    $sd = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $seed.Port)
+    $sw = [System.IO.StreamWriter]::new($sd.GetStream()); $sw.NewLine = "`n"; $sw.AutoFlush = $true
+    Greet $sw (Join-Path $scratch "GTerminal")
+    $srd = [System.IO.StreamReader]::new($sd.GetStream())
+    $sw.WriteLine('{"cmd":"shutdown"}')
+    $null = $srd.ReadLine()
+    $sd.Close()
+  } catch {}
+  # Wait for it to actually be gone before the second run starts a new one.
+  $stood = Wait-Until { $seed.Daemon.HasExited } 15 "the daemon to stand down and exit"
+  if (-not $stood) { Write-Host "  note: daemon did not exit on shutdown; Stop-App will force it" -ForegroundColor DarkYellow }
   Stop-App $first
-  Start-Sleep -Seconds 3
+  Start-Sleep -Seconds 2
 
   # Second run against the same profile — saved order and layouts intact.
   $ctx5 = Start-AppSeeded $seed
