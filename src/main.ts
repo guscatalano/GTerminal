@@ -47,6 +47,7 @@ import type { SessionState } from "./restore";
 import { SHORTCUTS } from "./shortcuts";
 import { daemonAction, shellsAtRisk, daemonNotice } from "./daemon";
 import { chromiumMajor, shouldWarnOldWebview, MIN_WEBVIEW } from "./webview";
+import { logicalLine } from "./copyline";
 import type { DaemonInfo } from "./daemon";
 import { activates } from "./menus";
 import { visibilityReport } from "./controls";
@@ -3756,6 +3757,20 @@ function lineAtPointer(tab: Tab, clientY: number): number | undefined {
   return tab.term.buffer.active.viewportY + row;
 }
 
+/// The whole logical line a pointer is over, wrapped rows joined into
+/// one. A line long enough to wrap is still one line to whoever is
+/// reading it, so "copy this line" copies that, not the visual row a
+/// click happened to land on. Empty when the pointer is off any row.
+function logicalLineAt(tab: Tab, clientY: number): string {
+  const row = lineAtPointer(tab, clientY);
+  if (row === undefined) return "";
+  const buf = tab.term.buffer.active;
+  return logicalLine((y) => {
+    const l = buf.getLine(y);
+    return l ? { isWrapped: l.isWrapped, text: (trim) => l.translateToString(trim) } : undefined;
+  }, row);
+}
+
 /// The text of a block. Without the command, the first row is skipped —
 /// that is the prompt and the command echoed onto it, which is exactly
 /// what you do not want when copying an error to paste elsewhere.
@@ -5302,6 +5317,20 @@ async function createTab(
             // The selection stays. Copying is not a reason to lose sight
             // of what you copied, and it leaves the second copy — or a
             // wider drag from the same anchor — one gesture away.
+            term.focus();
+          },
+        });
+      }
+      // The line the click landed on, whether or not anything is
+      // selected - the thing you right-clicked, copied without having to
+      // drag over it. Wrapped rows are joined, so a long line copies whole.
+      const clickedLine = logicalLineAt(tab, y);
+      if (clickedLine) {
+        items.push({
+          label: "Copy this line",
+          action: () => {
+            pushClip(clickedLine);
+            void copyToClipboard(clickedLine, "menu-line");
             term.focus();
           },
         });
