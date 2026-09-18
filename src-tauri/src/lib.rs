@@ -247,6 +247,70 @@ fn take_handoff() -> Option<serde_json::Value> {
     Some(value)
 }
 
+/// Whether WSL has a distro to launch, so the UI can offer the "WSL" shell
+/// only where it would work. `wsl.exe --list --quiet` prints the installed
+/// distro names as UTF-16LE, one per line, and nothing on stdout when there
+/// are none (the "no installed distributions" notice goes to stderr and the
+/// exit code is non-zero). So a successful run with a name on stdout is the
+/// signal; anything else - no wsl.exe, feature off, no distro - is "no".
+fn wsl_list_has_distro(status_ok: bool, stdout: &[u8]) -> bool {
+    if !status_ok {
+        return false;
+    }
+    let units: Vec<u16> = stdout
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .collect();
+    String::from_utf16_lossy(&units).chars().any(|c| c.is_alphanumeric())
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn wsl_available() -> bool {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    match std::process::Command::new("wsl.exe")
+        .args(["--list", "--quiet"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+    {
+        Ok(o) => wsl_list_has_distro(o.status.success(), &o.stdout),
+        Err(_) => false,
+    }
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+fn wsl_available() -> bool {
+    false
+}
+
+#[cfg(test)]
+mod wsl_available_tests {
+    use super::wsl_list_has_distro;
+
+    fn utf16le(s: &str) -> Vec<u8> {
+        s.encode_utf16().flat_map(|u| u.to_le_bytes()).collect()
+    }
+
+    #[test]
+    fn a_listed_distro_is_available() {
+        assert!(wsl_list_has_distro(true, &utf16le("Ubuntu\r\n")));
+        assert!(wsl_list_has_distro(true, &utf16le("Ubuntu\r\ndebian\r\n")));
+    }
+
+    #[test]
+    fn no_distro_is_not_available() {
+        // --list exits non-zero and prints to stderr when there are none.
+        assert!(!wsl_list_has_distro(false, &utf16le("anything on stderr")));
+        // Success but empty stdout: the feature is there, no distro.
+        assert!(!wsl_list_has_distro(true, &utf16le("\r\n")));
+        assert!(!wsl_list_has_distro(true, &[]));
+        // An odd trailing byte must not panic the UTF-16 decode.
+        assert!(!wsl_list_has_distro(true, &[0x0d]));
+    }
+}
+
 #[cfg(windows)]
 fn elevate(exe: &std::path::Path, args: &str) -> Result<(), String> {
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
@@ -1676,6 +1740,7 @@ pub fn run() {
             open_logs_folder,
             open_elevated_window,
             take_handoff,
+            wsl_available,
             open_folder,
             open_at_line,
             file_exists,

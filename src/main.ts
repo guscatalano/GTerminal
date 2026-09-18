@@ -448,6 +448,13 @@ const SHELL_CHOICES: Array<[string, string]> = [
   ["cmd", "Command Prompt"],
   ["wsl", "WSL (default distro)"],
 ];
+// WSL is only worth offering where a distro is there to launch. Detected
+// once at startup (wsl_available); until that confirms it, WSL stays
+// hidden, which is the safe default on a machine that has none.
+let wslAvailable = false;
+function shellChoices(): Array<[string, string]> {
+  return wslAvailable ? SHELL_CHOICES : SHELL_CHOICES.filter(([v]) => v !== "wsl");
+}
 let config: AppConfig = {};
 
 function minutesLeft(expiresMs: number): number {
@@ -9298,7 +9305,7 @@ function buildSettingsPage() {
   settingRow(
     "Default shell",
     "Shell for new tabs. Right-click the + button to open a one-off tab in a different shell.",
-    mkSelect(SHELL_CHOICES, config.default_shell ?? "auto", (v) => {
+    mkSelect(shellChoices(), config.default_shell ?? "auto", (v) => {
       config.default_shell = v === "auto" ? undefined : v;
       saveConfig();
     })
@@ -9330,7 +9337,7 @@ function buildSettingsPage() {
         saveConfig();
       });
       const shellSel = mkSelect(
-        [["auto", "Default shell"], ...SHELL_CHOICES.filter(([v]) => v !== "auto")],
+        [["auto", "Default shell"], ...shellChoices().filter(([v]) => v !== "auto")],
         t.shell ?? "auto",
         (v) => {
           t.shell = v === "auto" ? undefined : v;
@@ -10800,7 +10807,7 @@ async function main() {
     });
     items.push("sep");
     items.push(
-      ...SHELL_CHOICES.filter(([v]) => v !== "auto").map(([v, label]): CtxItem => ({
+      ...shellChoices().filter(([v]) => v !== "auto").map(([v, label]): CtxItem => ({
         label: `New ${label} tab`,
         action: () => createTab(undefined, v),
       }))
@@ -11248,6 +11255,11 @@ async function main() {
   void checkDaemonVersion(sessions);
   suggestThemesOnce(freshInstall);
   warnOldWebviewOnce();
+  void invoke<boolean>("wsl_available")
+    .then((ok) => {
+      wslAvailable = ok;
+    })
+    .catch(() => {});
 }
 
 main();
