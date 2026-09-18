@@ -17,6 +17,7 @@ import {
   accelerator,
   pasteNeedsWarning,
   pasteLineCount,
+  scrollbackKey,
 } from "../src/keys.ts";
 
 let failed = 0;
@@ -238,6 +239,16 @@ check(
   pasteNeedsWarning("a\nb", lim({ lines: 2 })),
   true
 );
+
+// -- scrollback keys --
+const sk = (over) => scrollbackKey({ shiftKey: false, ctrlKey: false, altKey: false, key: "PageUp", ...over });
+check("Shift+PageUp scrolls the scrollback up", sk({ shiftKey: true, key: "PageUp" }), "up");
+check("Shift+PageDown scrolls the scrollback down", sk({ shiftKey: true, key: "PageDown" }), "down");
+check("plain PageUp is left for the program", sk({ shiftKey: false, key: "PageUp" }), null);
+check("plain PageDown is left for the program", sk({ shiftKey: false, key: "PageDown" }), null);
+check("Ctrl+Shift+PageUp is not a scrollback key", sk({ shiftKey: true, ctrlKey: true, key: "PageUp" }), null);
+check("Alt+Shift+PageUp is not a scrollback key", sk({ shiftKey: true, altKey: true, key: "PageUp" }), null);
+check("Shift+Home is not a scrollback key", sk({ shiftKey: true, key: "Home" }), null);
 
 if (failed) {
   console.log(`${failed} key test(s) failed`);

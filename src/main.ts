@@ -32,6 +32,7 @@ import {
   accelerator,
   pasteNeedsWarning,
   pasteLineCount,
+  scrollbackKey,
 } from "./keys";
 import type { PasteLimits } from "./keys";
 import { autoTitle, SHELLS, BORING_TITLE } from "./titles";
@@ -4311,6 +4312,18 @@ function makeShortcutHandler(getId: () => number) {
     if (e.key === "F11") {
       void toggleZen();
       return false;
+    }
+    // Shift+PageUp/Down look back through the scrollback, and keep working
+    // even while a full-screen program has taken plain PageUp/Down for its
+    // own paging. On the alternate screen there is no scrollback, so it is
+    // a harmless no-op there.
+    const scroll = scrollbackKey(e);
+    if (scroll) {
+      const t = tabs.get(getId())?.term;
+      if (t) {
+        t.scrollPages(scroll === "up" ? -1 : 1);
+        return false;
+      }
     }
     if (e.ctrlKey && e.shiftKey && !e.altKey) {
       const key = e.key.toUpperCase();

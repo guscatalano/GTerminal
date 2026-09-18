@@ -58,6 +58,20 @@ export function routeCtrlKey(e: KeyEventLike, ctx: KeyContext): KeyAction {
   return "pass";
 }
 
+/// Shift+PageUp / Shift+PageDown scroll the scrollback, and stay the app's
+/// even while a full-screen program owns the screen: a program reads plain
+/// PageUp/PageDown for its own paging, so the shifted pair is the terminal's
+/// own way to look back - the way conhost and Windows Terminal reserve it.
+/// Returns the direction to scroll, or null for anything else. There may be
+/// nothing to scroll - the alternate screen keeps no scrollback - and that
+/// is the caller's to notice; this only routes the key.
+export function scrollbackKey(e: KeyEventLike): "up" | "down" | null {
+  if (!e.shiftKey || e.ctrlKey || e.altKey) return null;
+  if (e.key === "PageUp") return "up";
+  if (e.key === "PageDown") return "down";
+  return null;
+}
+
 export interface PasteLimits {
   enabled: boolean;
   /// Warn at or above this many lines. A pasted command that arrives as

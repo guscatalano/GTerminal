@@ -2947,6 +2947,27 @@ input.set-control {
   background-color: transparent !important;
 }
 
+/* A scrollbar you can read. Chromium's default over the transparent
+   viewport is a faint overlay that barely says where in the scrollback you
+   are; this gives it a visible thumb whose size and position answer 'how
+   far up am I'. Coloured off the theme text so it holds on light and dark. */
+.pane .xterm .xterm-viewport::-webkit-scrollbar {
+  width: 12px;
+}
+.pane .xterm .xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+.pane .xterm .xterm-viewport::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text) 38%, transparent);
+  border-radius: 6px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+.pane .xterm .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text) 60%, transparent);
+  background-clip: padding-box;
+}
+
 /* The – on tabs, when someone has turned it off. Its own class rather
    than nth-of-type: the close button is the same element type, and a
    selector that counts children breaks the moment one is added. */
