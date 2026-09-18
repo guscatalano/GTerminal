@@ -5328,20 +5328,6 @@ async function createTab(
           },
         });
       }
-      // The line the click landed on, whether or not anything is
-      // selected - the thing you right-clicked, copied without having to
-      // drag over it. Wrapped rows are joined, so a long line copies whole.
-      const clickedLine = logicalLineAt(tab, y);
-      if (clickedLine) {
-        items.push({
-          label: "Copy this line",
-          action: () => {
-            pushClip(clickedLine);
-            void copyToClipboard(clickedLine, "menu-line");
-            term.focus();
-          },
-        });
-      }
       // No selection, because a program has the mouse and took the
       // drag. Say so here rather than leaving a menu that is missing the
       // item somebody opened it for: the hint that explains this has a
@@ -5397,6 +5383,21 @@ async function createTab(
           term.focus();
         },
       });
+      // The line the click landed on, copied whole (wrapped rows joined),
+      // without a drag. Below Paste and Select all on purpose: the top of
+      // this menu is Copy then Paste, an order both a lot of hands and the
+      // visual scenes that click it by position depend on.
+      const clickedLine = logicalLineAt(tab, y);
+      if (clickedLine) {
+        items.push({
+          label: "Copy this line",
+          action: () => {
+            pushClip(clickedLine);
+            void copyToClipboard(clickedLine, "menu-line");
+            term.focus();
+          },
+        });
+      }
       // The folder this shell is actually in. After cd-ing three levels
       // deep, the alternative to this is retyping the path into Explorer.
       // Only offered when the cwd is known - the shells report it, but a
