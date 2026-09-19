@@ -491,6 +491,12 @@ pub enum Route {
     Engine,
     /// Its stylesheet.
     EngineCss,
+    /// Ask to pair (pre-auth, when pairing is on): records a request and
+    /// hands back a handle to poll and a code to read out to the desktop.
+    PairStart,
+    /// Poll a pairing (pre-auth): waiting, rejected, or approved - and only
+    /// then carrying the token the device may connect with.
+    PairStatus,
     NotFound,
 }
 
@@ -509,6 +515,8 @@ pub fn route(method: &str, path: &str) -> Route {
         ("POST", "/api/input") => Route::Input,
         ("GET", "/xterm.js") => Route::Engine,
         ("GET", "/xterm.css") => Route::EngineCss,
+        ("POST", "/pair/start") => Route::PairStart,
+        ("GET", "/pair/status") => Route::PairStatus,
         _ => Route::NotFound,
     }
 }
@@ -649,9 +657,208 @@ fn peek_text(id: u32) -> Result<String, String> {
 
 // ── the server ─────────────────────────────────────────────────────────
 
+// ---- Approve-on-desktop pairing ----------------------------------------
+//
+// The token is the credential; typing it into a phone is the friction this
+// removes. A device with no token asks to pair, and is shown nothing but a
+// short code. The desktop - the machine that already holds the shells - is
+// where that request is approved, against the same code, by the one person
+// who should. Approval hands the device the token it would have typed, so
+// nothing a connection may do changes: this is a safer way to deliver the
+// token, not a second kind of key. Off unless asked for (remote_pairing).
+//
+// The handle a device polls with is a random secret, not a sequence, so
+// polling another device's approved pairing is not a way in; the code is
+// only the human check that the device asking is the one in the hand of
+// whoever approves it.
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum PairState {
+    Waiting,
+    Approved,
+    Rejected,
+}
+
+struct Pending {
+    id: String,
+    code: String,
+    created_ms: u64,
+    state: PairState,
+    device: String,
+    /// The address the request came from. This is the anti-nuisance key:
+    /// every limit below is per-IP, because the thing being defended
+    /// against is one device asking over and over, not many devices asking
+    /// once. On a loopback bind every request is 127.0.0.1, which is fine -
+    /// there it is one machine and the limits still bound its prompts.
+    ip: String,
+    /// When a decision was made, if one has been. Used to hold a denied
+    /// request in its cooldown even after its creation TTL would drop it,
+    /// so "deny then ask again immediately" cannot get past the cooldown.
+    decided_ms: Option<u64>,
+}
+
+static PENDING: Mutex<Vec<Pending>> = Mutex::new(Vec::new());
+
+/// A waiting request lives this long - long enough to walk to the desktop
+/// and read the code, short enough that one left unanswered does not linger.
+const PAIR_TTL_MS: u64 = 3 * 60 * 1000;
+/// The most requests that may wait at once across everything, so no number
+/// of devices can bury the desktop in prompts.
+const MAX_PENDING: usize = 12;
+/// The most one address may have waiting at once. Low, because a person
+/// pairing a phone needs one; the room above that is for a fat-fingered
+/// retry, not for a device that has decided to be a nuisance.
+const MAX_PENDING_PER_IP: usize = 3;
+/// After the desktop says no, that address cannot ask again for this long.
+/// This is the answer to "they just re-pair and annoy me": a denial is not
+/// a thing they can undo by clicking again, it costs them a minute.
+const PAIR_DENY_COOLDOWN_MS: u64 = 60 * 1000;
+
+fn pairing_enabled(config: &Value) -> bool {
+    config
+        .get("remote_pairing")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// Whether a record still earns its place in the list at `now`: either it
+/// is within its creation TTL, or it was denied recently enough that its
+/// cooldown is still running and dropping it would forget the denial. Pure
+/// in `now` so the pruning can be checked without waiting for a clock.
+fn pending_is_live(p: &Pending, now: u64) -> bool {
+    if now.saturating_sub(p.created_ms) < PAIR_TTL_MS {
+        return true;
+    }
+    matches!((p.state, p.decided_ms), (PairState::Rejected, Some(d))
+        if now.saturating_sub(d) < PAIR_DENY_COOLDOWN_MS)
+}
+
+fn prune_at(list: &mut Vec<Pending>, now: u64) {
+    list.retain(|p| pending_is_live(p, now));
+}
+
+fn prune_pending(list: &mut Vec<Pending>) {
+    prune_at(list, now_ms());
+}
+
+/// Why an address may not start a pairing right now, or None if it may.
+/// Split out and pure in `now` so every branch is testable with a crafted
+/// list rather than by hammering the real one against a real clock.
+fn start_refusal(list: &[Pending], ip: &str, now: u64) -> Option<&'static str> {
+    // The global ceiling: enough devices, each within its own limit, could
+    // still add up to a wall of prompts, so there is a hard cap over all.
+    if list.iter().filter(|p| p.state == PairState::Waiting).count() >= MAX_PENDING {
+        return Some("too many pairings are waiting");
+    }
+    // This address, still waiting on its earlier asks.
+    if list
+        .iter()
+        .filter(|p| p.ip == ip && p.state == PairState::Waiting)
+        .count()
+        >= MAX_PENDING_PER_IP
+    {
+        return Some("this device already has a request waiting");
+    }
+    // This address, told no within the cooldown.
+    if list.iter().any(|p| {
+        p.ip == ip
+            && p.state == PairState::Rejected
+            && p.decided_ms
+                .is_some_and(|d| now.saturating_sub(d) < PAIR_DENY_COOLDOWN_MS)
+    }) {
+        return Some("this device was just turned away; try again shortly");
+    }
+    None
+}
+
+/// The unguessable handle a device polls with. Random, so it cannot be
+/// walked; it never appears on a screen.
+fn pair_id() -> String {
+    let mut b = [0u8; 16];
+    fill_random(&mut b);
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// The six digits shown on both screens. A person reads them to confirm the
+/// device asking is theirs; it is not a secret - the token behind it is.
+fn pair_code() -> String {
+    let mut b = [0u8; 4];
+    fill_random(&mut b);
+    format!("{:06}", u32::from_le_bytes(b) % 1_000_000)
+}
+
+/// Start a pairing from `ip`: record it, return the handle to poll and the
+/// code to show. None when a limit refuses it - too many waiting overall,
+/// too many already waiting from this address, or this address is inside
+/// the cooldown from a denial. The caller turns any None into one 429.
+fn start_pair(device: String, ip: String) -> Option<(String, String)> {
+    let mut list = PENDING.lock().ok()?;
+    let now = now_ms();
+    prune_at(&mut list, now);
+    if start_refusal(&list, &ip, now).is_some() {
+        return None;
+    }
+    let id = pair_id();
+    let code = pair_code();
+    list.push(Pending {
+        id: id.clone(),
+        code: code.clone(),
+        created_ms: now,
+        state: PairState::Waiting,
+        device,
+        ip,
+        decided_ms: None,
+    });
+    Some((id, code))
+}
+
+fn pair_state(id: &str) -> Option<PairState> {
+    let mut list = PENDING.lock().ok()?;
+    prune_pending(&mut list);
+    list.iter().find(|p| p.id == id).map(|p| p.state)
+}
+
+fn set_pair_state(id: &str, state: PairState) -> bool {
+    let Ok(mut list) = PENDING.lock() else {
+        return false;
+    };
+    match list.iter_mut().find(|p| p.id == id && p.state == PairState::Waiting) {
+        Some(p) => {
+            p.state = state;
+            // Stamped so a denial's cooldown is measured from the decision,
+            // not from when the request first arrived.
+            p.decided_ms = Some(now_ms());
+            true
+        }
+        None => false,
+    }
+}
+
+/// The requests still waiting, for the desktop to show. Handle, code and
+/// device only - never a token, which is not decided until approval.
+pub fn pending_pairs() -> Vec<Value> {
+    let Ok(mut list) = PENDING.lock() else {
+        return Vec::new();
+    };
+    prune_pending(&mut list);
+    list.iter()
+        .filter(|p| p.state == PairState::Waiting)
+        .map(|p| json!({ "id": p.id, "code": p.code, "device": p.device, "at_ms": p.created_ms }))
+        .collect()
+}
+
+pub fn approve_pair(id: &str) -> bool {
+    set_pair_state(id, PairState::Approved)
+}
+
+pub fn reject_pair(id: &str) -> bool {
+    set_pair_state(id, PairState::Rejected)
+}
+
 struct Ctx {
     token: Arc<String>,
     generation: u64,
+    pairing: bool,
 }
 
 fn serve(stream: TcpStream, ctx: Arc<Ctx>) {
@@ -673,6 +880,57 @@ fn serve(stream: TcpStream, ctx: Arc<Ctx>) {
         respond(&mut out, "400 Bad Request", "text/plain; charset=utf-8", "bad request\n");
         return;
     };
+
+    let r = route(&req.method, &req.path);
+    // Pairing is answered before the token gate - a device that has not
+    // paired has no token to present - but only for these two routes and
+    // only when it is switched on. /pair/start records a request and shows
+    // the device a code; /pair/status returns the token only once the desktop
+    // has approved that request, and only to the unguessable handle it was
+    // given, so polling another pairing is not a way in.
+    if ctx.pairing && (r == Route::PairStart || r == Route::PairStatus) {
+        match r {
+            Route::PairStart => {
+                let device = device_from_agent(req.header("user-agent").unwrap_or_default());
+                // The peer address is the limit key: it is what the anti-
+                // nuisance caps in start_pair count against.
+                match start_pair(device, addr.clone()) {
+                    Some((id, code)) => {
+                        respond_json(&mut out, "200 OK", &json!({ "id": id, "code": code }))
+                    }
+                    // One 429 for every limit - global cap, per-IP cap, or
+                    // denial cooldown - so a refusal never says which wall
+                    // was hit or how close anything is to it.
+                    None => respond_json(
+                        &mut out,
+                        "429 Too Many Requests",
+                        &json!({ "error": "too many pairing requests; wait a moment and try again" }),
+                    ),
+                }
+            }
+            Route::PairStatus => {
+                let id = req.param("id").unwrap_or_default();
+                match pair_state(id) {
+                    Some(PairState::Approved) => respond_json(
+                        &mut out,
+                        "200 OK",
+                        &json!({ "state": "approved", "token": ctx.token.as_str() }),
+                    ),
+                    Some(PairState::Rejected) => {
+                        respond_json(&mut out, "200 OK", &json!({ "state": "rejected" }))
+                    }
+                    Some(PairState::Waiting) => {
+                        respond_json(&mut out, "200 OK", &json!({ "state": "waiting" }))
+                    }
+                    None => {
+                        respond_json(&mut out, "404 Not Found", &json!({ "error": "no such pairing" }))
+                    }
+                }
+            }
+            _ => {}
+        }
+        return;
+    }
 
     if !secret_eq(&ctx.token, &presented_token(&req)) {
         punish_failure();
@@ -698,7 +956,7 @@ fn serve(stream: TcpStream, ctx: Arc<Ctx>) {
     // for a page load is a moment and for a stream is the whole visit.
     let who = viewer_join(addr, req.header("user-agent").unwrap_or_default().to_string());
 
-    match route(&req.method, &req.path) {
+    match r {
         Route::Page => respond(&mut out, "200 OK", "text/html; charset=utf-8", PAGE),
         Route::Sessions => respond_json(&mut out, "200 OK", &sessions_json()),
         Route::Peek => {
@@ -718,7 +976,11 @@ fn serve(stream: TcpStream, ctx: Arc<Ctx>) {
         // a route that says the server is here.
         Route::Engine => respond(&mut out, "200 OK", "application/javascript; charset=utf-8", ENGINE_JS),
         Route::EngineCss => respond(&mut out, "200 OK", "text/css; charset=utf-8", ENGINE_CSS),
-        Route::NotFound => respond(&mut out, "404 Not Found", "text/plain; charset=utf-8", "no\n"),
+        // Pairing routes are served pre-auth above when it is enabled; if
+        // one reaches here, pairing is off, so it simply does not exist.
+        Route::PairStart | Route::PairStatus | Route::NotFound => {
+            respond(&mut out, "404 Not Found", "text/plain; charset=utf-8", "no\n")
+        }
     }
     viewer_leave(who);
 }
@@ -1056,7 +1318,11 @@ pub fn sync(config: &Value) -> Value {
     // loopback is in an odd state is exactly the machine where "turn it
     // off" must not hang.
     let _ = listener.set_nonblocking(true);
-    let ctx = Arc::new(Ctx { token: Arc::new(token), generation });
+    let ctx = Arc::new(Ctx {
+        token: Arc::new(token),
+        generation,
+        pairing: pairing_enabled(config),
+    });
 
     std::thread::spawn(move || {
         loop {
@@ -1554,5 +1820,215 @@ mod remote_tests {
             }
         }
         assert!(!still_open, "the port stayed open after the feature was turned off");
+    }
+
+    // ---- pairing --------------------------------------------------------
+    //
+    // The pairing list is one process-wide static, so these tests share it.
+    // A single lock held for the body of each makes them run one at a time
+    // against it, and clearing it on the way in means each starts from
+    // empty regardless of what ran before.
+    static PAIR_SERIAL: Mutex<()> = Mutex::new(());
+
+    fn clear_pending() {
+        PENDING.lock().unwrap().clear();
+    }
+
+    /// A record built by hand, so the time-based limits can be checked at a
+    /// chosen `now` instead of against the wall clock.
+    fn pend(ip: &str, state: PairState, created_ms: u64, decided_ms: Option<u64>) -> Pending {
+        Pending {
+            id: pair_id(),
+            code: pair_code(),
+            created_ms,
+            state,
+            device: "iPhone".into(),
+            ip: ip.into(),
+            decided_ms,
+        }
+    }
+
+    #[test]
+    fn pairing_is_off_unless_a_real_true_asks_for_it() {
+        assert!(!pairing_enabled(&json!({})));
+        assert!(!pairing_enabled(&json!({"remote_pairing": false})));
+        assert!(!pairing_enabled(&json!({"remote_pairing": "true"})));
+        assert!(!pairing_enabled(&json!({"remote_pairing": 1})));
+        assert!(pairing_enabled(&json!({"remote_pairing": true})));
+    }
+
+    #[test]
+    fn the_pairing_routes_are_the_routes() {
+        assert_eq!(route("POST", "/pair/start"), Route::PairStart);
+        assert_eq!(route("GET", "/pair/status"), Route::PairStatus);
+        // Method is part of it here too: starting a pairing changes state,
+        // so a bare link must not be able to do it.
+        assert_eq!(route("GET", "/pair/start"), Route::NotFound);
+        assert_eq!(route("POST", "/pair/status"), Route::NotFound);
+    }
+
+    #[test]
+    fn a_started_pairing_waits_then_is_handed_over_on_approval() {
+        let _g = PAIR_SERIAL.lock().unwrap();
+        clear_pending();
+
+        let (id, code) = start_pair("iPhone".into(), "10.0.0.5".into())
+            .expect("a first pairing should start");
+        assert_eq!(id.len(), 32, "the handle is 16 random bytes in hex");
+        assert_eq!(code.len(), 6, "the code is six digits");
+        assert!(code.bytes().all(|b| b.is_ascii_digit()), "the code is not all digits: {code}");
+        assert_eq!(pair_state(&id), Some(PairState::Waiting));
+
+        // It shows up for the desktop to decide on, with its code and a
+        // name - but never a token.
+        let waiting = pending_pairs();
+        assert_eq!(waiting.len(), 1);
+        assert_eq!(waiting[0]["id"], json!(id));
+        assert_eq!(waiting[0]["code"], json!(code));
+        assert_eq!(waiting[0]["device"], json!("iPhone"));
+        assert!(waiting[0].get("token").is_none(), "a waiting pairing must not carry a token");
+
+        assert!(approve_pair(&id), "approving a waiting pairing succeeds");
+        assert_eq!(pair_state(&id), Some(PairState::Approved));
+        // Once decided it is no longer waiting, so it leaves the desktop list.
+        assert!(pending_pairs().is_empty(), "an approved pairing is still waiting");
+    }
+
+    #[test]
+    fn a_rejected_pairing_is_never_approved_after() {
+        let _g = PAIR_SERIAL.lock().unwrap();
+        clear_pending();
+
+        let (id, _code) = start_pair("Android".into(), "10.0.0.6".into()).expect("start");
+        assert!(reject_pair(&id), "rejecting a waiting pairing succeeds");
+        assert_eq!(pair_state(&id), Some(PairState::Rejected));
+        // A decision is final: a race that both rejects and approves must
+        // not flip an answered pairing back to approved.
+        assert!(!approve_pair(&id), "a rejected pairing was approved after the fact");
+        assert_eq!(pair_state(&id), Some(PairState::Rejected));
+    }
+
+    #[test]
+    fn an_unknown_handle_is_not_a_pairing() {
+        let _g = PAIR_SERIAL.lock().unwrap();
+        clear_pending();
+        assert_eq!(pair_state("0000000000000000000000000000000000"), None);
+        assert!(!approve_pair("nope"), "an unknown handle was approved");
+        assert!(!reject_pair("nope"), "an unknown handle was rejected");
+    }
+
+    /// The overall ceiling: no number of distinct addresses can put more
+    /// than MAX_PENDING prompts in front of the desktop at once.
+    #[test]
+    fn the_desktop_is_never_buried_no_matter_how_many_devices_ask() {
+        let _g = PAIR_SERIAL.lock().unwrap();
+        clear_pending();
+
+        // A different address each time, so the per-IP cap never bites and
+        // the only thing that can stop it is the global one.
+        for i in 0..MAX_PENDING {
+            let ip = format!("10.0.{i}.1");
+            assert!(start_pair("iPhone".into(), ip).is_some(), "a pairing under the global cap should start");
+        }
+        assert!(
+            start_pair("iPhone".into(), "10.9.9.9".into()).is_none(),
+            "the global cap did not hold"
+        );
+
+        // Answering one makes room again: the cap counts only what is still
+        // waiting, so a decided request does not keep a slot forever.
+        let waiting = pending_pairs();
+        assert!(approve_pair(waiting[0]["id"].as_str().unwrap()), "approve one to free a slot");
+        assert!(
+            start_pair("iPhone".into(), "10.9.9.9".into()).is_some(),
+            "a slot did not free after a decision"
+        );
+    }
+
+    /// The point of the whole exercise: one address cannot keep asking. It
+    /// gets its few, and then it is refused - while a different address is
+    /// entirely unaffected, because the limit is per-IP, not global.
+    #[test]
+    fn one_address_gets_a_few_asks_and_no_more() {
+        let _g = PAIR_SERIAL.lock().unwrap();
+        clear_pending();
+
+        let ip = "192.168.1.50";
+        for _ in 0..MAX_PENDING_PER_IP {
+            assert!(start_pair("iPhone".into(), ip.into()).is_some(), "an ask under the per-IP cap");
+        }
+        assert!(
+            start_pair("iPhone".into(), ip.into()).is_none(),
+            "a fourth ask from the same address got through"
+        );
+        // Another device is not punished for the noisy one next to it.
+        assert!(
+            start_pair("iPad".into(), "192.168.1.51".into()).is_some(),
+            "a different address was refused because of an unrelated one"
+        );
+    }
+
+    /// "They just deny and re-pair to annoy me": a denial costs the address
+    /// a cooldown, checked here at a chosen `now` rather than by sleeping.
+    #[test]
+    fn a_denied_address_cannot_immediately_ask_again() {
+        let now = 10_000_000;
+        let ip = "192.168.1.60";
+        // One rejected a moment ago is enough to refuse a fresh ask.
+        let list = vec![pend(ip, PairState::Rejected, now - 1_000, Some(now - 1_000))];
+        assert_eq!(
+            start_refusal(&list, ip, now),
+            Some("this device was just turned away; try again shortly")
+        );
+        // A different address is not inside anyone else's cooldown.
+        assert_eq!(start_refusal(&list, "192.168.1.61", now), None);
+    }
+
+    /// And the cooldown ends: once it has elapsed, the same address is free
+    /// to ask again, and the stale denial is pruned rather than kept.
+    #[test]
+    fn the_cooldown_lets_go_once_it_has_passed() {
+        let now = 10_000_000;
+        let ip = "192.168.1.62";
+        // Created past the TTL and denied past the cooldown: nothing keeps
+        // it now. (Created recently but denied long ago cannot happen - the
+        // decision follows the creation - so the case that matters is both
+        // clocks run out.)
+        let created = now - PAIR_TTL_MS - 5_000;
+        let denied_at = now - PAIR_DENY_COOLDOWN_MS - 1;
+        let p = pend(ip, PairState::Rejected, created, Some(denied_at));
+        // The refusal predicate no longer objects...
+        assert_eq!(start_refusal(std::slice::from_ref(&p), ip, now), None);
+        // ...and pruning at the same instant drops the record entirely,
+        // since it is past both its TTL and its cooldown.
+        let mut list = vec![p];
+        prune_at(&mut list, now);
+        assert!(list.is_empty(), "a spent denial was kept");
+    }
+
+    /// A denied record has to outlive its creation TTL when the cooldown is
+    /// still running, or "deny near the end of the wait" would forget the
+    /// denial the instant the request would have expired anyway.
+    #[test]
+    fn a_denial_is_kept_through_its_cooldown_even_past_the_ttl() {
+        let now = 10_000_000;
+        // Created long enough ago to be past the creation TTL, but denied
+        // just now.
+        let created = now - PAIR_TTL_MS - 5_000;
+        let p = pend("192.168.1.63", PairState::Rejected, created, Some(now - 1_000));
+        assert!(pending_is_live(&p, now), "a within-cooldown denial was treated as expired");
+        // The same record, denied long ago, is not kept.
+        let old = pend("192.168.1.63", PairState::Rejected, created, Some(now - PAIR_DENY_COOLDOWN_MS - 1));
+        assert!(!pending_is_live(&old, now), "a spent denial was kept alive");
+    }
+
+    /// Approving does not start a cooldown: an approved device is in, and
+    /// nothing about it should refuse a later, unrelated ask from that IP.
+    #[test]
+    fn approval_does_not_leave_a_cooldown_behind() {
+        let now = 10_000_000;
+        let ip = "192.168.1.64";
+        let list = vec![pend(ip, PairState::Approved, now - 1_000, Some(now - 1_000))];
+        assert_eq!(start_refusal(&list, ip, now), None);
     }
 }

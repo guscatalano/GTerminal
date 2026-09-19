@@ -448,6 +448,23 @@
         font-family: var(--mono);
         color: var(--cool);
       }
+
+      .pair-code {
+        display: block;
+        font: 700 40px/1.2 var(--mono);
+        letter-spacing: 0.22em;
+        color: var(--ink);
+        text-align: center;
+        margin: 8px 0 4px;
+        /* The digits are meant to be read out, not selected, but a person
+           checking a match should still be able to. */
+        user-select: text;
+      }
+
+      .pair-status {
+        text-align: center;
+        color: var(--ink-dim);
+      }
     </style>
   </head>
   <body>
@@ -509,6 +526,20 @@
       <p><code id="gate-detail"></code></p>
     </div>
 
+    <!-- Shown instead of the gate when the desktop has pairing switched on:
+         a code to read aloud, and a line that changes as the desktop
+         decides. No token is ever shown here - it arrives silently once
+         the desktop approves, and the page reloads with it. -->
+    <div class="gate" id="pair" hidden>
+      <h1>Ask the desktop to let this device in</h1>
+      <p>
+        On the computer running GTerminal, a request from this device is waiting.
+        Check that the code below matches the one it shows, then approve it there.
+      </p>
+      <p><code id="pair-code" class="pair-code">••••••</code></p>
+      <p id="pair-status" class="pair-status">Waiting for the desktop…</p>
+    </div>
+
     <div class="toast" id="toast"></div>
 
     <script>
@@ -544,9 +575,81 @@
       const device = $("device");
       const gate = $("gate");
 
-      if (!token) {
+      // ── pairing ────────────────────────────────────────────────────
+      // With no token, ask the desktop to let this device in rather than
+      // dead-ending on "paste the token". The desktop only answers these
+      // when its owner has switched pairing on; if it has not, /pair/start
+      // is not a route and we fall back to the token gate. Approval hands
+      // back the very token the link would have carried, so from here on
+      // nothing else in the page knows the difference.
+      function showTokenGate() {
         gate.hidden = false;
         $("gate-detail").textContent = location.origin + "/?t=…";
+      }
+
+      async function pairUntilApproved() {
+        const pair = $("pair");
+        const status = $("pair-status");
+        let started;
+        try {
+          const r = await fetch("/pair/start", { method: "POST" });
+          // 404 means the desktop has pairing off - there is nothing to do
+          // but ask for the token.
+          if (r.status === 404) return false;
+          // 429 means a limit turned this ask away - too many from here, or
+          // a recent denial's cooldown. Not the token gate: pairing is on,
+          // the device simply has to wait. Say so and stop asking; a reload
+          // tries again.
+          if (r.status === 429) {
+            $("pair-code").textContent = "— — —";
+            pair.hidden = false;
+            status.textContent = "Too many attempts from this device. Wait a moment, then reload.";
+            return true;
+          }
+          if (!r.ok) return false;
+          started = await r.json();
+        } catch (e) {
+          return false;
+        }
+
+        $("pair-code").textContent = started.code;
+        pair.hidden = false;
+
+        // Poll gently. The waiting request expires on the desktop after a
+        // few minutes; the loop simply stops answering when it is gone.
+        const id = encodeURIComponent(started.id);
+        for (;;) {
+          await new Promise((r) => setTimeout(r, 1500));
+          let s;
+          try {
+            const r = await fetch("/pair/status?id=" + id);
+            if (!r.ok) { status.textContent = "This request expired. Reload to ask again."; return true; }
+            s = await r.json();
+          } catch (e) {
+            continue; // a dropped poll is not a decision
+          }
+          if (s.state === "approved" && s.token) {
+            try {
+              sessionStorage.setItem(KEY, s.token);
+            } catch (e) {}
+            // Reload with the token in hand. The address bar stays clean:
+            // it goes through storage, not the URL.
+            status.textContent = "Approved. Connecting…";
+            location.replace(location.pathname);
+            return true;
+          }
+          if (s.state === "rejected") {
+            status.textContent = "The desktop declined this device.";
+            return true;
+          }
+          // still waiting
+        }
+      }
+
+      if (!token) {
+        pairUntilApproved().then((handled) => {
+          if (!handled) showTokenGate();
+        });
         throw new Error("no token");
       }
       device.hidden = false;

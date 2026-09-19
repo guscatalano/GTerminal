@@ -14,8 +14,11 @@ import {
   remoteBind,
   remoteInput,
   remoteOn,
+  remotePairing,
   remotePort,
   remoteUrl,
+  pairingConsequence,
+  describePending,
   describeRefused,
   describeViewer,
   remoteBadge,
@@ -50,6 +53,32 @@ check("nor is 1", remoteOn({ remote_enabled: 1 }), false);
 check("typing is off by default", remoteInput({ remote_enabled: true }), false);
 check("and only a real true turns it on", remoteInput({ remote_input: "yes" }), false);
 check("on when it says on", remoteInput({ remote_input: true }), true);
+
+// ── pairing is its own switch too ──────────────────────────────────────
+// Letting a device ask to connect is a way onto the machine's shells, so
+// it is off until turned on, and, like the rest, only a real true does it.
+check("pairing is off by default", remotePairing({ remote_enabled: true }), false);
+check("a truthy string does not turn pairing on", remotePairing({ remote_pairing: "yes" }), false);
+check("nor does 1", remotePairing({ remote_pairing: 1 }), false);
+check("on when it says on", remotePairing({ remote_pairing: true }), true);
+// The sentence under the switch changes with it, and both states say
+// something true rather than one being blank.
+check("the on sentence mentions the code", /code/.test(pairingConsequence(true)), true);
+check("the off sentence says the token is needed", /token/.test(pairingConsequence(false)), true);
+
+// ── one waiting device, described ──────────────────────────────────────
+// The code leads, because checking it against the phone is the job; the
+// device name is the client's own claim and comes second.
+check(
+  "a waiting device leads with its code",
+  describePending({ id: "abc", code: "429173", device: "iPhone", at_ms: 0 }),
+  "iPhone wants to connect. Code on it: 429173"
+);
+check(
+  "a device that named nothing is still described",
+  describePending({ id: "abc", code: "000042", device: "", at_ms: 0 }),
+  "A device wants to connect. Code on it: 000042"
+);
 
 // ── the bind fails closed ──────────────────────────────────────────────
 check("nothing said means loopback", remoteBind({}), "local");
@@ -183,6 +212,51 @@ check(
 // the user agent's [hidden] rule - so the read-only notice and the
 // composer were both drawn, each squeezed into half the bottom bar.
 check("hidden actually hides", /\[hidden\]\s*\{\s*display:\s*none\s*!important/.test(page), true);
+
+// ── the pairing flow, both ends ────────────────────────────────────────
+// The server answers /pair/start and /pair/status before the token gate -
+// a device with no token has nothing to present - but only when pairing
+// is switched on. These are shape checks so the pre-auth path cannot be
+// quietly removed, leaving the page's pairing UI polling a dead route.
+check("the server routes pair start", server.includes('"/pair/start") => Route::PairStart'), true);
+check("the server routes pair status", server.includes('"/pair/status") => Route::PairStatus'), true);
+check(
+  "starting a pairing is a POST, not something a link can do",
+  server.includes('("POST", "/pair/start")'),
+  true
+);
+check(
+  "pairing is answered before the token gate",
+  /ctx\.pairing && \(r == Route::PairStart \|\| r == Route::PairStatus\)/.test(server),
+  true
+);
+check(
+  "an approved pairing is the only state that returns the token",
+  /PairState::Approved[\s\S]*?"token": ctx\.token/.test(server),
+  true
+);
+// The page asks to pair when it has no token, and only falls back to the
+// token gate when the server says pairing is off (a 404 on /pair/start).
+check("the page asks to pair when it has no token", page.includes('fetch("/pair/start"'), true);
+check("and polls for the decision", page.includes('"/pair/status?id="'), true);
+check(
+  "a 404 means pairing is off and the token gate is shown",
+  /status === 404/.test(page),
+  true
+);
+// A rate-limited ask is not the token gate: pairing is on, the device is
+// just being throttled, and the page has to say wait rather than "paste
+// the token".
+check("a 429 is handled as a rate limit, not a missing token", /status === 429/.test(page), true);
+// And the server has the per-IP defences the DoS question was about: a
+// per-IP cap and a denial cooldown, both keyed on the peer address.
+check("the server caps pending per address", server.includes("MAX_PENDING_PER_IP"), true);
+check("and holds a denied address in a cooldown", server.includes("PAIR_DENY_COOLDOWN_MS"), true);
+check(
+  "the pairing limits are keyed on the request's address",
+  server.includes("start_pair(device, addr.clone())"),
+  true
+);
 
 
 // ── the warning in the window ──────────────────────────────────────────

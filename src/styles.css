@@ -891,6 +891,24 @@ button.armed,
   opacity: 0.85;
 }
 
+/* A waiting device: its claim and code on the left, Allow/Deny on the
+   right. The buttons keep their size; the text takes the slack. */
+.remote-pair-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 1;
+}
+
+.remote-pair-line > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.remote-pair-line > button {
+  flex: 0 0 auto;
+}
+
 #history-viewer-actions {
   margin-left: auto;
   display: flex;

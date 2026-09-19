@@ -761,6 +761,35 @@ fn remote_new_token() -> String {
     remote::new_token()
 }
 
+// ── approve-on-desktop pairing ─────────────────────────────────────────
+//
+// A device with no token asks to pair and is shown a short code; the
+// desktop approves it against that code and the device is handed the
+// token. These three read and change the in-memory list of waiting
+// requests. Off unless the user turned on remote_pairing.
+
+/// The pairings still waiting for a decision, for the desktop to show.
+/// Each is a handle, the code the device is displaying, and a guess at
+/// the device - never a token.
+#[tauri::command(async)]
+fn remote_pending_pairs() -> Vec<serde_json::Value> {
+    remote::pending_pairs()
+}
+
+/// Approve a waiting pairing by its handle. The next poll from that
+/// device receives the token. True if it was waiting and is now approved.
+#[tauri::command(async)]
+fn remote_approve_pair(id: String) -> bool {
+    remote::approve_pair(&id)
+}
+
+/// Reject a waiting pairing by its handle. The device is told no and
+/// never sees a token.
+#[tauri::command(async)]
+fn remote_reject_pair(id: String) -> bool {
+    remote::reject_pair(&id)
+}
+
 // ── weather and air quality ────────────────────────────────────────────
 
 /// The last report, and what was asked for to get it.
@@ -1758,6 +1787,9 @@ pub fn run() {
             remote_sync,
             remote_status,
             remote_new_token,
+            remote_pending_pairs,
+            remote_approve_pair,
+            remote_reject_pair,
             weather_report,
             claude_usage,
             update_status,

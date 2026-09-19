@@ -88,10 +88,13 @@ import {
   remoteBind,
   remoteInput,
   remoteOn,
+  remotePairing,
   remotePort,
+  pairingConsequence,
+  describePending,
   statusLine,
 } from "./remote";
-import type { RemoteStatus, RemoteStatusLive } from "./remote";
+import type { RemoteStatus, RemoteStatusLive, RemotePending } from "./remote";
 import { storageKey, keysToClear, FIRST_WINDOW } from "./windows";
 import { retagKeyed, retagOrder } from "./retag";
 import { windowName, moveTargets } from "./windownames";
@@ -362,6 +365,11 @@ interface AppConfig {
   remote_port?: number;
   remote_token?: string;
   remote_input?: boolean;
+  /// Approve-on-desktop pairing. When on, a device that opens the page
+  /// with no token can ask to connect, and is shown a short code; the
+  /// desktop approves the request against that code and the device is
+  /// handed the token. Off unless deliberately turned on, like the rest.
+  remote_pairing?: boolean;
 }
 
 // Built-in decorative backgrounds — pure CSS, no assets.
@@ -6104,6 +6112,12 @@ let remoteBadgeTimer = 0;
 /// from a previous build writes into detached nodes and harms nothing.
 let onRemoteStatus: ((st: RemoteStatusLive) => void) | null = null;
 
+/// The pairing poll runs only while its settings row is on screen and
+/// pairing is on: a waiting device needs answering within seconds, but
+/// nothing waits when the page is closed. Cleared before each rebuild so
+/// two never run at once.
+let pairingPollTimer = 0;
+
 async function refreshRemoteBadge() {
   const el = document.getElementById("remote-badge");
   if (!el) return;
@@ -6155,6 +6169,13 @@ function openSettings(jumpTo?: string) {
 function closeSettings() {
   if (!settingsOpen()) return;
   app.classList.remove("settings-on");
+  // The pairing poll exists to answer devices while its row is on screen;
+  // with the page closed there is nothing to answer into, so it stops
+  // until the page is built again.
+  if (pairingPollTimer) {
+    window.clearInterval(pairingPollTimer);
+    pairingPollTimer = 0;
+  }
   const tab = activeId !== null ? tabs.get(activeId) : undefined;
   if (tab) {
     fitTab(tab);
@@ -8338,6 +8359,118 @@ function buildRemoteSection() {
     "Typing from the page",
     "Separate from watching, and separately off. A browser tab that can see your shell and one that can drive it are different things to have published, and the second should never arrive as a side effect of wanting the first.",
     typeWrap
+  );
+
+  // Approve-on-desktop pairing.
+  //
+  // The token in a link is the hard part of this feature to use: it gets
+  // mistyped, screenshotted, left in a chat. Pairing removes the typing -
+  // a device with no token asks to connect, is shown a code, and is let in
+  // from here against that code. It is off by default, because it is still
+  // a way onto the machine's shells and turning it on should be a choice.
+  const pairWrap = document.createElement("div");
+  pairWrap.className = "setting-stack";
+  const pairSel = mkSelect(
+    [["off", "Off"], ["on", "Allow devices to ask"]],
+    remotePairing(config) ? "on" : "off",
+    (v) => {
+      config.remote_pairing = v === "on";
+      void apply();
+    }
+  );
+  const pairSays = document.createElement("div");
+  pairSays.className = "setting-status";
+  pairWrap.append(pairSel, pairSays);
+  redraws.push(() => {
+    pairSel.value = remotePairing(config) ? "on" : "off";
+    pairSays.textContent = pairingConsequence(remotePairing(config));
+  });
+  settingRow(
+    "Pairing from a device",
+    "How a phone connects without being handed the token first. With it on, a device that opens the page asks to connect and shows a code; you approve it below, checking the code matches, and only then does it receive the token. The token itself does not change - this is a safer way to deliver it, not a second key.",
+    pairWrap
+  );
+
+  // The requests waiting to be let in. Polled only while this is on
+  // screen; each is the device's own claim about itself plus a code to
+  // check, and Allow hands over the token the link would have carried.
+  const waitingWrap = document.createElement("div");
+  waitingWrap.className = "setting-stack";
+  const waitingList = document.createElement("div");
+  waitingList.className = "remote-who";
+  waitingWrap.append(waitingList);
+
+  const renderPending = (pending: RemotePending[]) => {
+    waitingList.textContent = "";
+    if (!remoteOn(config) || !remotePairing(config)) {
+      const none = document.createElement("div");
+      none.className = "setting-status";
+      none.textContent = remoteOn(config)
+        ? "Pairing is off, so no device can ask to connect."
+        : "Remote control is off, so nothing can ask to connect.";
+      waitingList.appendChild(none);
+      return;
+    }
+    if (!pending.length) {
+      const none = document.createElement("div");
+      none.className = "setting-status";
+      none.textContent = "No device is waiting.";
+      waitingList.appendChild(none);
+      return;
+    }
+    for (const p of pending) {
+      const row = document.createElement("div");
+      row.className = "remote-who-line remote-pair-line";
+      const says = document.createElement("span");
+      says.textContent = describePending(p);
+      const allow = document.createElement("button");
+      allow.className = "set-control";
+      allow.textContent = "Allow";
+      allow.addEventListener("click", () => {
+        allow.disabled = true;
+        void invoke<boolean>("remote_approve_pair", { id: p.id })
+          .then(() => void pollPending())
+          .catch(() => {
+            allow.disabled = false;
+          });
+      });
+      const deny = document.createElement("button");
+      deny.className = "set-control";
+      deny.textContent = "Deny";
+      deny.addEventListener("click", () => {
+        deny.disabled = true;
+        void invoke<boolean>("remote_reject_pair", { id: p.id })
+          .then(() => void pollPending())
+          .catch(() => {
+            deny.disabled = false;
+          });
+      });
+      row.append(says, allow, deny);
+      waitingList.appendChild(row);
+    }
+  };
+
+  const pollPending = async () => {
+    if (!remoteOn(config) || !remotePairing(config)) {
+      renderPending([]);
+      return;
+    }
+    try {
+      const pending = await invoke<RemotePending[]>("remote_pending_pairs");
+      renderPending(pending);
+    } catch {
+      renderPending([]);
+    }
+  };
+
+  if (pairingPollTimer) window.clearInterval(pairingPollTimer);
+  pairingPollTimer = window.setInterval(() => void pollPending(), 2000);
+  redraws.push(() => void pollPending());
+
+  settingRow(
+    "Devices waiting to connect",
+    "A device that has asked to pair appears here with the code it is showing. Check the code matches the one on the device, then Allow to hand it the token, or Deny to turn it away. Requests expire on their own after a few minutes.",
+    waitingWrap
   );
 
   // Who is there.

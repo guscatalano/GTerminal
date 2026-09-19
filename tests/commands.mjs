@@ -76,6 +76,11 @@ const OFF_UI_THREAD = new Set([
   "remote_sync",
   "remote_status",
   "remote_new_token",
+  // Approve-on-desktop pairing: each takes the pairing mutex, which a
+  // remote request also holds while it records or polls a pairing.
+  "remote_pending_pairs",
+  "remote_approve_pair",
+  "remote_reject_pair",
 ]);
 
 

@@ -20,6 +20,11 @@ export interface RemoteSettings {
   /// Whether the page may type into a shell. Separate from being able to
   /// watch one, and separately off.
   remote_input?: boolean;
+  /// Approve-on-desktop pairing. When on, a device with no token can ask
+  /// to connect and is shown a code; the desktop approves it against that
+  /// code and the device is handed the token. Off unless turned on, and
+  /// like the rest, absent has to keep meaning off.
+  remote_pairing?: boolean;
 }
 
 /// The port the Rust side falls back to. Kept in step by the test below
@@ -44,6 +49,41 @@ export function remotePort(c: RemoteSettings): number {
 
 export function remoteInput(c: RemoteSettings): boolean {
   return c.remote_input === true;
+}
+
+/// Whether a device with no token may ask to be let in. Like every other
+/// switch here, only a real boolean true turns it on, so a hand-edited
+/// `"remote_pairing": "yes"` fails closed on both sides.
+export function remotePairing(c: RemoteSettings): boolean {
+  return c.remote_pairing === true;
+}
+
+/// What turning pairing on actually means, in the sentence to read before
+/// choosing it. The device is shown a code and nothing else; the token is
+/// only ever handed over after the person at the desktop approves the
+/// request, so this changes how the token is delivered, not what it is.
+export function pairingConsequence(on: boolean): string {
+  return on
+    ? "A device opening the page without the token is shown a short code and waits. It gets in only when you approve it here, against that code — the token is handed over then, never typed."
+    : "A device without the token cannot ask to connect. Opening the page then only says the link needs its token.";
+}
+
+/// One waiting request, as the desktop sees it: a handle to answer with,
+/// the code the device is showing, and a guess at what the device is.
+/// Never a token — that is not decided until approval.
+export interface RemotePending {
+  id: string;
+  code: string;
+  device: string;
+  at_ms: number;
+}
+
+/// The line above the Allow/Deny buttons for one waiting device. The code
+/// leads, because checking it against the phone in your hand is the whole
+/// job; the device name is the client's own claim and comes second.
+export function describePending(p: RemotePending): string {
+  const device = p.device || "A device";
+  return `${device} wants to connect. Code on it: ${p.code}`;
 }
 
 /// What binding wide actually means, in the words someone should read
