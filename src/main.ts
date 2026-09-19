@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl, openPath } from "@tauri-apps/plugin-opener";
+import qrcode from "qrcode-generator";
 // The clipboard goes through the app, not the browser. navigator.clipboard
 // is a *web page's* clipboard API: WebView2 puts a permission dialog in
 // front of every read, and a read can hang outright while another process
@@ -8115,6 +8116,17 @@ function buildWeatherSection() {
 /// match it, in that order and with the config handed over rather than
 /// re-read: saveConfig debounces by 300ms, and a server started from
 /// the file in between would be running the previous answer.
+/// A QR image (data URL) for the remote link, so a phone camera opens it
+/// instead of a hand typing the token into an address bar. Type 0 sizes the
+/// code to whatever the link needs; medium error correction survives being
+/// photographed off a screen.
+function qrDataUrl(text: string): string {
+  const qr = qrcode(0, "M");
+  qr.addData(text);
+  qr.make();
+  return qr.createDataURL(6, 8);
+}
+
 function buildRemoteSection() {
   settingsSection("Remote control");
 
@@ -8221,6 +8233,10 @@ function buildRemoteSection() {
   linkWrap.className = "setting-stack";
   const links = document.createElement("div");
   links.className = "setting-status remote-mono";
+  const qrImg = document.createElement("img");
+  qrImg.className = "remote-qr";
+  qrImg.hidden = true;
+  qrImg.alt = "QR code that opens the remote address";
   const copyLink = document.createElement("button");
   copyLink.className = "set-control";
   copyLink.textContent = "Copy address";
@@ -8232,7 +8248,7 @@ function buildRemoteSection() {
       window.setTimeout(() => (copyLink.textContent = "Copy address"), 1400);
     });
   });
-  linkWrap.append(copyLink, links);
+  linkWrap.append(qrImg, copyLink, links);
   redraws.push(() => {
     const all = status.running ? addressesFor(status, config.remote_token ?? "") : [];
     // The token is in the link, and a link is the thing that gets
@@ -8241,10 +8257,17 @@ function buildRemoteSection() {
     // on the switch above is what makes that an informed trade.
     links.textContent = all.length ? all.join("\n") : "Nothing is being served.";
     copyLink.disabled = !all.length;
+    if (all.length) {
+      qrImg.src = qrDataUrl(all[0]);
+      qrImg.hidden = false;
+    } else {
+      qrImg.hidden = true;
+      qrImg.removeAttribute("src");
+    }
   });
   settingRow(
     "Address to open",
-    "Open this on the phone. The token travels in the link, and the page takes it out of the address bar as soon as it has read it.",
+    "Scan the code with the phone camera, or open the link by hand. The token travels in both, and the page takes it out of the address bar as soon as it has read it.",
     linkWrap
   );
 

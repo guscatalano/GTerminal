@@ -3030,3 +3030,15 @@ input.set-control {
   max-width: 34ch;
 }
 
+/* The scan-to-connect code. White quiet zone and pixelated scaling so a
+   phone camera reads it cleanly off the panel, whatever the theme. */
+.remote-qr {
+  width: 168px;
+  height: 168px;
+  image-rendering: pixelated;
+  background: #fff;
+  padding: 6px;
+  border-radius: 6px;
+  align-self: flex-start;
+}
+
