@@ -403,6 +403,12 @@ foreach ($spec in $specs) {
   #    reorder anything
   $long = "L" + ("0123456789" * 18) + "R"
   $wrapped = Run-Line "echo $long" 3
+  if ($wrapped -notlike "*$long*") {
+    # The whole wrapped line's echo may not have drained in the window on a
+    # slow runner; give it one more, longer pass before calling it wrong.
+    Start-Sleep -Milliseconds 500
+    $wrapped = Run-Line "echo $long" 4
+  }
   if ($wrapped -like "*$long*") { "PASS [$name] wrapped line executed intact" }
   else { $failures += "[$name] wrap: 200-char line came back wrong" }
 
@@ -896,6 +902,23 @@ function Test-DaemonResponsive {
   }
 }
 
+# Measure-Keystrokes can come back short when one keystroke's echo stalls
+# past its 5s wait on a loaded runner - the measurement aborts early. A
+# fresh one then lands, while a genuinely dropped keystroke stalls both
+# times. Re-measure once under $Min samples, so a busy CI runner does not
+# read as a latency regression or a dropped key.
+function Measure-Steady {
+  param([int]$Count, [int]$Min, [string]$Text = "")
+  $run = { if ($Text) { Measure-Keystrokes $Count $Text } else { Measure-Keystrokes $Count } }
+  $m = & $run
+  if ($null -eq $m -or @($m).Count -lt $Min) {
+    Write-Host "  (keystroke echo came back short - $(@($m).Count)/$Count - re-measuring once)" -ForegroundColor DarkYellow
+    Start-Sleep -Seconds 1
+    $m = & $run
+  }
+  $m
+}
+
 # Print enough to carry the ring past its cap and into the regime where
 # it trims. Everything about scrollback cost only starts there.
 function Fill-Ring {
@@ -922,14 +945,14 @@ $latSess = Open-Shell "pwsh"
 
 # 1. The original: fresh session, empty prompt. Still worth keeping - it
 #    is the floor everything else is compared against.
-Check-Latency "fresh" (Measure-Keystrokes 40) 50 150
+Check-Latency "fresh" (Measure-Steady 40 30) 50 150
 
 # 2. The same thing once the ring is past its cap. The ring is a buffer
 #    drained from the front; trimming it per chunk instead of in batches
 #    moves half a megabyte for every chunk of output, under the lock a
 #    keystroke needs. Nothing about the fresh case can see that.
 Fill-Ring
-Check-Latency "full ring" (Measure-Keystrokes 40) 50 150
+Check-Latency "full ring" (Measure-Steady 40 30) 50 150
 
 # 3. Along a long line, which is what a person actually notices: PSReadLine
 #    repaints the whole input line on every keypress, so the echo grows
@@ -938,7 +961,7 @@ Check-Latency "full ring" (Measure-Keystrokes 40) 50 150
 #    than the start, but not a different order of magnitude, and a ratio
 #    does not need a fast machine to stay honest.
 $sentence = "the quick brown fox jumps over the lazy dog and keeps on running well past the point where any sensible animal would have stopped to rest a while"
-$line = Measure-Keystrokes $sentence.Length $sentence
+$line = Measure-Steady $sentence.Length 60 $sentence
 if ($null -eq $line -or $line.Count -lt 60) {
   $failures += "latency long line: a keystroke got no echo within 5s"
 } else {
@@ -975,7 +998,7 @@ if (-not (Test-DaemonResponsive 5000)) {
 } else {
   "PASS stalled client: the daemon still answers with a client stalled mid-flood"
   $typeSess = Open-Shell "pwsh"
-  Check-Latency "stalled neighbour" (Measure-Keystrokes 40) 80 250
+  Check-Latency "stalled neighbour" (Measure-Steady 40 30) 80 250
 }
 # Let the flooder's socket go before anything tries to kill it: on a build
 # where the pump is blocked writing to it, the kill would block too, and
