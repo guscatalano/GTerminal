@@ -1,0 +1,207 @@
+<!doctype html>
+<!--
+  Does what a redrawing program draws depend on how its bytes were split?
+
+  Driven by tests/chunking.mjs. A terminal reads its input in whatever
+  chunks the reads happen to deliver, and those boundaries are not stable:
+  a tab typing gets many small writes, a tab that sat idle gets one big
+  coalesced burst when it wakes, and a busy machine splits a sequence
+  wherever a read returned short. If a redraw sequence is mishandled when
+  it arrives split at a particular byte, the screen is wrong — and because
+  the split depends on timing, the wrong screen looks random and shows up
+  "after the tab was idle for a while".
+
+  So this writes each sequence into a fresh terminal several times, split
+  differently each time — whole, one byte at a time, at every escape, at
+  fixed strides, and at seeded-random positions — and reads the whole
+  buffer back after each. The invariant is simple and total: every
+  splitting must land the terminal in the identical state. Awaiting each
+  chunk's parse before the next is the faithful part — it is bytes
+  arriving separated in time, not concatenated in one buffer.
+
+  Sequences live here; the invariant lives in the test. This file says
+  what a program draws; the test says the drawing cannot depend on the
+  read boundaries.
+-->
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css" />
+<style>
+  body { margin: 0; background: #101014; }
+  #term { width: 700px; height: 260px; }
+  #out { font: 12px monospace; white-space: pre-wrap; color: #000; background: #fff; }
+</style>
+<div id="term"></div>
+<pre id="out">PENDING</pre>
+<script type="module">
+  import { Terminal } from "../../node_modules/@xterm/xterm/lib/xterm.mjs";
+
+  const ESC = "\x1b";
+  const BEL = "\x07";
+  const ST = ESC + "\\";
+
+  // Every one of these is something a picker, a progress bar, vim,
+  // lazygit or an agent TUI writes on a frame — chosen because each hides
+  // a boundary a naive parser can trip on: an ESC alone at the end of a
+  // read, a parameter cut between its digits, an OSC string split across
+  // its terminator, a wide char split across its two bytes.
+  const SEQS = [
+    { name: "plain text", data: "hello world" },
+    { name: "erase in line, rewritten in place", data: `STATUS: working${ESC}[1G${ESC}[KSTATUS: done` },
+    { name: "full-screen repaint by cursor address", data: `${ESC}[2J${ESC}[1;1HTOP${ESC}[4;10HMIDDLE${ESC}[8;1HBOTTOM` },
+    { name: "multi-parameter cursor address", data: `${ESC}[2;1HA${ESC}[12;34HB${ESC}[3;5HC` },
+    { name: "sgr run then reset", data: `${ESC}[1;31;44mRED ON BLUE${ESC}[0m plain` },
+    { name: "sgr split-prone long params", data: `${ESC}[38;5;208mORANGE${ESC}[48;2;10;20;30mBG${ESC}[0m` },
+    { name: "scroll region set, scroll, reset", data: `${ESC}[HHEAD${ESC}[2;4r${ESC}[2;1HL1\r\nL2\r\nL3\r\nL4\r\nL5${ESC}[r` },
+    { name: "alternate screen round trip", data: `MAIN${ESC}[?1049hDRAWN OVER${ESC}[2;1HMORE${ESC}[?1049l` },
+    { name: "insert and delete lines", data: `A\r\nB\r\nC\r\nD${ESC}[2;1H${ESC}[L${ESC}[3;1H${ESC}[M` },
+    { name: "insert and delete characters", data: `ABCDEFGH${ESC}[1;3H${ESC}[2@${ESC}[1;6H${ESC}[2P` },
+    { name: "save and restore cursor", data: `AB${ESC}7${ESC}[6;20HZZ${ESC}8CD` },
+    { name: "OSC title set mid-stream", data: `before${ESC}]0;a new window title${BEL}after` },
+    { name: "OSC ended with ST not BEL", data: `x${ESC}]2;title via ST${ST}y` },
+    { name: "synchronised output frame", data: `${ESC}[?2026h${ESC}[2J${ESC}[1;1HFRAME${ESC}[2;1HROW-TWO${ESC}[?2026l` },
+    { name: "wide characters and a following column", data: `日本語 X` },
+    { name: "deferred wrap at the last column", data: `${"x".repeat(40)}Z` },
+    { name: "autowrap disabled then re-enabled", data: `${ESC}[?7l${"y".repeat(48)}${ESC}[?7hZ` },
+    { name: "carriage return overwrites in place", data: `LONGER FIRST LINE\rSHORT` },
+    { name: "erase whole display variants", data: `AAA\r\nBBB\r\nCCC${ESC}[2;2H${ESC}[1J${ESC}[2;2H${ESC}[0J` },
+    { name: "a two-frame vim-like repaint", data:
+      `${ESC}[2J${ESC}[1;1H${ESC}[7m file.txt ${ESC}[0m${ESC}[2;1H  1 first line${ESC}[3;1H  2 second line${ESC}[4;1H~` +
+      `${ESC}[2;1H${ESC}[K  1 FIRST LINE EDITED${ESC}[3;1H${ESC}[K  2 second line${ESC}[10;1H${ESC}[7m -- INSERT -- ${ESC}[0m` },
+    { name: "tab stops and backspace", data: `a\tb\tc\b\bZ` },
+    { name: "many newlines into the scrollback", data: Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\r\n") },
+  ];
+
+  // ── how a sequence gets split ──────────────────────────────────────────
+  // Each returns the list of chunks the bytes arrive in.
+  const whole = (d) => [d];
+  const perUnit = (d) => [...d];
+  function everyN(n) {
+    return (d) => {
+      const out = [];
+      for (let i = 0; i < d.length; i += n) out.push(d.slice(i, i + n));
+      return out.length ? out : [""];
+    };
+  }
+  // Split so that every ESC begins a new chunk: the introducer of a
+  // sequence arrives at the tail of one read and its body in the next,
+  // which is the single most common way a partial sequence is mishandled.
+  function afterEsc(d) {
+    const out = [];
+    let cur = "";
+    for (const ch of d) {
+      if (ch === ESC && cur) { out.push(cur); cur = ""; }
+      cur += ch;
+    }
+    if (cur) out.push(cur);
+    return out;
+  }
+  // Deterministic pseudo-random split positions, so an adversarial
+  // boundary is covered without the suite being flaky.
+  function seeded(seed) {
+    return (d) => {
+      let s = seed >>> 0;
+      const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+      const out = [];
+      let i = 0;
+      while (i < d.length) {
+        const step = 1 + Math.floor(rnd() * 4);
+        out.push(d.slice(i, i + step));
+        i += step;
+      }
+      return out.length ? out : [""];
+    };
+  }
+
+  const CHUNKINGS = [
+    ["whole", whole],
+    ["per-unit", perUnit],
+    ["after-esc", afterEsc],
+    ["every-2", everyN(2)],
+    ["every-3", everyN(3)],
+    ["every-7", everyN(7)],
+    ["seeded-a", seeded(0x1234)],
+    ["seeded-b", seeded(0x9e37)],
+  ];
+
+  const host = document.getElementById("term");
+
+  function snapshot(term) {
+    const buf = term.buffer.active;
+    const lines = [];
+    for (let i = 0; i < buf.length; i++) {
+      lines.push((buf.getLine(i)?.translateToString(true) ?? "").replace(/\s+$/, ""));
+    }
+    return {
+      screen: term.buffer.active === term.buffer.alternate ? "alt" : "normal",
+      cursorX: buf.cursorX,
+      cursorY: buf.cursorY,
+      baseY: buf.baseY,
+      length: buf.length,
+      lines,
+    };
+  }
+
+  async function stateFor(data, chunkFn) {
+    const term = new Terminal({
+      cols: 40,
+      rows: 8,
+      // The options main.ts builds a terminal with that can change what
+      // lands in the buffer, not merely how it looks.
+      allowProposedApi: true,
+      allowTransparency: true,
+      minimumContrastRatio: 4.5,
+      scrollback: 100,
+    });
+    const div = document.createElement("div");
+    host.appendChild(div);
+    term.open(div);
+    // Await each chunk's parse before the next: bytes separated in time,
+    // which is what a coalesced-then-split delivery actually is.
+    for (const chunk of chunkFn(data)) {
+      await new Promise((resolve) => term.write(chunk, resolve));
+    }
+    const st = snapshot(term);
+    term.dispose();
+    div.remove();
+    return st;
+  }
+
+  // The first place two states differ, in words, so a failure names the
+  // row and the two spellings rather than dumping both whole buffers.
+  function firstDiff(a, b) {
+    for (const f of ["screen", "cursorX", "cursorY", "baseY", "length"]) {
+      if (a[f] !== b[f]) return { field: f, whole: a[f], got: b[f] };
+    }
+    const n = Math.max(a.lines.length, b.lines.length);
+    for (let i = 0; i < n; i++) {
+      if (a.lines[i] !== b.lines[i]) {
+        return { field: `row ${i}`, whole: a.lines[i] ?? "<none>", got: b.lines[i] ?? "<none>" };
+      }
+    }
+    return { field: "?", whole: "", got: "" };
+  }
+
+  (async () => {
+    const results = [];
+    try {
+      for (const seq of SEQS) {
+        const states = {};
+        for (const [cname, cfn] of CHUNKINGS) states[cname] = await stateFor(seq.data, cfn);
+        const base = states["whole"];
+        const baseJson = JSON.stringify(base);
+        let mismatch = null;
+        for (const [cname] of CHUNKINGS) {
+          if (cname === "whole") continue;
+          if (JSON.stringify(states[cname]) !== baseJson) {
+            mismatch = { strategy: cname, ...firstDiff(base, states[cname]) };
+            break;
+          }
+        }
+        results.push(mismatch ? { name: seq.name, ok: false, ...mismatch } : { name: seq.name, ok: true });
+      }
+      document.getElementById("out").textContent = "RESULTS " + JSON.stringify(results);
+    } catch (e) {
+      document.getElementById("out").textContent = "RESULTS-ERROR " + String((e && e.stack) || e);
+    }
+  })();
+</script>
