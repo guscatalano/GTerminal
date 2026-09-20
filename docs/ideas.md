@@ -279,3 +279,55 @@ What is still worth doing: the pipe itself, which would make the check
 structural rather than something every client has to remember. The
 remaining gap is a process running as this user that has no business
 driving a shell — for which a file it can read is no barrier.
+
+## Argued, and set down
+
+### 17. Remote terminals — a tab on another machine
+
+The ask was two things wearing one name: a tab that is a shell *on*
+another box — `ssh user@host`, or PowerShell's `Enter-PSSession` over
+WinRM or over SSH — and a tab that attaches to *another GTerminal's*
+running sessions, the same ones its own window is showing.
+
+Both are cheaper than they look, which is what made them tempting. The
+shell half is nearly free: a session template already carries a run-on-
+open command (idea 9), delivered after the first prompt, so a connection
+is just a template whose command is `ssh …`. Nothing new in the daemon,
+and a property worth having falls out — the local shell it launched from
+is a harbour, so when the remote drops you land back at a working prompt
+instead of a dead tab. The GTerminal-to-GTerminal half is cheap where it
+counts too: the trust is already built. The far window runs the remote-
+control server (the phone view's server), and the approve-on-desktop
+pairing shipped with it — a device with no token asks, a code shows on
+the desktop, approval hands back the token. Machine to machine is the
+same handshake with a native client in the phone's place; not a line of
+new auth.
+
+So the machinery is small. We set it down anyway, on the question the
+machinery does not answer: **how does anyone tell a remote pane from a
+local one?** A connection is not really a launcher — it is an identity,
+and until that identity is carried everywhere the session shows its face
+(the tab, a strip across the top of the pane, the sidebar row, the status
+bar), with local staying plain and only remote lit, the feature's net
+effect is to make it easy to lose track of which machine a keystroke
+lands on. That is the one mistake a terminal must never make cheap, and
+shipping the easy half — the launcher — without the identity makes it
+cheaper, not dearer. The cheap half is the trap.
+
+The launcher placement was a smaller cut of the same worry. Inline in the
+new-tab `+` menu, "open a shell here" and "go to another machine" read as
+one action, and that menu already carries templates, elevated, and the
+raw shells. And the harbour muddies the very signal it would need: an ssh
+tab is local, then remote, then local again on `exit`, and the app has no
+live read of which — the prompt hook that reports the folder stops at the
+ssh boundary, so "am I home?" would be a guess until that hook learns to
+report the hostname too.
+
+What it would take to pick this up is therefore not the ssh command —
+that is an afternoon — but the identity, worked out first: a colour and a
+name a connection wears on its tab and its pane and every list it appears
+in; the prompt hook taught to carry the host so remote-versus-local is
+live rather than assumed; and a home for connections that is not the `+`
+menu. The argument to build it does not hold yet. Revisit when someone is
+driving a second machine often enough to pay for being sure, at a glance,
+which one they are typing into.
