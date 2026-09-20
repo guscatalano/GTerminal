@@ -124,12 +124,6 @@ a hand makes on the way to the one it wanted. A scene drags with the
 setting off and then on, because either half alone passes for the
 wrong reason.
 
-### 6. Broadcast input to several panes
-
-Splits exist; typing the same thing into each is manual. tmux calls it
-synchronize-panes and Windows Terminal has it too. Worth it if you run
-agents side by side, which is what these panes are usually for.
-
 ### 7. Find, properly — *done, and the entry was mostly wrong*
 
 Written up as "no regex, no case toggle, and nothing searches the
@@ -179,11 +173,6 @@ pre-types it, because a command sitting at a prompt is one keystroke
 from either running or being erased, which is worse than either. The
 lifecycle test waits for the marker to appear *twice*, echoed and then
 printed, since once means typed and never run.
-
-### 10. A screen-reader mode
-
-xterm has one and nothing exposes it. A checkbox and a line of settings
-text, and the only reason it is not higher is that nobody has asked.
 
 ### 12. Shell integration for cmd and WSL — *done; WSL tested on a real distro*
 
@@ -281,6 +270,28 @@ remaining gap is a process running as this user that has no business
 driving a shell — for which a file it can read is no barrier.
 
 ## Argued, and set down
+
+### 6. Broadcast input to several panes — set down
+
+Splits exist; typing the same thing into each is manual, and tmux
+(synchronize-panes) and Windows Terminal both do it. Set down because the
+split here is for *watching* several things run, not driving them in
+lockstep — and a mode that sends one keystroke into every live shell is a
+footgun with a narrow upside: the day it saves you typing one command
+into four shells is outnumbered by the day it runs the wrong one in all
+four. Not worth the mode, and the guardrails it would need, until
+something asks for it far more loudly than anything has.
+
+### 10. A screen-reader mode — set down, not against
+
+xterm has one and nothing exposes it, so it looked like a checkbox and a
+line of settings text. That is the trap: exposing the flag is not the
+same as a terminal that actually reads well, and shipping the toggle
+would claim an accessibility feature without having sat with a real
+screen reader to know it delivers one. Better built properly — and tested
+against an actual reader — the day someone needs it, than shipped on
+faith as a tickbox. The door stays open; this is "not yet, and not like
+this", not "no".
 
 ### 17. Remote terminals — a tab on another machine
 
