@@ -1189,7 +1189,14 @@ if ($Only) {
   Release-Modifiers
 }
 
-$baseCfg = '"grace_minutes":5,"prediction":"off","summon_hotkey":"Control+Alt+F9","close_action":"hide","bell":"none"'
+# First-run hints are marked already-shown, so no scene has to race a
+# nudge that appears once and then dismisses itself. The shortcuts nudge
+# in particular is not gated on a fresh install (it is meant to reach
+# existing users too), so without this it drew over the top-right of every
+# scene for its first fourteen seconds — which is what a clean frame
+# captured early and a "new tab" frame captured late disagreed about in
+# the ghost scene, reading as 3.2% of ghosting that was really the hint.
+$baseCfg = '"grace_minutes":5,"prediction":"off","summon_hotkey":"Control+Alt+F9","close_action":"hide","bell":"none","themes_hint_shown":true,"shortcuts_hint_shown":true'
 
 # ══ scene: powershell ══════════════════════════════════════════════════
 if (-not $Only -or $Only -eq "pwsh") {
