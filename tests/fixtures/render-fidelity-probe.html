@@ -1,0 +1,114 @@
+<!doctype html>
+<!--
+  Does the renderer show what the buffer holds — after a partial redraw?
+
+  Driven by tests/render-fidelity.mjs. The chunking probe proves the bytes
+  land in the buffer correctly however they are split; this proves the
+  other half of the bisection — that what is *drawn* matches the buffer,
+  cell for cell, after the kind of partial repaint a TUI does every frame.
+
+  A "mispaint" is a cell whose drawn glyph is not the one in the buffer:
+  a leftover from a previous frame, a row the renderer decided was clean
+  and skipped. That is a render-vs-data divergence, and the DOM renderer
+  is the one whose output can be read back and compared without a
+  screenshot — so this drives that renderer, writes a frame, lets it
+  paint, and reads every rendered row back against the buffer line.
+
+  The WebGL renderer's pixels are only visible to a screenshot (the visual
+  scenes); this pins the renderer the app falls back to, and the family of
+  bug — stale cell after a partial overwrite — that looks the same in both.
+-->
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css" />
+<style>
+  body { margin: 0; background: #101014; }
+  #term { width: 700px; height: 260px; }
+  #out { font: 12px monospace; white-space: pre-wrap; color: #000; background: #fff; }
+</style>
+<div id="term"></div>
+<pre id="out">PENDING</pre>
+<script type="module">
+  import { Terminal } from "../../node_modules/@xterm/xterm/lib/xterm.mjs";
+
+  const ESC = "\x1b";
+
+  // A running program's frames: each entry is written on top of the last,
+  // and after each the drawn rows must equal the buffer rows. The partial
+  // ones are the point — a renderer that repaints only what it thinks
+  // changed is exactly the thing that leaves a stale cell behind.
+  const FRAMES = [
+    { name: "fill the screen", data: `${ESC}[2J${ESC}[H` + Array.from({ length: 8 }, (_, i) => `row ${i} original content`).join("\r\n") },
+    { name: "rewrite one row in place", data: `${ESC}[4;1H${ESC}[K    ROW FOUR REPLACED` },
+    { name: "erase to end of another row", data: `${ESC}[2;12H${ESC}[K` },
+    { name: "insert a line, pushing the rest down", data: `${ESC}[6;1H${ESC}[LINSERTED AT SIX` },
+    { name: "delete a line, pulling the rest up", data: `${ESC}[3;1H${ESC}[M` },
+    { name: "a scroll region moves only its band", data: `${ESC}[2;5r${ESC}[5;1H\r\nBAND SCROLLED${ESC}[r` },
+    { name: "colour a run without moving text", data: `${ESC}[1;1H${ESC}[43;30mrow${ESC}[0m` },
+    { name: "leave and return from the alternate screen", data: `${ESC}[?1049hFULLSCREEN JUNK${ESC}[2;1HMORE JUNK${ESC}[?1049l` },
+    { name: "clear it all again", data: `${ESC}[2J${ESC}[H` + Array.from({ length: 8 }, (_, i) => `final ${i}`).join("\r\n") },
+  ];
+
+  const host = document.getElementById("term");
+  const term = new Terminal({
+    cols: 40,
+    rows: 8,
+    // main.ts's buffer-affecting options; no WebglAddon, so xterm uses its
+    // DOM renderer, whose rows are readable here.
+    allowProposedApi: true,
+    allowTransparency: true,
+    minimumContrastRatio: 4.5,
+    scrollback: 100,
+  });
+  term.open(host);
+
+  const nextFrame = () =>
+    new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+  function bufferRows() {
+    const buf = term.buffer.active;
+    const rows = [];
+    for (let i = 0; i < term.rows; i++) {
+      rows.push((buf.getLine(buf.viewportY + i)?.translateToString(true) ?? "").replace(/\s+$/, ""));
+    }
+    return rows;
+  }
+
+  // What the DOM renderer actually put on screen, row by row. The renderer
+  // draws each viewport row as one element under .xterm-rows.
+  function renderedRows() {
+    const container = host.querySelector(".xterm-rows");
+    if (!container) return null;
+    return Array.from(container.children).slice(0, term.rows).map((el) =>
+      // The renderer pads with spaces / non-breaking spaces to full width;
+      // trailing padding is not content, so it does not count as a mismatch.
+      (el.textContent ?? "").replace(/ /g, " ").replace(/\s+$/, "")
+    );
+  }
+
+  (async () => {
+    const results = [];
+    try {
+      for (const frame of FRAMES) {
+        await new Promise((resolve) => term.write(frame.data, resolve));
+        await nextFrame();
+        const buf = bufferRows();
+        const drawn = renderedRows();
+        let mismatch = null;
+        if (!drawn) {
+          mismatch = { field: "renderer", buffer: "<rows>", drawn: "<no .xterm-rows found>" };
+        } else {
+          for (let i = 0; i < buf.length; i++) {
+            if ((drawn[i] ?? "") !== buf[i]) {
+              mismatch = { field: `row ${i}`, buffer: buf[i], drawn: drawn[i] ?? "<none>" };
+              break;
+            }
+          }
+        }
+        results.push(mismatch ? { name: frame.name, ok: false, ...mismatch } : { name: frame.name, ok: true });
+      }
+      document.getElementById("out").textContent = "RESULTS " + JSON.stringify(results);
+    } catch (e) {
+      document.getElementById("out").textContent = "RESULTS-ERROR " + String((e && e.stack) || e);
+    }
+  })();
+</script>
