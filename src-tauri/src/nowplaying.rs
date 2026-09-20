@@ -33,6 +33,16 @@ pub fn current(want_art: bool) -> Option<Value> {
     }
 }
 
+/// Assemble a `data:` URI from a MIME type and raw image bytes, defaulting
+/// the type when the stream named none. Pure and platform-agnostic — the
+/// WinRT side hands it the bytes and the declared type — so the format and
+/// the fallback are tested without a live session.
+fn data_uri(mime: &str, bytes: &[u8]) -> String {
+    let mime = mime.trim();
+    let mime = if mime.is_empty() { "image/jpeg" } else { mime };
+    format!("data:{};base64,{}", mime, crate::mux::b64(bytes))
+}
+
 #[cfg(windows)]
 mod imp {
     use serde_json::{json, Value};
@@ -121,13 +131,37 @@ mod imp {
         let mut bytes = vec![0u8; size as usize];
         reader.ReadBytes(&mut bytes).ok()?;
 
-        let mime = stream
-            .ContentType()
-            .map(|h| h.to_string())
-            .ok()
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "image/jpeg".to_string());
+        let mime = stream.ContentType().map(|h| h.to_string()).unwrap_or_default();
+        Some(super::data_uri(&mime, &bytes))
+    }
+}
 
-        Some(format!("data:{};base64,{}", mime, crate::mux::b64(&bytes)))
+#[cfg(test)]
+mod tests {
+    use super::data_uri;
+
+    #[test]
+    fn a_named_type_is_kept_and_the_bytes_are_base64() {
+        // "foo" -> "Zm9v" is the RFC vector; the encoder is mux::b64.
+        assert_eq!(data_uri("image/png", b"foo"), "data:image/png;base64,Zm9v");
+        assert_eq!(data_uri("image/jpeg", b""), "data:image/jpeg;base64,");
+    }
+
+    #[test]
+    fn a_blank_type_falls_back_to_jpeg() {
+        // Some streams answer ContentType with nothing; a data URI still has
+        // to name a type or the browser will not decode it.
+        assert_eq!(data_uri("", b"foo"), "data:image/jpeg;base64,Zm9v");
+        assert_eq!(data_uri("   ", b"foo"), "data:image/jpeg;base64,Zm9v");
+    }
+
+    #[test]
+    fn nothing_playing_is_a_clean_none_not_a_panic() {
+        // Off Windows there is no media API; the call must be a quiet None
+        // rather than a crash — the same shape the frontend treats as "not
+        // playing". On Windows this just exercises that the call returns.
+        let _ = super::current(false);
+        #[cfg(not(windows))]
+        assert!(super::current(true).is_none());
     }
 }

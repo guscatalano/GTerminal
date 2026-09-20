@@ -5,6 +5,7 @@
 // a person reads is pure — so it is tested here, and the Rust side stays
 // thin glue over the system media API.
 import { formatNowPlaying, nowPlayingLabel, sameTrack } from "../src/nowplaying.ts";
+import { readFileSync } from "fs";
 
 let failed = 0;
 function check(name, got, want) {
@@ -43,6 +44,25 @@ check("the same song paused is the same track", sameTrack(track(), track({ playi
 check("a different title is a different track", sameTrack(track(), track({ title: "The Chain" })), false);
 check("null matches only null", sameTrack(track(), null), false);
 check("both null is the same (nothing)", sameTrack(null, null), true);
+
+// ── the wiring, so the feature cannot be half-removed ──────────────────
+// The pure parts above are useless if nothing calls them. These pin the
+// three ends: the status item, the live theme, and the two-cost poll.
+const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+check("the status bar has a now-playing item", /nowplaying:\s*\{[\s\S]{0,200}formatNowPlaying/.test(main), true);
+check("there is a Now Playing theme", /THEMES\["now-playing"\]\s*=\s*mkTheme/.test(main), true);
+check("the status line reads with art off", main.includes('"now_playing", { art: false }'), true);
+check("the background reads with art on", main.includes('"now_playing", { art: true }'), true);
+check(
+  "art is only refetched when the track changes",
+  /sameTrack\([\s\S]{0,400}art: true/.test(main),
+  true
+);
+check(
+  "polling is gated on the item or the theme being present",
+  /ids\.includes\("nowplaying"\) \|\| npTheme/.test(main),
+  true
+);
 
 if (failed) {
   console.log(`${failed} now-playing test(s) failed`);
