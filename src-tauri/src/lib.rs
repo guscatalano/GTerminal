@@ -809,8 +809,8 @@ const WEATHER_TTL_MS: u64 = 10 * 60 * 1000;
 /// frontend only asks while the setting is on, so the poll, not a gate
 /// here, is what keeps it quiet.
 #[tauri::command(async)]
-fn now_playing() -> Option<serde_json::Value> {
-    nowplaying::current()
+fn now_playing(art: bool) -> Option<serde_json::Value> {
+    nowplaying::current(art)
 }
 
 /// Nothing is requested until a postcode is set: this is the only thing the

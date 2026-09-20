@@ -103,6 +103,8 @@ import { formatEvent, describeText, logLevel, shouldLog } from "./uilog";
 import type { UiEvent } from "./uilog";
 import { BlockTracker } from "./blocks";
 import type { Block } from "./blocks";
+import { formatNowPlaying, sameTrack } from "./nowplaying";
+import type { NowPlaying } from "./nowplaying";
 import {
   leavesOf,
   replaceLeaf,
@@ -389,10 +391,39 @@ const BG_PRESETS: Record<string, string> = {
 
 /// Resolve the effective background CSS: theme's built-in art by default,
 /// or a preset / custom image / plain color per the Background setting.
+/// The album art of whatever is playing, as a data: URI, or null. Drives
+/// the "Now Playing" theme's background; set by the status poll on a track
+/// change so a busy image is fetched once per song, not once per tick.
+let nowPlayingArt: string | null = null;
+
+/// Whether the live album-art background is the thing on screen right now:
+/// the theme is picked, and there is a picture to show.
+function nowPlayingBgActive(): boolean {
+  return themeKey === "now-playing" && !!nowPlayingArt;
+}
+
+/// Swap the album art behind the terminal. A no-op when it has not changed,
+/// so re-renders do not repaint the same picture; repaints the background
+/// only while the theme that uses it is the one on screen.
+function setNowPlayingArt(art: string | null) {
+  if (art === nowPlayingArt) return;
+  nowPlayingArt = art;
+  if (themeKey === "now-playing") applyBackground();
+}
+
 function resolvedBgCss(): string {
   const style = config.bg_style ?? "theme";
   if (style === "none") return "";
-  if (style === "theme") return currentTheme().bgArt;
+  if (style === "theme") {
+    // The live theme: the current album art, or its flat dark ground when
+    // nothing is playing.
+    if (themeKey === "now-playing") {
+      return nowPlayingArt
+        ? `url("${nowPlayingArt.replace(/"/g, "%22")}") center / cover no-repeat fixed`
+        : currentTheme().bgArt;
+    }
+    return currentTheme().bgArt;
+  }
   if (style === "custom") {
     const raw = config.bg_image?.trim();
     if (!raw) return "";
@@ -447,9 +478,14 @@ function applyBackground() {
     `${Math.round(80 + (100 - transp) * 0.2)}%`
   );
   // Theme-built-in art is already palette-matched and subtle; presets and
-  // images get the dim overlay for readability.
-  const isThemeArt = (config.bg_style ?? "theme") === "theme";
-  const dim = Math.min(0.95, Math.max(0, (config.bg_dim ?? 50) / 100));
+  // images get the dim overlay for readability. The live album art is a
+  // picture like any other — unknown, often bright — so it takes the
+  // overlay too, with a firmer floor since text has to survive whatever
+  // cover art it lands on.
+  const npArt = nowPlayingBgActive();
+  const isThemeArt = (config.bg_style ?? "theme") === "theme" && !npArt;
+  let dim = Math.min(0.95, Math.max(0, (config.bg_dim ?? 50) / 100));
+  if (npArt) dim = Math.max(dim, 0.6);
   const overlay = hexToRgba(currentTheme().xterm.background ?? "#0f1115", dim);
   appEl.style.background = isThemeArt
     ? image
@@ -2635,6 +2671,25 @@ THEMES.spotify = mkTheme(
 THEMES.spotify.xterm.cursor = "#1db954";
 THEMES.spotify.xterm.selectionBackground = "#1db95440";
 
+// The live one: its background is the album art of whatever is playing,
+// swapped in as the track changes (see nowPlayingArt / setNowPlayingArt).
+// A neutral, high-contrast palette because the art behind it is anything
+// at all; a flat dark ground when nothing is playing. Reads what's playing
+// from Windows' media controls, locally — off unless this theme is picked.
+THEMES["now-playing"] = mkTheme(
+  "Now Playing",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.15, "bar"],
+  "linear-gradient(180deg, #0a0a0a, #050505)",
+  "#0a0a0a",
+  "#ececec",
+  [
+    "#2a2a2a", "#ff6b6b", "#57d977", "#ffcf5a", "#66aaff", "#d78aff", "#56d6d6", "#d8d8d8",
+    "#6a6a6a", "#ff8f8f", "#7fe89a", "#ffdd85", "#90c4ff", "#e3adff", "#85e6e6", "#ffffff",
+  ]
+);
+THEMES["now-playing"].xterm.cursor = "#57d977";
+
 // Per-theme see-through defaults. Busy or bright backdrops (dense text,
 // white UI panels, lit floors) veil themselves more so the terminal
 // stays legible; sparse dark art keeps the full 100.
@@ -2654,7 +2709,7 @@ for (const [k, v] of Object.entries({
   // the brighter or busier grounds veil themselves more.
   cassette: 62, vaporwave: 66, "golden-hour": 72, hades: 78, discoelysium: 78,
   mrrobot: 78, obsidian: 80, eldenring: 82, aurora: 85, abyss: 85,
-  hollowknight: 88, hal9000: 90, spotify: 85,
+  hollowknight: 88, hal9000: 90, spotify: 85, "now-playing": 62,
 })) {
   if (THEMES[k]) THEMES[k].transparency = v;
 }
@@ -2826,6 +2881,25 @@ function applyTheme(key: string) {
   applyAppearance(); // also refreshes --ui-font from the theme's font
   config.theme = themeKey;
   saveConfig();
+  // The live theme needs its picture at once — whatever the poll's clock
+  // says, and even when the track was already known (so switching to it
+  // with music already playing is not a blank wait for the next change).
+  if (themeKey === "now-playing") {
+    nowPlayingLastRun = 0;
+    void invoke<NowPlaying | null>("now_playing", { art: true })
+      .then((np) => {
+        if (np) {
+          statusCtx.nowplaying = np;
+          statusCtx.nowplayingFetched = true;
+        }
+        setNowPlayingArt(np?.art ?? null);
+      })
+      .catch(() => {});
+  } else if (nowPlayingArt) {
+    // Left the theme: drop the cached picture so it cannot flash back the
+    // moment the theme is chosen again, before a fresh track has loaded.
+    nowPlayingArt = null;
+  }
 }
 
 function orderedIds(): number[] {
@@ -8281,7 +8355,7 @@ const THEME_GROUPS: Array<[string, string[]]> = [
   ["Consoles", ["library", "blade", "cartridge", "polygon"]],
   ["Anime", ["akira", "bebop", "scouter", "nerv"]],
   ["Space", ["hyperspace", "space", "missionctl"]],
-  ["Media", ["spotify"]],
+  ["Media", ["spotify", "now-playing"]],
   ["Nature & sky", ["aurora", "golden-hour", "abyss", "obsidian"]],
   ["Places & vibes", ["skicabin", "rave", "nightclub", "speakeasy", "datacenter", "backrooms"]],
   ["Art & liminal", ["hermes", "nous", "synthwave", "outrun", "vaporwave", "cassette", "blueprint", "redacted", "sakura", "pride"]],
@@ -10440,6 +10514,13 @@ interface StatusCtx {
   /// for whether that file existed and parsed.
   claude: ClaudeUsage | null;
   claudeError: string;
+  /// Null until the first read comes back. `nowplayingFetched` tells a
+  /// silent player ("nothing playing") apart from a first tick that has
+  /// not answered yet — two states that must not read the same. Read
+  /// locally from Windows' media controls; only polled while the item is
+  /// on the bar, which is the opt-in. See PRIVACY.md.
+  nowplaying: NowPlaying | null;
+  nowplayingFetched: boolean;
 }
 
 interface StatusDetail {
@@ -10458,6 +10539,30 @@ interface StatusItemDef {
 
 
 const STATUS_BUILTINS: Record<string, StatusItemDef> = {
+  nowplaying: {
+    label: "Now playing",
+    render: (c) => formatNowPlaying(c.nowplaying, c.nowplayingFetched),
+    detail: (c) => {
+      const np = c.nowplaying;
+      if (!np) {
+        return {
+          rows: [
+            ["Status", c.nowplayingFetched ? "Nothing is playing" : "Reading…"],
+            ["Source", "Windows media controls — Spotify, a browser, any player"],
+            ["Privacy", "Read on this machine only. Nothing is sent anywhere."],
+          ],
+        };
+      }
+      return {
+        rows: [
+          ["Title", np.title || "—"],
+          ["Artist", np.artist || "—"],
+          ["Album", np.album || "—"],
+          ["State", np.playing ? "Playing" : "Paused"],
+        ],
+      };
+    },
+  },
   weather: {
     label: "Weather",
     render: (c) =>
@@ -10867,6 +10972,8 @@ let statusCtx: StatusCtx = {
   weatherError: "",
   claude: null,
   claudeError: "",
+  nowplaying: null,
+  nowplayingFetched: false,
 };
 
 /// Items whose data costs a wildcard PDH sweep; only those groups get
@@ -10888,6 +10995,10 @@ let weatherLastRun = 0;
 /// already caches for a minute (CLAUDE_USAGE_TTL in lib.rs), so asking
 /// every status-bar tick would just be a wasted IPC round trip.
 let claudeLastRun = 0;
+/// Song info changes slowly and the read is a WinRT round trip, so it has
+/// its own gentle cadence rather than the tick's. Only ever set while the
+/// item is on the bar — that presence is the opt-in.
+let nowPlayingLastRun = 0;
 
 function statusItemIds(): string[] {
   return config.status_items ?? ["clock", "cpu", "mem", "diskio"];
@@ -11011,6 +11122,34 @@ async function sampleStatus() {
       .catch((e) => {
         statusCtx.claudeError = String(e);
         claudeLastRun = Date.now() - 50 * 1000;
+        renderStatusBar();
+      });
+  }
+  // Now playing: polled while the item is on the bar or the live theme is
+  // on (either is the opt-in), on its own slower clock. The text read has
+  // art off; when the live background is on and the *track* changed, a
+  // second read fetches the picture — once per song, not once per tick.
+  const npTheme = themeKey === "now-playing";
+  if ((ids.includes("nowplaying") || npTheme) && Date.now() - nowPlayingLastRun > 4000) {
+    nowPlayingLastRun = Date.now();
+    invoke<NowPlaying | null>("now_playing", { art: false })
+      .then((np) => {
+        const changed = !sameTrack(np, statusCtx.nowplaying);
+        statusCtx.nowplaying = np;
+        statusCtx.nowplayingFetched = true;
+        renderStatusBar();
+        if (npTheme && changed) {
+          if (!np) {
+            setNowPlayingArt(null);
+          } else {
+            invoke<NowPlaying | null>("now_playing", { art: true })
+              .then((withArt) => setNowPlayingArt(withArt?.art ?? null))
+              .catch(() => {});
+          }
+        }
+      })
+      .catch(() => {
+        statusCtx.nowplayingFetched = true;
         renderStatusBar();
       });
   }

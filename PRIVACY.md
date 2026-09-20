@@ -93,6 +93,20 @@ If you turn it on:
 
 Turning it off closes the port and disconnects every page open on it.
 
+## Now playing (off by default, and stays on your device)
+
+The status bar can show the current track, and the **Now Playing** theme can
+use its album art as the background. Both read from Windows' own system media
+controls — the same "now playing" the media keys and the volume flyout use —
+so they work for Spotify, a browser tab, or any player, with no Spotify login.
+
+- **Nothing is sent anywhere.** The title, artist, album, and album art are
+  read locally and used only to draw the status bar and the background. No
+  network request is made, and the developer receives nothing.
+- It runs only when you ask for it: the app reads what is playing only while
+  the *Now playing* item is on your status bar or the *Now Playing* theme is
+  selected. Remove the item and switch the theme and it reads nothing at all.
+
 ## Changes
 
 Updates to this policy will appear in this file in the app's public source

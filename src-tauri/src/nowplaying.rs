@@ -15,14 +15,20 @@ use serde_json::Value;
 
 /// The current track, or `None` when nothing is playing or the platform
 /// cannot answer. On success: `title`, `artist`, `album`, `playing`, and
-/// `art` — a `data:` URI of the album thumbnail, or null when there is none.
-pub fn current() -> Option<Value> {
+/// `art` — a `data:` URI of the album thumbnail, or null.
+///
+/// `want_art` gates the one expensive step. The status-bar line needs only
+/// the text and asks with it off, so a poll every few seconds does not read
+/// and base64 a few hundred kilobytes of image each time; the live
+/// background asks with it on, and only when the track changes.
+pub fn current(want_art: bool) -> Option<Value> {
     #[cfg(windows)]
     {
-        imp::current()
+        imp::current(want_art)
     }
     #[cfg(not(windows))]
     {
+        let _ = want_art;
         None
     }
 }
@@ -64,7 +70,7 @@ mod imp {
         });
     }
 
-    pub fn current() -> Option<Value> {
+    pub fn current(want_art: bool) -> Option<Value> {
         ensure_com();
 
         let manager = Manager::RequestAsync().ok()?.get().ok()?;
@@ -89,7 +95,7 @@ mod imp {
             .map(|status| status == PlaybackStatus::Playing)
             .unwrap_or(false);
 
-        let art = album_art(&props);
+        let art = if want_art { album_art(&props) } else { None };
 
         Some(json!({
             "title": title,
