@@ -2385,6 +2385,236 @@ THEMES.helm = mkTheme(
 );
 THEMES.helm.xterm.cursor = "#5a8cf5";
 
+// ── Utility themes ──────────────────────────────────────────────────────
+// These earn their place by doing a job, not setting a mood, so they stay
+// flat: a busy backdrop is the opposite of what a high-contrast or
+// low-blue-light theme is for. No PNG, just a plain ground.
+
+// Maximum legibility: pure black, bold white, saturated primaries. For a
+// bright room, a projector, or eyes that want no ambiguity between colours.
+THEMES["high-contrast"] = mkTheme(
+  "High Contrast",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "block"],
+  "linear-gradient(180deg, rgb(0,0,0), rgb(0,0,0))",
+  "#000000",
+  "#ffffff",
+  [
+    "#000000", "#ff4d4d", "#33ff66", "#ffe14d", "#4db8ff", "#ff66ff", "#4dffff", "#ffffff",
+    "#808080", "#ff8080", "#80ff99", "#ffee80", "#99d6ff", "#ff99ff", "#99ffff", "#ffffff",
+  ]
+);
+THEMES["high-contrast"].xterm.cursor = "#ffffff";
+THEMES["high-contrast"].xterm.selectionBackground = "#ffffff55";
+
+// Okabe–Ito, the palette designed so no two hues collide for the common
+// forms of colour blindness: red is shifted to vermillion, green to a
+// bluish teal, so a diff or a log stays readable.
+THEMES.colorblind = mkTheme(
+  "Colorblind Safe",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.15, "bar"],
+  "linear-gradient(180deg, rgb(27,30,35), rgb(23,26,30))",
+  "#1b1e23",
+  "#e6e8ea",
+  [
+    "#2a2e34", "#d55e00", "#009e73", "#f0e442", "#0072b2", "#cc79a7", "#56b4e9", "#d7dbe0",
+    "#5c636e", "#ff8c3c", "#26c79a", "#ffe95e", "#4ba6e0", "#e59cc4", "#86cef2", "#ffffff",
+  ]
+);
+THEMES.colorblind.xterm.cursor = "#56b4e9";
+
+// Low blue light for the evening: everything shifted warm, blues pulled
+// back toward slate and tan so the screen stops arguing with the hour.
+THEMES["night-shift"] = mkTheme(
+  "Night Shift",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"],
+  "linear-gradient(180deg, rgb(26,21,18), rgb(20,16,13))",
+  "#1a1512",
+  "#ecdcc2",
+  [
+    "#33291f", "#e0715c", "#b9a05a", "#e0a44e", "#a98f6b", "#cf8f7a", "#c2a878", "#deccb0",
+    "#6b5a48", "#ef8a72", "#cdb56e", "#f0bd6a", "#c9a06b", "#e0a68f", "#d4bc8a", "#f6ecd8",
+  ]
+);
+THEMES["night-shift"].xterm.cursor = "#e0a44e";
+
+// ── Nature & time-of-day ────────────────────────────────────────────────
+
+THEMES.aurora = mkTheme(
+  "Aurora",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.15, "bar"],
+  'linear-gradient(rgba(10,15,30,0.4), rgba(10,15,30,0.56)), url("/backgrounds/aurora.png") center / cover no-repeat, linear-gradient(180deg, #0a0f1e, #05070f)',
+  "#0a0f1e",
+  "#d6e3f0",
+  [
+    "#16203a", "#e06c8a", "#6ee7a0", "#d9e07a", "#6aa6f0", "#b98cf0", "#66d9e0", "#c6d3e6",
+    "#52627e", "#f08aa4", "#8ff0bd", "#e6ee96", "#8fc0ff", "#cba6ff", "#8fe8f0", "#eaf2ff",
+  ]
+);
+THEMES.aurora.xterm.cursor = "#6ee7a0";
+
+THEMES["golden-hour"] = mkTheme(
+  "Golden Hour",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.15, "bar"],
+  'linear-gradient(rgba(30,20,20,0.44), rgba(30,20,20,0.6)), url("/backgrounds/golden-hour.png") center / cover no-repeat, linear-gradient(180deg, #1e1414, #120b0b)',
+  "#1e1414",
+  "#f4e3cf",
+  [
+    "#3a2a24", "#e56b5a", "#c9a15a", "#f0b45a", "#d98a6a", "#e08a9a", "#e0a878", "#f0dcc4",
+    "#6e5148", "#f28a72", "#dcbb70", "#ffc873", "#eaa383", "#f2a6b4", "#f0c79a", "#fbeeda",
+  ]
+);
+THEMES["golden-hour"].xterm.cursor = "#f0b45a";
+
+THEMES.abyss = mkTheme(
+  "Abyss",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"],
+  'linear-gradient(rgba(5,8,15,0.42), rgba(5,8,15,0.58)), url("/backgrounds/abyss.png") center / cover no-repeat, linear-gradient(180deg, #05080f, #02040a)',
+  "#05080f",
+  "#b8ccd6",
+  [
+    "#0e1a24", "#d96a7a", "#4fd6b0", "#7fb0c0", "#3f8fd6", "#8f7fd6", "#3fd6e0", "#a8c0cc",
+    "#3f5a68", "#f08a98", "#74e6c8", "#9fcede", "#6fb0e6", "#ab9ee6", "#74e6f0", "#d6e8ee",
+  ]
+);
+THEMES.abyss.xterm.cursor = "#3fd6e0";
+
+THEMES.obsidian = mkTheme(
+  "Obsidian",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.15, "block"],
+  'linear-gradient(rgba(12,9,6,0.4), rgba(12,9,6,0.56)), url("/backgrounds/obsidian.png") center / cover no-repeat, linear-gradient(180deg, #0c0906, #060403)',
+  "#0c0906",
+  "#e6d2c2",
+  [
+    "#241612", "#ff5a3c", "#c78a3a", "#ffa23c", "#7a6ab0", "#e06a6a", "#d98a5a", "#e0ccbc",
+    "#6e4a36", "#ff7a5a", "#e0a85a", "#ffbe5a", "#9a8ad0", "#f28a8a", "#f0aa7a", "#f6e6d8",
+  ]
+);
+THEMES.obsidian.xterm.cursor = "#ff5a3c";
+
+// ── Games ───────────────────────────────────────────────────────────────
+
+THEMES.hades = mkTheme(
+  "Hades",
+  "white",
+  ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "block"],
+  'linear-gradient(rgba(20,16,15,0.46), rgba(20,16,15,0.62)), url("/backgrounds/hades.png") center / cover no-repeat, linear-gradient(180deg, #14100f, #0a0807)',
+  "#14100f",
+  "#f0e0d0",
+  [
+    "#2e211f", "#e23b3b", "#a8b06a", "#f0c04a", "#7a6ad0", "#d05aa0", "#6ac0c0", "#e6d6c6",
+    "#6e544e", "#ff5a5a", "#c2ca86", "#ffd66a", "#9a8ae6", "#f07ac0", "#8fe0e0", "#fbeee0",
+  ]
+);
+THEMES.hades.xterm.cursor = "#f0c04a";
+
+THEMES.hollowknight = mkTheme(
+  "Hollow Knight",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "bar"],
+  'linear-gradient(rgba(13,16,24,0.4), rgba(13,16,24,0.56)), url("/backgrounds/hollowknight.png") center / cover no-repeat, linear-gradient(180deg, #0d1018, #07090f)',
+  "#0d1018",
+  "#cdd6e6",
+  [
+    "#1a2030", "#d08a5a", "#6a9ab0", "#b0b8c8", "#5a7ad0", "#9a7ac0", "#6ac0d0", "#c6cfe0",
+    "#4a556e", "#e0a06a", "#8fb8cc", "#d0d8e6", "#8fa6e6", "#b89ad6", "#8fd6e6", "#eaf0fa",
+  ]
+);
+THEMES.hollowknight.xterm.cursor = "#cdd6e6";
+
+THEMES.eldenring = mkTheme(
+  "Elden Ring",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.15, "bar"],
+  'linear-gradient(rgba(18,16,10,0.44), rgba(18,16,10,0.6)), url("/backgrounds/eldenring.png") center / cover no-repeat, linear-gradient(180deg, #12100a, #0a0906)',
+  "#12100a",
+  "#e6dcc0",
+  [
+    "#2a2618", "#c05a3a", "#8a9a5a", "#e0b84a", "#6a7a8a", "#a07a9a", "#7aa090", "#d6ccae",
+    "#6a6244", "#e07a5a", "#a8b876", "#f6d066", "#8fa0b0", "#c299ba", "#9cc0b0", "#f2ecd4",
+  ]
+);
+THEMES.eldenring.xterm.cursor = "#f6d066";
+
+THEMES.discoelysium = mkTheme(
+  "Disco Elysium",
+  "white",
+  ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "bar"],
+  'linear-gradient(rgba(20,32,31,0.46), rgba(20,32,31,0.62)), url("/backgrounds/discoelysium.png") center / cover no-repeat, linear-gradient(180deg, #14201f, #0c1413)',
+  "#14201f",
+  "#e0d6c0",
+  [
+    "#253531", "#b8564e", "#7a9a6a", "#cfa257", "#5a8a9a", "#a06a8a", "#6aa89a", "#d6ccb4",
+    "#5a6a64", "#d0766a", "#96b486", "#e6bc76", "#7aa6b6", "#bc8aa6", "#8ac2b4", "#ece2ce",
+  ]
+);
+THEMES.discoelysium.xterm.cursor = "#cfa257";
+
+// ── Film & aesthetic ────────────────────────────────────────────────────
+
+THEMES.hal9000 = mkTheme(
+  "HAL 9000",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.2, "block"],
+  'linear-gradient(rgba(0,0,0,0.34), rgba(0,0,0,0.5)), url("/backgrounds/hal9000.png") center / cover no-repeat, linear-gradient(180deg, #000000, #000000)',
+  "#000000",
+  "#d0d0d0",
+  [
+    "#1a1a1a", "#ff2b1e", "#8a8a8a", "#b0b0b0", "#6a6a6a", "#d02b1e", "#9a9a9a", "#d0d0d0",
+    "#606060", "#ff5a4a", "#a8a8a8", "#c8c8c8", "#8a8a8a", "#ff5a4a", "#b8b8b8", "#f0f0f0",
+  ]
+);
+THEMES.hal9000.xterm.cursor = "#ff2b1e";
+THEMES.hal9000.xterm.selectionBackground = "#ff2b1e40";
+
+THEMES.mrrobot = mkTheme(
+  "Mr. Robot",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.15, "block"],
+  'linear-gradient(rgba(10,14,10,0.44), rgba(10,14,10,0.6)), url("/backgrounds/mrrobot.png") center / cover no-repeat, linear-gradient(180deg, #0a0e0a, #050805)',
+  "#0a0e0a",
+  "#c8f0c8",
+  [
+    "#12180f", "#e23b3b", "#33d17a", "#b8d13a", "#3a9a6a", "#d03b6a", "#3ad1a0", "#b8e0b8",
+    "#4c644c", "#ff5a5a", "#5af0a0", "#d0f05a", "#5ab89a", "#f05a8a", "#5af0c8", "#e0ffe0",
+  ]
+);
+THEMES.mrrobot.xterm.cursor = "#33d17a";
+
+THEMES.vaporwave = mkTheme(
+  "Vaporwave",
+  "white",
+  ['"Cascadia Code", "Cascadia Mono", monospace', 1.15, "block"],
+  'linear-gradient(rgba(26,16,48,0.46), rgba(26,16,48,0.62)), url("/backgrounds/vaporwave.png") center / cover no-repeat, linear-gradient(180deg, #1a1030, #100a20)',
+  "#1a1030",
+  "#f0d6f0",
+  [
+    "#2e2044", "#ff6ec7", "#6ee0c8", "#f0e07a", "#7a9af0", "#d08ef0", "#6ed0f0", "#ecd6ec",
+    "#6a5a92", "#ff9ad6", "#9af0dc", "#f6eca0", "#9ab6f6", "#e0b0f6", "#9ae0f6", "#fbeefb",
+  ]
+);
+THEMES.vaporwave.xterm.cursor = "#ff6ec7";
+
+THEMES.cassette = mkTheme(
+  "Cassette Futurism",
+  "white",
+  ["Consolas, monospace", 1.15, "block"],
+  'linear-gradient(rgba(32,28,22,0.5), rgba(32,28,22,0.66)), url("/backgrounds/cassette.png") center / cover no-repeat, linear-gradient(180deg, #201c16, #14110d)',
+  "#201c16",
+  "#e0d8c0",
+  [
+    "#332e24", "#cc6650", "#8aa06a", "#e0a84a", "#5a90a0", "#b07a8a", "#6aa8a0", "#d6ccae",
+    "#6e6250", "#e0846a", "#a6bc86", "#f0c266", "#7aacba", "#c89aa6", "#8ac6bc", "#ece0c6",
+  ]
+);
+THEMES.cassette.xterm.cursor = "#e0a84a";
+
 // Per-theme see-through defaults. Busy or bright backdrops (dense text,
 // white UI panels, lit floors) veil themselves more so the terminal
 // stays legible; sparse dark art keeps the full 100.
@@ -2400,6 +2630,11 @@ for (const [k, v] of Object.entries({
   eink: 55, whiteboard: 58, punchcard: 60, circuit: 66, mainframe: 68,
   panic: 70, git: 72, duck: 80, coral: 82, containers: 82, helm: 85,
   monochrome: 88, zenburn: 95,
+  // The new families. Subtle dark art keeps most of its see-through;
+  // the brighter or busier grounds veil themselves more.
+  cassette: 62, vaporwave: 66, "golden-hour": 72, hades: 78, discoelysium: 78,
+  mrrobot: 78, obsidian: 80, eldenring: 82, aurora: 85, abyss: 85,
+  hollowknight: 88, hal9000: 90,
 })) {
   if (THEMES[k]) THEMES[k].transparency = v;
 }
@@ -8014,17 +8249,21 @@ async function renderRestoreMenu() {
 // land in their own groups, so nothing can silently vanish.
 const THEME_GROUPS: Array<[string, string[]]> = [
   ["Start here", ["plain"]],
+  // First after Plain: these do a job rather than set a mood, so somebody
+  // who needs one should not have to scroll a mood board to find it.
+  ["Accessibility", ["high-contrast", "colorblind", "night-shift"]],
   ["Classics", ["one-dark", "dracula", "nord", "gruvbox", "tokyo-night", "catppuccin", "solarized-dark", "solarized-light", "monokai", "everforest", "zenburn"]],
   ["Dev & tooling", ["coral", "monochrome", "git", "circuit", "containers", "helm", "mainframe", "punchcard", "panic", "whiteboard", "eink", "duck"]],
   ["Retro hardware", ["amber-crt", "gameboy", "c64"]],
   ["Operating systems", ["dos", "penguin", "cupertino", "material", "macintosh", "chicago", "aero", "fluent"]],
-  ["Film & TV", ["matrix", "bladerunner", "tron", "lcars", "dune", "umbrella", "nostromo", "wargames", "lumon", "swordfish", "hackers", "galactica"]],
-  ["Games", ["cyberpunk", "deus-ex", "pipboy", "nier", "sheikah", "aperture", "persona", "valorant", "csgo", "dbd"]],
+  ["Film & TV", ["matrix", "bladerunner", "tron", "lcars", "dune", "umbrella", "nostromo", "wargames", "lumon", "swordfish", "hackers", "galactica", "hal9000", "mrrobot"]],
+  ["Games", ["cyberpunk", "deus-ex", "pipboy", "nier", "sheikah", "aperture", "persona", "valorant", "csgo", "dbd", "hades", "hollowknight", "eldenring", "discoelysium"]],
   ["Consoles", ["library", "blade", "cartridge", "polygon"]],
   ["Anime", ["akira", "bebop", "scouter", "nerv"]],
   ["Space", ["hyperspace", "space", "missionctl"]],
+  ["Nature & sky", ["aurora", "golden-hour", "abyss", "obsidian"]],
   ["Places & vibes", ["skicabin", "rave", "nightclub", "speakeasy", "datacenter", "backrooms"]],
-  ["Art & liminal", ["hermes", "nous", "synthwave", "outrun", "blueprint", "redacted", "sakura", "pride"]],
+  ["Art & liminal", ["hermes", "nous", "synthwave", "outrun", "vaporwave", "cassette", "blueprint", "redacted", "sakura", "pride"]],
 ];
 
 /// Grouped theme select: optgroups per category, then Custom, then any

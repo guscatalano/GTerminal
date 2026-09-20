@@ -78,6 +78,18 @@ Seeded GDI+ renders — re-running the script reproduces them exactly.
 - `zenburn.png` — soft muted bands, deliberately almost nothing
 - `containers.png` — whale carrying a stack of shipping containers
 - `helm.png` — heptagon wheel with spokes, node hexes, pod dots
+- `aurora.png` — polar navy, sparse stars, ribbons of green and violet
+- `golden-hour.png` — plum sky to an amber horizon, a low sun and haze
+- `abyss.png` — deep ocean with a light shaft and bioluminescent motes
+- `obsidian.png` — volcanic glass with glowing lava cracks and an ember base
+- `hades.png` — charcoal underworld, blood-red glow, a gold meander
+- `hollowknight.png` — void indigo, a pale central glow, drifting spores
+- `eldenring.png` — murk with a golden tree-glow and drifting motes
+- `discoelysium.png` — overlapping watercolour washes, painterly
+- `hal9000.png` — a black panel and the red eye
+- `mrrobot.png` — fsociety terminal: green code walls and scanlines
+- `vaporwave.png` — pastel twilight, a gridded floor, a cut sun
+- `cassette.png` — beige console: amber CRT, chunky controls, cyan lights
 
 ## NASA imagery (public domain)
 

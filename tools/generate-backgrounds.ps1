@@ -5001,4 +5001,232 @@ for ($sy2 = 0; $sy2 -lt $H; $sy2 += 3) { $g.FillRectangle($sl, 0, $sy2, $W, 1) }
 $sl.Dispose()
 Save $bmp $g "outrun.png"
 
+# ── Aurora: polar navy, sparse stars, ribbons of green and violet ──
+$rng = New-Object System.Random(4001)
+Get-Random -SetSeed 4001 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 10 15 30) (C 255 4 6 14)
+Glow $g 960 980 900 (C 30 40 120 160)
+for ($i = 0; $i -lt 260; $i++) {
+  $sx = $rng.Next(0, $W); $sy = $rng.Next(0, 620)
+  $a = $rng.Next(30, 170); $r = $rng.Next(1, 3)
+  $b = New-Object System.Drawing.SolidBrush((C $a 220 230 245)); $g.FillEllipse($b, $sx, $sy, $r, $r); $b.Dispose()
+}
+foreach ($band in @(@(180, 110, 231, 160), @(340, 150, 140, 240), @(520, 100, 200, 220))) {
+  $y0 = $band[0]; $cr = $band[1]; $cg = $band[2]; $cb = $band[3]
+  for ($pass = 0; $pass -lt 3; $pass++) {
+    $pen = New-Object System.Drawing.Pen((C (14 + $pass * 12) $cr $cg $cb), (70 - $pass * 22))
+    $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $path.AddBezier(-50, $y0, 620, ($y0 - 90), 1300, ($y0 + 120), 1980, ($y0 - 40))
+    $g.DrawPath($pen, $path); $pen.Dispose(); $path.Dispose()
+  }
+}
+EdgeFade $g "top" 220 150; EdgeFade $g "bottom" 160 120
+Save $bmp $g "aurora.png"
+
+# ── Golden Hour: plum sky to amber horizon, a low sun, haze ──
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 40 22 40) (C 255 120 60 40)
+GradRect $g 0 620 $W 460 (C 0 240 150 70) (C 150 240 150 70)
+Glow $g 960 900 720 (C 90 255 190 110)
+Glow $g 960 940 380 (C 120 255 220 150)
+for ($i = 0; $i -lt 7; $i++) {
+  $hy = 700 + $i * 46
+  $b = New-Object System.Drawing.SolidBrush((C (30 - $i * 3) 255 210 170)); $g.FillRectangle($b, 0, $hy, $W, 14); $b.Dispose()
+}
+EdgeFade $g "top" 300 150
+Save $bmp $g "golden-hour.png"
+
+# ── Abyss: deep ocean, a shaft from the surface, biolum motes ──
+$rng = New-Object System.Random(4003)
+Get-Random -SetSeed 4003 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 12 30 48) (C 255 2 4 8)
+$path = New-Object System.Drawing.Drawing2D.GraphicsPath
+$path.AddPolygon((MkPts @(@(820, 0), @(1100, 0), @(1360, 1080), @(560, 1080))))
+$br = New-Object System.Drawing.Drawing2D.LinearGradientBrush((New-Object System.Drawing.Rectangle(0, 0, $W, $H)), (C 40 90 180 220), (C 0 90 180 220), 90.0)
+$g.FillPath($br, $path); $br.Dispose(); $path.Dispose()
+for ($i = 0; $i -lt 90; $i++) {
+  $mx = $rng.Next(0, $W); $my = $rng.Next(120, $H)
+  $r = $rng.Next(2, 7); $a = $rng.Next(40, 150)
+  Glow $g $mx $my ($r * 6) (C ([int]($a / 2)) 60 230 210)
+  $b = New-Object System.Drawing.SolidBrush((C $a 120 250 220)); $g.FillEllipse($b, $mx, $my, $r, $r); $b.Dispose()
+}
+EdgeFade $g "bottom" 300 160; EdgeFade $g "top" 120 90
+Save $bmp $g "abyss.png"
+
+# ── Obsidian: volcanic glass, glowing lava cracks, ember base ──
+$rng = New-Object System.Random(4004)
+Get-Random -SetSeed 4004 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 18 12 10) (C 255 4 2 2)
+Glow $g 960 1080 900 (C 60 255 90 30)
+for ($c = 0; $c -lt 5; $c++) {
+  $px = 200 + $c * 380 + $rng.Next(-80, 80)
+  $py = $H
+  for ($seg = 0; $seg -lt 8; $seg++) {
+    $ny = $py - $rng.Next(90, 150)
+    $nx = $px + $rng.Next(-90, 90)
+    NeonLine $g $px $py $nx $ny 255 90 30
+    $px = $nx; $py = $ny
+    if ($ny -lt 200) { break }
+  }
+}
+EdgeFade $g "top" 220 150
+Save $bmp $g "obsidian.png"
+
+# ── Hades: charcoal underworld, blood-red glow, gold meander ──
+$rng = New-Object System.Random(4005)
+Get-Random -SetSeed 4005 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 26 18 17) (C 255 8 5 5)
+Glow $g 960 1000 820 (C 70 200 40 40)
+Glow $g 960 980 420 (C 60 240 120 40)
+$pen = New-Object System.Drawing.Pen((C 180 220 170 70), 5)
+$mx = 80
+while ($mx -lt $W - 120) {
+  $g.DrawLines($pen, (MkPts @(@($mx, 120), @(($mx + 50), 120), @(($mx + 50), 150), @(($mx + 20), 150), @(($mx + 20), 90), @(($mx + 80), 90))))
+  $mx += 80
+}
+$pen.Dispose()
+for ($i = 0; $i -lt 70; $i++) {
+  $ex = $rng.Next(0, $W); $ey = $rng.Next(400, $H); $r = $rng.Next(1, 4)
+  $b = New-Object System.Drawing.SolidBrush((C $($rng.Next(50, 150)) 240 190 90)); $g.FillEllipse($b, $ex, $ey, $r, $r); $b.Dispose()
+}
+EdgeFade $g "bottom" 250 140
+Save $bmp $g "hades.png"
+
+# ── Hollow Knight: void indigo, a pale glow, drifting spores ──
+$rng = New-Object System.Random(4006)
+Get-Random -SetSeed 4006 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 18 22 34) (C 255 6 8 14)
+Glow $g 960 520 640 (C 26 150 180 220)
+Glow $g 960 520 240 (C 30 200 220 240)
+for ($i = 0; $i -lt 120; $i++) {
+  $sx = $rng.Next(0, $W); $sy = $rng.Next(0, $H)
+  $r = $rng.Next(1, 4); $a = $rng.Next(30, 130)
+  $b = New-Object System.Drawing.SolidBrush((C $a 200 216 236)); $g.FillEllipse($b, $sx, $sy, $r, $r); $b.Dispose()
+}
+EdgeFade $g "top" 260 170; EdgeFade $g "bottom" 260 170; EdgeFade $g "left" 220 140; EdgeFade $g "right" 220 140
+Save $bmp $g "hollowknight.png"
+
+# ── Elden Ring: murk with a golden tree-glow and drifting motes ──
+$rng = New-Object System.Random(4007)
+Get-Random -SetSeed 4007 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 26 24 16) (C 255 8 7 4)
+Glow $g 1360 360 720 (C 60 230 190 90)
+Glow $g 1360 360 320 (C 80 246 210 110)
+$path = New-Object System.Drawing.Drawing2D.GraphicsPath
+$path.AddPolygon((MkPts @(@(1240, 300), @(1480, 300), @(1700, 1080), @(1020, 1080))))
+$br = New-Object System.Drawing.Drawing2D.LinearGradientBrush((New-Object System.Drawing.Rectangle(0, 0, $W, $H)), (C 34 240 200 100), (C 0 240 200 100), 90.0)
+$g.FillPath($br, $path); $br.Dispose(); $path.Dispose()
+for ($i = 0; $i -lt 80; $i++) {
+  $mx = $rng.Next(700, $W); $my = $rng.Next(200, $H); $r = $rng.Next(1, 4)
+  $b = New-Object System.Drawing.SolidBrush((C $($rng.Next(50, 150)) 246 214 120)); $g.FillEllipse($b, $mx, $my, $r, $r); $b.Dispose()
+}
+EdgeFade $g "bottom" 260 150; EdgeFade $g "left" 200 120
+Save $bmp $g "eldenring.png"
+
+# ── Disco Elysium: overlapping watercolour washes, painterly ──
+$rng = New-Object System.Random(4008)
+Get-Random -SetSeed 4008 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 26 40 38) (C 255 14 22 21)
+$washes = @(@(90, 160, 140), @(200, 150, 80), @(170, 70, 80), @(90, 150, 170), @(150, 110, 140))
+for ($i = 0; $i -lt 26; $i++) {
+  $wc = $washes[$rng.Next(0, $washes.Count)]
+  $cx = $rng.Next(0, $W); $cy = $rng.Next(0, $H); $r = $rng.Next(180, 520)
+  Glow $g $cx $cy $r (C $($rng.Next(14, 34)) $wc[0] $wc[1] $wc[2])
+}
+for ($i = 0; $i -lt 400; $i++) {
+  $b = New-Object System.Drawing.SolidBrush((C $($rng.Next(6, 16)) 230 220 200)); $g.FillEllipse($b, $rng.Next(0, $W), $rng.Next(0, $H), 2, 2); $b.Dispose()
+}
+Save $bmp $g "discoelysium.png"
+
+# ── HAL 9000: black panel, the red eye ──
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 0 0 0) (C 255 0 0 0)
+Glow $g 960 540 760 (C 10 40 40 40)
+$b = New-Object System.Drawing.SolidBrush((C 255 8 6 6)); $g.FillEllipse($b, 760, 340, 400, 400); $b.Dispose()
+Glow $g 960 540 260 (C 150 255 30 20)
+$b = New-Object System.Drawing.SolidBrush((C 255 30 4 4)); $g.FillEllipse($b, 820, 400, 280, 280); $b.Dispose()
+Glow $g 960 540 150 (C 200 255 60 40)
+$b = New-Object System.Drawing.SolidBrush((C 255 255 90 60)); $g.FillEllipse($b, 910, 490, 100, 100); $b.Dispose()
+$b = New-Object System.Drawing.SolidBrush((C 255 255 210 120)); $g.FillEllipse($b, 940, 520, 40, 40); $b.Dispose()
+$pen = New-Object System.Drawing.Pen((C 60 90 90 90), 3); $g.DrawEllipse($pen, 740, 320, 440, 440); $pen.Dispose()
+Save $bmp $g "hal9000.png"
+
+# ── Mr. Robot: fsociety terminal, green code, scanlines ──
+$rng = New-Object System.Random(4010)
+Get-Random -SetSeed 4010 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 8 14 8) (C 255 3 6 3)
+Glow $g 960 540 900 (C 20 30 200 90)
+$grn = C 150 60 220 120
+for ($row = 0; $row -lt 30; $row++) {
+  DashRow $g 120 (90 + $row * 32) $($rng.Next(500, 1600)) $grn 12
+}
+for ($i = 0; $i -lt 4; $i++) {
+  DashRow $g 120 (90 + $rng.Next(0, 30) * 32) $($rng.Next(300, 700)) (C 170 230 60 60) 12
+}
+Scanlines $g 30 10
+EdgeFade $g "top" 90 90; EdgeFade $g "bottom" 90 90
+Save $bmp $g "mrrobot.png"
+
+# ── Vaporwave: pastel twilight, a gridded floor, a cut sun ──
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 40 20 70) (C 255 20 14 44)
+$horizon = 560
+Glow $g 960 $horizon 360 (C 90 255 150 210)
+$path = New-Object System.Drawing.Drawing2D.GraphicsPath
+$path.AddEllipse(700, ($horizon - 300), 520, 520)
+$g.SetClip($path)
+GradRect $g 700 ($horizon - 300) 520 300 (C 255 255 210 130) (C 255 255 110 200)
+$g.ResetClip(); $path.Dispose()
+for ($i = 0; $i -lt 7; $i++) {
+  $cy = $horizon - 20 - $i * 22
+  $b = New-Object System.Drawing.SolidBrush((C 255 40 20 70)); $g.FillRectangle($b, 700, $cy, 520, (6 + $i)); $b.Dispose()
+}
+GradRect $g 0 $horizon $W ($H - $horizon) (C 255 20 60 80) (C 255 8 20 30)
+for ($i = -12; $i -le 12; $i++) {
+  NeonLine $g 960 $horizon (960 + $i * 150) $H 110 240 220
+}
+$gy = $horizon; $step = 14
+while ($gy -lt $H) {
+  NeonLine $g 0 $gy $W $gy 110 240 220
+  $step = [int]($step * 1.35); $gy += $step
+}
+$pen = New-Object System.Drawing.Pen((C 220 255 180 230), 3); $g.DrawLine($pen, 0, $horizon, $W, $horizon); $pen.Dispose()
+Save $bmp $g "vaporwave.png"
+
+# ── Cassette Futurism: beige console, amber CRT, chunky controls ──
+$rng = New-Object System.Random(4012)
+Get-Random -SetSeed 4012 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 60 54 44) (C 255 38 34 27)
+$face = RoundRect 200 160 1520 760 26
+$b = New-Object System.Drawing.SolidBrush((C 255 74 68 55)); $g.FillPath($b, $face); $b.Dispose()
+$pen = New-Object System.Drawing.Pen((C 120 30 28 22), 4); $g.DrawPath($pen, $face); $pen.Dispose(); $face.Dispose()
+$scr = RoundRect 260 220 640 460 14
+$b = New-Object System.Drawing.SolidBrush((C 255 20 14 6)); $g.FillPath($b, $scr); $b.Dispose(); $scr.Dispose()
+Glow $g 580 450 380 (C 40 240 170 60)
+$amb = C 150 235 165 60
+for ($row = 0; $row -lt 9; $row++) { DashRow $g 300 (260 + $row * 44) $($rng.Next(200, 560)) $amb 14 }
+for ($by = 0; $by -lt 4; $by++) {
+  for ($bx = 0; $bx -lt 5; $bx++) {
+    $btn = RoundRect (980 + $bx * 130) (250 + $by * 120) 96 84 12
+    $b = New-Object System.Drawing.SolidBrush((C 255 92 84 68)); $g.FillPath($b, $btn); $b.Dispose()
+    $pen = New-Object System.Drawing.Pen((C 150 40 36 28), 3); $g.DrawPath($pen, $btn); $pen.Dispose(); $btn.Dispose()
+  }
+}
+for ($i = 0; $i -lt 6; $i++) {
+  $lx = 300 + $i * 90
+  Glow $g $lx 740 40 (C 120 80 210 210)
+  $b = New-Object System.Drawing.SolidBrush((C 255 130 240 235)); $g.FillEllipse($b, ($lx - 8), 732, 16, 16); $b.Dispose()
+}
+EdgeFade $g "top" 120 110; EdgeFade $g "bottom" 140 120
+Save $bmp $g "cassette.png"
+
 "done -> $out"
