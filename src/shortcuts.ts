@@ -115,6 +115,12 @@ export const SHORTCUTS: ShortcutGroup[] = [
       { keys: "Ctrl+Shift+B", what: "Toggle the session sidebar", handler: "toggleSidebar" },
       { keys: "Ctrl+Shift+Z", what: "Restore a detached session", handler: "renderRestoreMenu" },
       { keys: "Ctrl+Shift+S", what: "Toggle the status bar", handler: "toggleStatusBar" },
+      {
+        keys: "Ctrl+Shift+/",
+        what: "Show this list of shortcuts — or F1, or the ⌨ button in the top bar",
+        handler: "openShortcutsOverlay",
+        only: "F1 opens it outside a full-screen program; Ctrl+Shift+/ always",
+      },
     ],
   },
 ];

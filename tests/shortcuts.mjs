@@ -52,6 +52,46 @@ for (const g of SHORTCUTS) {
   check(`the ${g.title} group has entries`, g.items.length > 0, "empty group");
 }
 
+// The cheat sheet is the answer to "I use this every day and never found
+// the shortcuts", so its three ways in are the thing most worth pinning:
+// a visible button, and two keys. If any of these is removed, a shortcut
+// list nobody can open is no better than no list.
+const main = readFileSync(join(here, "..", "src", "main.ts"), "utf8");
+const html = readFileSync(join(here, "..", "index.html"), "utf8");
+check(
+  "there is a visible shortcuts button in the chrome",
+  /id="shortcutsbtn"/.test(html),
+  "index.html has no #shortcutsbtn, so the sheet has no button to open it"
+);
+check(
+  "the button opens the sheet",
+  /getElementById\("shortcutsbtn"\)[\s\S]{0,160}openShortcutsOverlay\(\)/.test(main),
+  "#shortcutsbtn is not wired to openShortcutsOverlay"
+);
+check(
+  "F1 opens the sheet",
+  /"F1"[\s\S]{0,160}openShortcutsOverlay\(\)/.test(main),
+  "F1 is not wired to the sheet"
+);
+check(
+  "Ctrl+Shift+/ opens the sheet",
+  /code === "Slash"[\s\S]{0,120}openShortcutsOverlay\(\)/.test(main),
+  "Ctrl+Shift+/ is not wired to the sheet"
+);
+check(
+  "the sheet is built from this one list, not a second copy",
+  /for \(const group of SHORTCUTS\)[\s\S]{0,600}shortcuts-panel|shortcuts-panel[\s\S]{0,1200}for \(const group of SHORTCUTS\)/.test(
+    main
+  ),
+  "openShortcutsOverlay does not iterate SHORTCUTS, so it can drift from the real keys"
+);
+// The nudge that reaches existing daily users - shown once, ever.
+check(
+  "existing users are told the sheet exists, once",
+  /suggestShortcutsOnce/.test(main) && /shortcuts_hint_shown/.test(main),
+  "no one-time nudge, so people who already have the app never learn the sheet is there"
+);
+
 // The README table and this list are two audiences for one set of facts.
 // It does not have to list everything, but what it lists must be real.
 const readme = readFileSync(join(here, "..", "README.md"), "utf8");

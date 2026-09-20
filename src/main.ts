@@ -316,6 +316,11 @@ interface AppConfig {
   /// Set once the first-run theme hint has been shown — or once an
   /// existing install has been marked as not needing it. Never unset.
   themes_hint_shown?: boolean;
+  /// Set once the "there is a shortcuts list now" nudge has been shown.
+  /// Unlike the themes hint this shows on existing installs too, exactly
+  /// once: the whole point is to reach people who have used the app for
+  /// months and never found the shortcuts. Never unset.
+  shortcuts_hint_shown?: boolean;
   /// Draw the – (hide) button on tabs.
   tab_hide_button?: boolean;
   /// Draw the decoration gutter down the right edge (failed commands,
@@ -4322,6 +4327,26 @@ function makeShortcutHandler(getId: () => number) {
       void toggleZen();
       return false;
     }
+    // The shortcuts cheat sheet. Ctrl+Shift+/ (Ctrl+?) always opens it -
+    // an app chord nothing in a shell wants. F1 opens it too, but only on
+    // the normal screen: inside a full-screen program (vim, htop) F1 is
+    // that program's help key and must reach it, so it is left alone there.
+    if (
+      e.ctrlKey &&
+      e.shiftKey &&
+      !e.altKey &&
+      (e.key === "/" || e.key === "?" || e.code === "Slash")
+    ) {
+      openShortcutsOverlay();
+      return false;
+    }
+    if (e.key === "F1") {
+      const alt = tabs.get(getId())?.term.buffer.active.type === "alternate";
+      if (!alt) {
+        openShortcutsOverlay();
+        return false;
+      }
+    }
     // Shift+PageUp/Down look back through the scrollback, and keep working
     // even while a full-screen program has taken plain PageUp/Down for its
     // own paging. On the alternate screen there is no scrollback, so it is
@@ -5809,6 +5834,152 @@ function suggestThemesOnce(freshInstall: boolean) {
   ov.appendChild(panel);
   document.body.appendChild(ov);
   go.focus();
+}
+
+/// The shortcuts cheat sheet, over the terminal, from the same one list
+/// the settings page and README are built from — so it cannot drift from
+/// what the keys actually do. Reached three ways: the ⌨ button, Ctrl+Shift+/
+/// and F1. Pressing the key again, Escape, the ×, or a click on the
+/// backdrop all close it.
+///
+/// It exists because a shortcut buried in a settings tab is one a daily
+/// user never finds: "I use this every day and still don't know the
+/// shortcuts" is the exact gap it closes.
+function openShortcutsOverlay() {
+  // A toggle: the same key that opened it closes it, rather than stacking
+  // a second copy on top of the first.
+  const existing = document.getElementById("shortcuts-overlay");
+  if (existing) {
+    existing.remove();
+    return;
+  }
+  logUi("shortcuts.open");
+
+  const ov = document.createElement("div");
+  ov.className = "overlay";
+  ov.id = "shortcuts-overlay";
+  const panel = document.createElement("div");
+  panel.className = "shortcuts-panel";
+
+  const head = document.createElement("div");
+  head.className = "shortcuts-head";
+  const title = document.createElement("span");
+  title.textContent = "Keyboard shortcuts";
+  const close = document.createElement("button");
+  close.className = "shortcuts-close";
+  close.title = "Close (Esc)";
+  close.textContent = "×";
+  head.append(title, close);
+
+  const groups = document.createElement("div");
+  groups.className = "shortcuts-groups";
+  for (const group of SHORTCUTS) {
+    const g = document.createElement("div");
+    g.className = "sc-group";
+    const h = document.createElement("div");
+    h.className = "sc-group-title";
+    h.textContent = group.title;
+    g.appendChild(h);
+    for (const s of group.items) {
+      const row = document.createElement("div");
+      row.className = "sc-row";
+      const keys = document.createElement("div");
+      keys.className = "sc-keys";
+      // Split on + so each key is its own cap, but leave "Ctrl+1 … Ctrl+8"
+      // and the arrow clusters as one thing — the same rule the settings
+      // page uses, so the two never look different.
+      for (const part of s.keys.split("+")) {
+        const k = document.createElement("kbd");
+        k.textContent = part;
+        keys.appendChild(k);
+      }
+      const what = document.createElement("div");
+      what.className = "sc-what";
+      what.textContent = s.what;
+      if (s.only) {
+        const only = document.createElement("span");
+        only.className = "sc-only";
+        only.textContent = ` — ${s.only}`;
+        what.appendChild(only);
+      }
+      row.append(keys, what);
+      g.appendChild(row);
+    }
+    groups.appendChild(g);
+  }
+
+  const foot = document.createElement("div");
+  foot.className = "shortcuts-foot";
+  foot.textContent = "Press Ctrl+Shift+/ or F1 any time. Also in Settings → Keyboard shortcuts.";
+
+  const shut = () => {
+    ov.remove();
+    window.removeEventListener("keydown", onKey, true);
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      shut();
+    }
+  };
+  close.addEventListener("click", shut);
+  // A click on the dark backdrop, but not on the panel itself, closes it.
+  ov.addEventListener("mousedown", (e) => {
+    if (e.target === ov) shut();
+  });
+  window.addEventListener("keydown", onKey, true);
+
+  panel.append(head, groups, foot);
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+  close.focus();
+}
+
+/// Tell people the shortcuts list exists — once, ever.
+///
+/// Deliberately not gated on a fresh install the way the themes hint is:
+/// the people this is for are the ones who have run the app for months
+/// without finding the shortcuts, so an existing config is exactly who
+/// should see it. Shown once and marked shown, so it is never an advert.
+function suggestShortcutsOnce() {
+  if (config.shortcuts_hint_shown === true) return;
+  const btn = document.getElementById("shortcutsbtn");
+  if (!btn) return;
+  config.shortcuts_hint_shown = true;
+  saveConfig();
+  logUi("firstrun.shortcuts");
+
+  const hint = document.createElement("div");
+  hint.className = "chrome-hint";
+  hint.setAttribute("role", "button");
+  hint.tabIndex = 0;
+  hint.textContent = "New: every keyboard shortcut lives here — click, or press Ctrl+Shift+/ or F1.";
+  const rect = btn.getBoundingClientRect();
+  // Anchored under the button and pinned to its right edge, so the little
+  // arrow points back up at the icon it is talking about.
+  hint.style.top = `${Math.round(rect.bottom + 8)}px`;
+  hint.style.right = `${Math.round(window.innerWidth - rect.right)}px`;
+
+  const go = () => {
+    hint.classList.add("leaving");
+    window.setTimeout(() => hint.remove(), 300);
+  };
+  hint.addEventListener("click", () => {
+    go();
+    openShortcutsOverlay();
+  });
+  hint.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      go();
+      openShortcutsOverlay();
+    } else if (e.key === "Escape") {
+      go();
+    }
+  });
+  document.body.appendChild(hint);
+  // Long enough to read and act on, gone on its own if ignored.
+  window.setTimeout(go, 14000);
 }
 
 /// Open the folder the logs are in, and say so when it cannot.
@@ -11036,6 +11207,12 @@ async function main() {
     if (settingsOpen()) closeSettings();
     else openSettings();
   });
+  document.getElementById("shortcutsbtn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    closeMenus();
+    closeHistory();
+    openShortcutsOverlay();
+  });
   // The badge is a way in as well as a warning: the first thing anybody
   // does after noticing it is look for the switch.
   document.getElementById("remote-badge")?.addEventListener("click", (e) => {
@@ -11424,6 +11601,7 @@ async function main() {
   // Last, and never blocking: the window works, one thing in it may not.
   void checkDaemonVersion(sessions);
   suggestThemesOnce(freshInstall);
+  suggestShortcutsOnce();
   warnOldWebviewOnce();
   void invoke<boolean>("wsl_available")
     .then((ok) => {
