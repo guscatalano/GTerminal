@@ -4637,9 +4637,19 @@ function confirmPaste(id: number, text: string) {
 
 /// Paste the system clipboard into a session.
 function pasteClipboardInto(id: number, source = "keyboard") {
+  // Timed: a paste that feels slow before the text even appears, one word
+  // or many, is the clipboard read and not the shell or the delivery. This
+  // records how long the read took so the guess can be replaced with a
+  // number in ui.log rather than argued about.
+  const t0 = performance.now();
   clipRead()
-    .then((text) => pasteText(id, text, source))
-    .catch(() => {});
+    .then((text) => {
+      logUi("paste.clipread", { ms: Math.round(performance.now() - t0), chars: text.length, source });
+      pasteText(id, text, source);
+    })
+    .catch((e) => {
+      logUi("paste.clipread.err", { ms: Math.round(performance.now() - t0), err: String(e) });
+    });
 }
 
 function makeShortcutHandler(getId: () => number) {
