@@ -5229,4 +5229,22 @@ for ($i = 0; $i -lt 6; $i++) {
 EdgeFade $g "top" 120 110; EdgeFade $g "bottom" 140 120
 Save $bmp $g "cassette.png"
 
+# ── Spotify: dark stage, a green equalizer along the floor ──
+$rng = New-Object System.Random(4100)
+Get-Random -SetSeed 4100 | Out-Null
+$bmp, $g = New-Canvas
+Fill-Vertical $g (C 255 26 26 26) (C 255 9 9 9)
+Glow $g 960 1080 940 (C 45 29 185 84)
+$bars = 34
+$bw = [int]($W / $bars)
+for ($i = 0; $i -lt $bars; $i++) {
+  $bh = $rng.Next(70, 640)
+  $bx = $i * $bw + 6
+  $x2 = $bw - 12
+  GradRect $g $bx ($H - $bh) $x2 $bh (C 200 29 185 84) (C 35 18 96 46)
+  $b = New-Object System.Drawing.SolidBrush((C 235 40 215 110)); $g.FillRectangle($b, $bx, ($H - $bh), $x2, 6); $b.Dispose()
+}
+EdgeFade $g "top" 320 160
+Save $bmp $g "spotify.png"
+
 "done -> $out"

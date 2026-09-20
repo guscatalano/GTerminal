@@ -90,6 +90,7 @@ Seeded GDI+ renders — re-running the script reproduces them exactly.
 - `mrrobot.png` — fsociety terminal: green code walls and scanlines
 - `vaporwave.png` — pastel twilight, a gridded floor, a cut sun
 - `cassette.png` — beige console: amber CRT, chunky controls, cyan lights
+- `spotify.png` — a green equalizer along the floor of a dark stage
 
 ## NASA imagery (public domain)
 

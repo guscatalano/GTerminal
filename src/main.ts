@@ -2615,6 +2615,26 @@ THEMES.cassette = mkTheme(
 );
 THEMES.cassette.xterm.cursor = "#e0a84a";
 
+// ── Media ───────────────────────────────────────────────────────────────
+
+// The brand palette: green on near-black, the way the app that inspired it
+// paints itself. A neutral-plus-green ramp, so the one colour that matters
+// is the one that reads.
+THEMES.spotify = mkTheme(
+  "Spotify",
+  "white",
+  ['"Cascadia Mono", Consolas, monospace', 1.15, "bar"],
+  'linear-gradient(rgba(18,18,18,0.5), rgba(18,18,18,0.64)), url("/backgrounds/spotify.png") center / cover no-repeat, linear-gradient(180deg, #121212, #0a0a0a)',
+  "#121212",
+  "#e6e8e6",
+  [
+    "#191414", "#e06c75", "#1db954", "#c9a84c", "#5c8fd6", "#b06cc9", "#4ec9b0", "#d2d4d2",
+    "#5c5c5c", "#ef7a83", "#1ed760", "#e0c46a", "#78a8e6", "#c78ad9", "#6fe0c8", "#ffffff",
+  ]
+);
+THEMES.spotify.xterm.cursor = "#1db954";
+THEMES.spotify.xterm.selectionBackground = "#1db95440";
+
 // Per-theme see-through defaults. Busy or bright backdrops (dense text,
 // white UI panels, lit floors) veil themselves more so the terminal
 // stays legible; sparse dark art keeps the full 100.
@@ -2634,7 +2654,7 @@ for (const [k, v] of Object.entries({
   // the brighter or busier grounds veil themselves more.
   cassette: 62, vaporwave: 66, "golden-hour": 72, hades: 78, discoelysium: 78,
   mrrobot: 78, obsidian: 80, eldenring: 82, aurora: 85, abyss: 85,
-  hollowknight: 88, hal9000: 90,
+  hollowknight: 88, hal9000: 90, spotify: 85,
 })) {
   if (THEMES[k]) THEMES[k].transparency = v;
 }
@@ -8261,6 +8281,7 @@ const THEME_GROUPS: Array<[string, string[]]> = [
   ["Consoles", ["library", "blade", "cartridge", "polygon"]],
   ["Anime", ["akira", "bebop", "scouter", "nerv"]],
   ["Space", ["hyperspace", "space", "missionctl"]],
+  ["Media", ["spotify"]],
   ["Nature & sky", ["aurora", "golden-hour", "abyss", "obsidian"]],
   ["Places & vibes", ["skicabin", "rave", "nightclub", "speakeasy", "datacenter", "backrooms"]],
   ["Art & liminal", ["hermes", "nous", "synthwave", "outrun", "vaporwave", "cassette", "blueprint", "redacted", "sakura", "pride"]],
