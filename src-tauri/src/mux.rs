@@ -2938,8 +2938,9 @@ fn shell_init_for(prediction: &str, history: bool, dir: &str) -> String {
 
 // Standard base64 with padding. Ships the WSL rcfile through wsl.exe and
 // bash -c by value, where only [A-Za-z0-9+/=] appear so no quoting or
-// path translation can bite.
-fn b64(data: &[u8]) -> String {
+// path translation can bite. Also the album-art encoder for nowplaying,
+// which needs the same bytes-to-ASCII with no new dependency.
+pub(crate) fn b64(data: &[u8]) -> String {
     const T: &[u8; 64] =
         b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity((data.len() + 2) / 3 * 4);

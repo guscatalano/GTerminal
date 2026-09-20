@@ -1,5 +1,6 @@
 mod claude_usage;
 mod mux;
+mod nowplaying;
 mod remote;
 mod stats;
 mod update;
@@ -802,6 +803,16 @@ const WEATHER_TTL_MS: u64 = 10 * 60 * 1000;
 
 /// Weather and air quality for a postcode.
 ///
+/// The current track from Windows' system media controls, or null when
+/// nothing is playing. Read locally and sent nowhere — see nowplaying.rs.
+/// `(async)` because the WinRT calls block on the album-art read; the
+/// frontend only asks while the setting is on, so the poll, not a gate
+/// here, is what keeps it quiet.
+#[tauri::command(async)]
+fn now_playing() -> Option<serde_json::Value> {
+    nowplaying::current()
+}
+
 /// Nothing is requested until a postcode is set: this is the only thing the
 /// app sends anywhere that says something about where you are, so it is
 /// blank by default, the same as the optional AI endpoint. See PRIVACY.md.
@@ -1791,6 +1802,7 @@ pub fn run() {
             remote_approve_pair,
             remote_reject_pair,
             weather_report,
+            now_playing,
             claude_usage,
             update_status,
             update_versions,

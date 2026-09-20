@@ -47,7 +47,19 @@ tauri-plugin-notification = "2"
 # Pinned to what wry already links, so there is only one WebView2 binding
 # in the build.
 webview2-com = "0.38"
-windows = { version = "0.61", features = ["Win32_Foundation"] }
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  # SMTC — the system "now playing": whatever is playing (Spotify, a
+  # browser tab, any media app) read locally through Windows' own media
+  # controls, so there is no Spotify login and nothing leaves the machine.
+  # Media_Control for the session + track, Storage_Streams to read the
+  # album-art thumbnail, Foundation for awaiting the async calls, and
+  # System_Com to put the worker thread in an apartment WinRT will talk to.
+  "Media_Control",
+  "Storage_Streams",
+  "Foundation",
+  "Win32_System_Com",
+] }
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_System_Diagnostics_ToolHelp",

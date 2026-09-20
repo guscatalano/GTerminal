@@ -35,6 +35,9 @@ const OFF_UI_THREAD = new Set([
   "perf_items",
   "status_command",
   "weather_report",
+  // Calls into Windows' media controls (WinRT) and reads the album-art
+  // thumbnail — a blocking round trip, off the UI thread.
+  "now_playing",
   "claude_usage",
   "update_status",
   "update_versions",

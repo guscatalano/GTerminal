@@ -1,0 +1,127 @@
+//! Now playing — the current track from Windows' system media controls.
+//!
+//! Not Spotify's API and no login: Windows exposes whatever is playing —
+//! Spotify, a browser tab, any media app that registers with the system
+//! transport controls — through SMTC
+//! (`GlobalSystemMediaTransportControlsSessionManager`). Title, artist,
+//! album, whether it is playing, and the album-art thumbnail, all read
+//! locally and sent nowhere. Off unless the user turns it on.
+//!
+//! Everything here fails soft: no session, no media app, a track with no
+//! art, or a platform that is not Windows all come back as `None`, and the
+//! status bar simply shows nothing. A missing song is not an error.
+
+use serde_json::Value;
+
+/// The current track, or `None` when nothing is playing or the platform
+/// cannot answer. On success: `title`, `artist`, `album`, `playing`, and
+/// `art` — a `data:` URI of the album thumbnail, or null when there is none.
+pub fn current() -> Option<Value> {
+    #[cfg(windows)]
+    {
+        imp::current()
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+#[cfg(windows)]
+mod imp {
+    use serde_json::{json, Value};
+    use std::cell::Cell;
+    use windows::Media::Control::{
+        GlobalSystemMediaTransportControlsSessionManager as Manager,
+        GlobalSystemMediaTransportControlsSessionMediaProperties as MediaProperties,
+        GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus,
+    };
+    use windows::Storage::Streams::DataReader;
+    use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
+
+    // An album thumbnail is tens to a few hundred KB; a megabyte is already
+    // generous, and refusing more keeps a hostile or broken stream from
+    // handing us an arbitrary allocation to base64 into the UI.
+    const MAX_ART_BYTES: u64 = 2 * 1024 * 1024;
+
+    thread_local! {
+        // WinRT will not talk to a thread that is not in an apartment.
+        // Worker threads are reused, so init once each and never uninit —
+        // the poll runs on whichever thread the pool hands it.
+        static COM_READY: Cell<bool> = const { Cell::new(false) };
+    }
+
+    fn ensure_com() {
+        COM_READY.with(|ready| {
+            if !ready.get() {
+                // MTA: this is a worker thread with no message pump, and a
+                // returned S_FALSE (already initialised) is not a failure.
+                unsafe {
+                    let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+                }
+                ready.set(true);
+            }
+        });
+    }
+
+    pub fn current() -> Option<Value> {
+        ensure_com();
+
+        let manager = Manager::RequestAsync().ok()?.get().ok()?;
+        // No current session means nothing has claimed the media controls —
+        // no player open, or none playing. Not an error, just quiet.
+        let session = manager.GetCurrentSession().ok()?;
+
+        let props = session.TryGetMediaPropertiesAsync().ok()?.get().ok()?;
+        let title = props.Title().map(|h| h.to_string()).unwrap_or_default();
+        let artist = props.Artist().map(|h| h.to_string()).unwrap_or_default();
+        let album = props.AlbumTitle().map(|h| h.to_string()).unwrap_or_default();
+        // A session that names neither a title nor an artist is not a song
+        // worth showing — some apps register the controls before they have
+        // anything loaded.
+        if title.trim().is_empty() && artist.trim().is_empty() {
+            return None;
+        }
+
+        let playing = session
+            .GetPlaybackInfo()
+            .and_then(|info| info.PlaybackStatus())
+            .map(|status| status == PlaybackStatus::Playing)
+            .unwrap_or(false);
+
+        let art = album_art(&props);
+
+        Some(json!({
+            "title": title,
+            "artist": artist,
+            "album": album,
+            "playing": playing,
+            "art": art,
+        }))
+    }
+
+    /// The album thumbnail as a `data:` URI, or `None`. Every step is
+    /// allowed to fail without taking the track down with it: plenty of
+    /// tracks have no art, and a missing picture is not a missing song.
+    fn album_art(props: &MediaProperties) -> Option<String> {
+        let reference = props.Thumbnail().ok()?;
+        let stream = reference.OpenReadAsync().ok()?.get().ok()?;
+        let size = stream.Size().ok()?;
+        if size == 0 || size > MAX_ART_BYTES {
+            return None;
+        }
+        let reader = DataReader::CreateDataReader(&stream).ok()?;
+        reader.LoadAsync(size as u32).ok()?.get().ok()?;
+        let mut bytes = vec![0u8; size as usize];
+        reader.ReadBytes(&mut bytes).ok()?;
+
+        let mime = stream
+            .ContentType()
+            .map(|h| h.to_string())
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "image/jpeg".to_string());
+
+        Some(format!("data:{};base64,{}", mime, crate::mux::b64(&bytes)))
+    }
+}
