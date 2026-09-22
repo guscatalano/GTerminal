@@ -1563,6 +1563,19 @@ if (-not $Only -or $Only -eq "restore-again") {
   # it talks to the daemon that is still holding the sessions in memory;
   # only the restart applies the rule.
   $seed = Seed-Daemon 5 $cfg -Typed
+  # Each seed session's birth time, kept so a *resurrected* one can be told
+  # from a *reused id*. Declining with "close the ones I don't restore" on
+  # (the default) hard-kills the five ended sessions and empties the daemon,
+  # which then exits when idle; the fresh shell the empty window opens comes
+  # up under a brand-new daemon whose id counter has reset, so it can land
+  # on id 1 — a seed id — without being a seed session at all. The birth
+  # time does not reuse: a real restore keeps the session's original
+  # created_ms, a new shell gets a new one. Matching on it is how "nothing
+  # came back" stays true even when an id is recycled underneath it.
+  $seedBorn = @{}
+  foreach ($s in Daemon-Sessions) {
+    if ($seed.Ids -contains $s.id) { $seedBorn[[int]$s.id] = $s.created_ms }
+  }
   # First run: take them all, which is what writes the order and layouts.
   $first = Start-AppSeeded $seed
   $againPressed = Press-OnDialog $first.Hwnd $VK_RETURN
@@ -1646,7 +1659,13 @@ if (-not $Only -or $Only -eq "restore-again") {
   if ($againMoved -gt 0.05) { Pass "the second run's question took the clicks" }
   else { Fail "restore-again" ("the screen did not change when the question was answered ({0:p0}) - the clicks may have missed it, and what follows would prove nothing" -f $againMoved) }
   $now5 = Daemon-Sessions
-  $again = @($now5 | Where-Object { $seed.Ids -contains $_.id -and $_.attached })
+  # A seed session genuinely came back only if its id AND its birth time
+  # both match — an id on its own can be a recycled number on a brand-new
+  # shell (see $seedBorn). Attached-and-alive with the original created_ms
+  # is a real resurrection; anything else is the empty window's fresh tab.
+  $again = @($now5 | Where-Object {
+    $_.attached -and $seed.Ids -contains $_.id -and $seedBorn[[int]$_.id] -eq $_.created_ms
+  })
   if ($again.Count -eq 0) { Pass "declining on a second run still restores nothing" }
   else { Fail "restore-again" "$($again.Count) of 5 came back from the saved layout" }
   foreach ($b in $againBefore, $againAfter) { if ($b) { $b.Dispose() } }
