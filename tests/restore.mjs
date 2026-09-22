@@ -121,6 +121,23 @@ check("no tabs at all", tabForNumber([], 1), undefined);
 check("zero is not a tab number", tabForNumber([11], 0), undefined);
 check("ten is out of range", tabForNumber([11], 10), undefined);
 
+// ── the restore dialog closes what you don't bring back ────────────────
+// Kept sessions that you never re-adopt used to run on forever unwatched;
+// the dialog now offers to close the ones you leave out, on by default,
+// at the one moment you are present to decide. Shape checks, because it is
+// a dialog: the box exists and is on, the explicit Restore path closes the
+// leftovers, and Esc — the "leave everything" gesture — never does.
+import { readFileSync } from "fs";
+const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+check("there is a close-the-rest box", /Close the ones I don't restore/.test(main), true);
+check("it is ticked by default", /closeRestBox\.checked = true/.test(main), true);
+check("the leftovers are the ones not restored", /if \(!ids\.has\(s\.id\)\) void invoke\("kill_session"/.test(main), true);
+check(
+  "the Restore action passes the box; Esc passes nothing",
+  /finish\(new Set\(\[\.\.\.boxes\][\s\S]{0,80}closeRestBox\.checked\)/.test(main) && /finish\(new Set\(\)\);/.test(main),
+  true
+);
+
 if (failed) {
   console.log(`${failed} restore test(s) failed`);
   process.exit(1);

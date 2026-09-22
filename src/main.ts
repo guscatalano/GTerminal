@@ -48,6 +48,8 @@ import {
 import type { SessionState } from "./restore";
 import { SHORTCUTS } from "./shortcuts";
 import { daemonAction, shellsAtRisk, daemonNotice } from "./daemon";
+import { normalizeCloseMode, CLOSE_CHOICES } from "./closebehavior";
+import type { CloseMode } from "./closebehavior";
 import { chromiumMajor, shouldWarnOldWebview, MIN_WEBVIEW } from "./webview";
 import { logicalLine } from "./copyline";
 import type { DaemonInfo } from "./daemon";
@@ -4668,17 +4670,9 @@ function confirmPaste(id: number, text: string) {
   go.focus();
 }
 
-type CloseMode = "hide" | "keep" | "remember" | "close";
-
-/// The normalized close behaviour. Legacy "quit" reads as "close"; an
-/// install with nothing set gets "remember" — closing then genuinely
-/// closes, and the folders come back next launch, rather than shells
-/// running on unseen forever.
+/// The stored close behaviour, normalised — see closebehavior.ts.
 function closeMode(): CloseMode {
-  const v = config.close_action;
-  if (v === "hide" || v === "keep" || v === "remember" || v === "close") return v;
-  if (v === "quit") return "close";
-  return "remember";
+  return normalizeCloseMode(config.close_action);
 }
 
 function confirmOnClose(): boolean {
@@ -4703,24 +4697,6 @@ function openWorkspace(): Array<{ cwd?: string; shell?: string; title?: string }
 /// Set true only just before our own destroy(), so the close-requested
 /// handler lets that final close through instead of re-opening the prompt.
 let closingForReal = false;
-
-const CLOSE_CHOICES: Array<{ mode: "keep" | "remember" | "close"; label: string; desc: string }> = [
-  {
-    mode: "keep",
-    label: "Keep them running",
-    desc: "Your terminals and anything running in them stay alive in the background. Reopen GTerminal any time and they're back, exactly where you left them.",
-  },
-  {
-    mode: "remember",
-    label: "Close but remember",
-    desc: "Ends the terminals and anything running in them, but reopens the same ones — in the same folders — next time.",
-  },
-  {
-    mode: "close",
-    label: "Close them",
-    desc: "Ends everything and forgets it. A clean slate next launch.",
-  },
-];
 
 /// Ask what happens to the live terminals. Resolves to the chosen mode, or
 /// "cancel". The default mode is the one highlighted, so it is one Enter to

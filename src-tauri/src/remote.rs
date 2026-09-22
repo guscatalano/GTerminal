@@ -1756,6 +1756,24 @@ mod remote_tests {
         }
         assert!(chosen != 0, "nothing ever bound: {reported}");
 
+        // A settings change (flipping read-only to typing, say) re-syncs on
+        // the same port while the previous generation's server is still
+        // letting go of it. Before the bind retry that raced and came back
+        // not-running, which read as the address, QR and links all
+        // vanishing. Now the rebind waits for the outgoing server, so a
+        // re-sync on the same port comes back running.
+        let resync = sync(&json!({
+            "remote_enabled": true,
+            "remote_bind": "local",
+            "remote_port": chosen,
+            "remote_token": token,
+        }));
+        assert_eq!(
+            resync.get("running").and_then(Value::as_bool),
+            Some(true),
+            "a re-sync on the same port did not come back running — the rebind raced the outgoing server: {resync}"
+        );
+
         let get = |target: &str, bearer: Option<&str>| -> String {
             let mut s = TcpStream::connect(("127.0.0.1", chosen)).expect("connect");
             s.set_read_timeout(Some(Duration::from_secs(10))).ok();
