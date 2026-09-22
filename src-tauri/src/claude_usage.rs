@@ -179,8 +179,16 @@ pub fn totals_for_day(
 /// tick hang or balloon memory. In practice a single day's transcripts
 /// are a handful of files, a few MB total; these caps only bite on a
 /// pathological one.
-const MAX_LINES: usize = 200_000;
-const MAX_BYTES: usize = 64 * 1024 * 1024;
+const MAX_LINES: usize = 1_000_000;
+const MAX_BYTES: usize = 256 * 1024 * 1024;
+/// Today's usage sits at the END of an append-only transcript, and a
+/// resumed session's file can carry months of history before it. Each file
+/// is therefore read from this far before its end, not from the start: a
+/// single day's slice for one session is far smaller than this, while
+/// reading the head spent the whole line/byte budget on old content and
+/// never reached today — which is why the status bar read zero on any
+/// machine with long-lived sessions.
+const TAIL_BYTES: u64 = 8 * 1024 * 1024;
 
 /// Walk every `*.jsonl` under `<claude_dir>/projects/*/`, keeping only
 /// files last modified on `day` in local time - a session file's mtime
@@ -196,6 +204,13 @@ const MAX_BYTES: usize = 64 * 1024 * 1024;
 /// silently skipped rather than surfaced, matching the module's
 /// degrade-never-throw rule.
 pub fn scan(claude_dir: &Path, day: chrono::NaiveDate) -> Vec<UsageEntry> {
+    scan_with_tail(claude_dir, day, TAIL_BYTES)
+}
+
+/// The scan, with the tail size a parameter so the "today is at the end of
+/// a long file" behaviour can be tested with a small file and a small tail
+/// rather than an eight-megabyte fixture.
+fn scan_with_tail(claude_dir: &Path, day: chrono::NaiveDate, tail_bytes: u64) -> Vec<UsageEntry> {
     let mut out = Vec::new();
     let projects = claude_dir.join("projects");
     let Ok(project_dirs) = std::fs::read_dir(&projects) else {
@@ -223,12 +238,24 @@ pub fn scan(claude_dir: &Path, day: chrono::NaiveDate) -> Vec<UsageEntry> {
             if !is_today {
                 continue;
             }
-            let Ok(f) = std::fs::File::open(&path) else {
+            let Ok(mut f) = std::fs::File::open(&path) else {
                 continue;
             };
-            use std::io::BufRead;
-            for line in std::io::BufReader::new(f).lines() {
+            use std::io::{BufRead, Seek, SeekFrom};
+            // Start from near the end. A file longer than the tail is read
+            // from `len - tail_bytes`, and its first line is dropped, since
+            // the seek almost certainly lands in the middle of one.
+            let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+            let mut skip_partial = false;
+            if len > tail_bytes {
+                let _ = f.seek(SeekFrom::Start(len - tail_bytes));
+                skip_partial = true;
+            }
+            for (i, line) in std::io::BufReader::new(f).lines().enumerate() {
                 let Ok(line) = line else { break };
+                if skip_partial && i == 0 {
+                    continue;
+                }
                 bytes_read += line.len() + 1;
                 if let Some(entry) = parse_line(&line) {
                     out.push(entry);
@@ -300,6 +327,45 @@ pub fn fetch_today(claude_dir: &Path) -> Report {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Today's usage lives at the END of a long, append-only transcript,
+    /// after however many months of a resumed session. Reading the head
+    /// spent the budget on old content and reported zero; reading the tail
+    /// finds it. A tiny tail here exercises the same "skip the old head,
+    /// read the recent tail" path the real 8MB one does, on a small file.
+    #[test]
+    fn todays_usage_at_the_end_of_a_long_file_is_found() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join(format!("gt-claude-usage-{}", std::process::id()));
+        let proj = dir.join("projects").join("p");
+        std::fs::create_dir_all(&proj).unwrap();
+        let mut f = std::fs::File::create(proj.join("s.jsonl")).unwrap();
+        // A head of old content, far larger than the tail read below.
+        let old = r#"{"type":"assistant","timestamp":"2026-01-01T10:00:00.000Z","sessionId":"s","message":{"model":"m","usage":{"input_tokens":9,"output_tokens":9,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#;
+        for _ in 0..300 {
+            writeln!(f, "{old}").unwrap();
+        }
+        // Today's line, at the very end.
+        let now = chrono::Utc::now();
+        writeln!(
+            f,
+            r#"{{"type":"assistant","timestamp":"{}","sessionId":"s","message":{{"model":"m","usage":{{"input_tokens":100,"output_tokens":200,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}}}}"#,
+            now.to_rfc3339()
+        )
+        .unwrap();
+        drop(f);
+
+        let day = chrono::Local::now().date_naive();
+        // A tail far smaller than the old head: the head is skipped, the
+        // recent tail that holds today is read.
+        let entries = scan_with_tail(&dir, day, 1024);
+        let report = totals_for_day(&entries, day, *chrono::Local::now().offset());
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(report.input_tokens, 100, "today at the tail was missed: {report:?}");
+        assert_eq!(report.output_tokens, 200, "today's output at the tail was missed");
+        assert_eq!(report.messages, 1, "only today's one message counts, not the old head");
+    }
 
     /// A subscription plan records no cost, and that must not render as
     /// having cost nothing. Measured on a real machine: seven models
@@ -573,3 +639,4 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 }
+
