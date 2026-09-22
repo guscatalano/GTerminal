@@ -4212,7 +4212,7 @@ function chooseRestore(list: SessionInfo[]): Promise<Set<number>> {
     const note = document.createElement("div");
     note.className = "restore-note";
     note.textContent =
-      "They are all still running. Anything you leave out stays in the background and can be reopened from the sidebar. Enter restores the ticked ones, Esc starts with none.";
+      "They are all still running. Enter restores the ticked ones; with the box below ticked, the rest are closed — untick it to leave them running in the background. Esc leaves everything and starts with none.";
 
     const rows = document.createElement("div");
     rows.className = "restore-list";
@@ -4273,6 +4273,18 @@ function chooseRestore(list: SessionInfo[]): Promise<Set<number>> {
     neverText.textContent = "Don't ask again";
     never.append(neverBox, neverText);
 
+    // On by default: the ones you do not bring back are closed, so keeping
+    // sessions across a close and then not restoring them does not leave
+    // them running unwatched. Untick to keep them in the background.
+    const closeRest = document.createElement("label");
+    closeRest.className = "restore-never";
+    const closeRestBox = document.createElement("input");
+    closeRestBox.type = "checkbox";
+    closeRestBox.checked = true;
+    const closeRestText = document.createElement("span");
+    closeRestText.textContent = "Close the ones I don't restore";
+    closeRest.append(closeRestBox, closeRestText);
+
     const actions = document.createElement("div");
     actions.className = "restore-actions";
     const none = document.createElement("button");
@@ -4288,12 +4300,22 @@ function chooseRestore(list: SessionInfo[]): Promise<Set<number>> {
     relabel();
     rows.addEventListener("change", relabel);
     actions.append(none, all, go);
-    foot.append(never, actions);
+    foot.append(closeRest, never, actions);
 
-    const finish = (ids: Set<number>) => {
+    const finish = (ids: Set<number>, closeLeftovers = false) => {
       if (neverBox.checked) {
         config.restore_prompt = false;
         saveConfig();
+      }
+      // The unticked ones: end them if the box is on, so "keep them
+      // running, then don't restore" does not quietly leave shells alive
+      // forever. Off keeps the old behaviour — they stay in the background,
+      // reachable from the sidebar. Never on the Esc path, which is the
+      // quiet "leave everything" gesture.
+      if (closeLeftovers) {
+        for (const s of list) {
+          if (!ids.has(s.id)) void invoke("kill_session", { id: s.id }).catch(() => {});
+        }
       }
       ov.remove();
       window.removeEventListener("keydown", onKey, true);
@@ -4303,7 +4325,7 @@ function chooseRestore(list: SessionInfo[]): Promise<Set<number>> {
       e.stopPropagation();
       if (e.key === "Enter") {
         e.preventDefault();
-        finish(new Set([...boxes].filter(([, b]) => b.checked).map(([id]) => id)));
+        finish(new Set([...boxes].filter(([, b]) => b.checked).map(([id]) => id)), closeRestBox.checked);
       }
       // Escape opens none. Dismissing a dialog should do the quiet thing,
       // not the expensive one — and restoring everything on Escape is a
@@ -4324,7 +4346,7 @@ function chooseRestore(list: SessionInfo[]): Promise<Set<number>> {
       relabel();
     });
     go.addEventListener("click", () =>
-      finish(new Set([...boxes].filter(([, b]) => b.checked).map(([id]) => id)))
+      finish(new Set([...boxes].filter(([, b]) => b.checked).map(([id]) => id)), closeRestBox.checked)
     );
     window.addEventListener("keydown", onKey, true);
 
