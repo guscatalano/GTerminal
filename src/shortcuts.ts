@@ -117,7 +117,7 @@ export const SHORTCUTS: ShortcutGroup[] = [
       { keys: "Ctrl+Shift+S", what: "Toggle the status bar", handler: "toggleStatusBar" },
       {
         keys: "Ctrl+Shift+/",
-        what: "Show this list of shortcuts — or F1, or the ⌨ button in the top bar",
+        what: "Show this list of shortcuts — or F1, or the keyboard icon in the top bar",
         handler: "openShortcutsOverlay",
         only: "F1 opens it outside a full-screen program; Ctrl+Shift+/ always",
       },
