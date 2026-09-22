@@ -928,21 +928,33 @@ async fn update_versions() -> Result<Vec<update::Version>, String> {
 #[tauri::command(async)]
 async fn update_check() -> Result<Option<update::Version>, String> {
     let cfg = mux::read_config();
-    if !update::updates_supported(package_family_name().is_some()) {
+    let packaged = package_family_name().is_some();
+    // A packaged (Store) build cannot install an update itself — and
+    // update_install still refuses to, below — but its owner deserves to
+    // know a newer one shipped rather than sit silently on an old version,
+    // which is exactly the trap this closes. So the check runs for it too;
+    // only the installing stays the Store's job. Auto-update and pinning
+    // are installer-build controls with nothing to honour on a Store build,
+    // and the Store ships stable only, so a pre-release is never the update
+    // a packaged build is behind on.
+    if !packaged && !cfg.get("update_auto").and_then(|v| v.as_bool()).unwrap_or(true) {
         return Ok(None);
     }
-    if !cfg.get("update_auto").and_then(|v| v.as_bool()).unwrap_or(true) {
-        return Ok(None);
-    }
-    let pin = cfg
-        .get("update_pin")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let pre = cfg
-        .get("update_prerelease")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(mux::channel() == "dev");
+    let pin = if packaged {
+        String::new()
+    } else {
+        cfg.get("update_pin")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    let pre = if packaged {
+        false
+    } else {
+        cfg.get("update_prerelease")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(mux::channel() == "dev")
+    };
     let list = tauri::async_runtime::spawn_blocking(update::fetch_versions)
         .await
         .map_err(|e| format!("the version list did not come back: {e}"))??;

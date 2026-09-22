@@ -9104,16 +9104,58 @@ async function buildUpdatesSection() {
   settingRow("This build", "", where);
 
   if (!status.supported) {
-    // Said plainly rather than by leaving the controls out. A packaged
-    // install cannot install an MSI over itself - that is a second copy
-    // of the app under a different identity, with the Store still
-    // believing its package is the one in use.
+    // A packaged install cannot run an MSI over itself - that is a second
+    // copy under a different identity - so it does not offer that button.
+    // But it can do the two things that were missing, and that left a Store
+    // user sitting on an old version with no way to know: say a newer one
+    // shipped, and open the Store to it in one click. Closing to update
+    // keeps the shells, so the reassurance goes here where it is read.
+    const wrap = document.createElement("div");
+    wrap.className = "setting-stack";
     const note = document.createElement("div");
     note.className = "setting-status";
     note.textContent =
-      "Installed from the Microsoft Store, so the Store keeps it up to date. " +
-      "The installer build updates itself from GitHub instead.";
-    settingRow("Updating", "", note);
+      "Installed from the Microsoft Store, so the Store applies updates. " +
+      "Closing GTerminal keeps your shells running — they come back, with their scrollback and folder, when you reopen.";
+    const line = document.createElement("div");
+    line.className = "setting-status";
+    line.textContent = "Checking for a newer version…";
+    wrap.append(note, line);
+
+    const openStore = async () => {
+      const pfn = await invoke<string | null>("package_family_name").catch(() => null);
+      // The app's own Store page by package family name, where an Update
+      // button appears when one is pending; the downloads-and-updates list
+      // is the fallback when the identity is somehow unavailable.
+      const url = pfn ? `ms-windows-store://pdp/?PFN=${pfn}` : "ms-windows-store://downloadsandupdates";
+      void openUrl(url).catch(() => {});
+    };
+    const storeButton = (label: string) => {
+      const b = document.createElement("button");
+      b.className = "set-control";
+      b.textContent = label;
+      b.addEventListener("click", () => void openStore());
+      return b;
+    };
+
+    void invoke<UpdateVersion | null>("update_check")
+      .then((found) => {
+        if (found) {
+          line.textContent = `Version ${found.version} is available — you are on ${status.version}.`;
+          wrap.append(storeButton("Update in Microsoft Store"));
+          logUi("update.available", { version: found.version, tag: found.tag, packaged: true });
+        } else {
+          line.textContent = `You are on the latest version (${status.version}).`;
+        }
+      })
+      .catch(() => {
+        // Offer the Store anyway, so it stays one click even when the
+        // check itself could not reach the release list.
+        line.textContent = "Could not check for a newer version just now.";
+        wrap.append(storeButton("Open in Microsoft Store"));
+      });
+
+    settingRow("Updating", "", wrap);
     return;
   }
 
