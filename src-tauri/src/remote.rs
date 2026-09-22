@@ -1300,7 +1300,23 @@ pub fn sync(config: &Value) -> Value {
     }
     let bind = bind_addr(config);
     let p = port(config);
-    let listener = match TcpListener::bind((bind, p)) {
+    // The previous generation's server is very likely still holding this
+    // port. It stops at the top of its accept loop — which it reaches only
+    // within its poll interval, then drops the listener — so a config change
+    // that comes straight back through here (even one that needed no
+    // restart, like flipping read-only to typing) would race that release
+    // and fail to bind. That failure read as the address, the QR and the
+    // links all vanishing and the page going unreachable for a moment. So
+    // give the outgoing server time to let go rather than binding into its
+    // face; this runs off the UI thread, so the short wait costs nothing
+    // that is felt.
+    let mut bound = TcpListener::bind((bind, p));
+    let deadline = std::time::Instant::now() + Duration::from_millis(700);
+    while bound.is_err() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(30));
+        bound = TcpListener::bind((bind, p));
+    }
+    let listener = match bound {
         Ok(l) => l,
         Err(e) => {
             return json!({
