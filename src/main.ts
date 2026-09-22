@@ -92,6 +92,7 @@ import {
   remoteOn,
   remotePairing,
   remotePort,
+  remoteTls,
   pairingConsequence,
   describePending,
   statusLine,
@@ -390,6 +391,10 @@ interface AppConfig {
   /// desktop approves the request against that code and the device is
   /// handed the token. Off unless deliberately turned on, like the rest.
   remote_pairing?: boolean;
+  /// Encrypt with HTTPS. The one remote switch that is on by default:
+  /// absent means encrypted, and only an explicit false serves in the
+  /// clear. See remoteTls.
+  remote_tls?: boolean;
 }
 
 // Built-in decorative backgrounds — pure CSS, no assets.
@@ -9063,6 +9068,39 @@ function buildRemoteSection() {
     "Typing from the page",
     "Separate from watching, and separately off. A browser tab that can see your shell and one that can drive it are different things to have published, and the second should never arrive as a side effect of wanting the first.",
     typeWrap
+  );
+
+  // Encrypt with HTTPS.
+  //
+  // On by default, and the reason the links and QR now say https. The
+  // certificate is self-signed, so the first time a phone opens the page
+  // it asks the user to trust it once - the cost of a cert nobody had to
+  // buy or renew. The escape hatch (turning this off) is for someone who
+  // already has TLS in front, or whose client will not accept a
+  // self-signed cert; it serves in the clear, so it names that plainly.
+  const tlsWrap = document.createElement("div");
+  tlsWrap.className = "setting-stack";
+  const tlsSel = mkSelect(
+    [["on", "Encrypt with HTTPS"], ["off", "Serve in the clear (HTTP)"]],
+    remoteTls(config) ? "on" : "off",
+    (v) => {
+      config.remote_tls = v === "on";
+      void apply();
+    }
+  );
+  const tlsSays = document.createElement("div");
+  tlsSays.className = "setting-status";
+  tlsWrap.append(tlsSel, tlsSays);
+  redraws.push(() => {
+    tlsSel.value = remoteTls(config) ? "on" : "off";
+    tlsSays.textContent = remoteTls(config)
+      ? "Encrypted. A phone trusts the self-signed certificate once, then the connection is private."
+      : "Not encrypted. Anything watched or typed travels in the clear — only for a network you already trust or a proxy that adds TLS.";
+  });
+  settingRow(
+    "Encryption",
+    "Whether the connection is HTTPS. On by default, with a certificate GTerminal makes and keeps, so a phone is asked to trust it once and not again. Turn it off only if something in front already provides TLS, or a client refuses the self-signed certificate — without it, a watched shell and anything typed into it cross the network in the clear.",
+    tlsWrap
   );
 
   // Approve-on-desktop pairing.

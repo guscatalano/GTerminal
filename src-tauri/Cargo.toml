@@ -36,6 +36,14 @@ tauri-plugin-single-instance = "2.4.3"
 # of machinery for two requests. rustls rather than schannel so the
 # trust store is the same one the tests run against.
 ureq = { version = "2", default-features = false, features = ["tls", "json", "gzip"] }
+# Remote control speaks HTTPS by default, with a self-signed certificate
+# it generates once and keeps. rustls (the ring backend, the same one
+# ureq already links, so there is one crypto library in the build) is the
+# server; rcgen makes the certificate; rustls-pemfile reads it back off
+# disk on the next launch so the cert a phone trusted once stays put.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging", "tls12"] }
+rcgen = { version = "0.13", default-features = false, features = ["pem", "ring"] }
+rustls-pemfile = "2"
 # Already in the tree transitively (tauri and windows both pull it in);
 # depended on directly here just to convert Claude Code's UTC transcript
 # timestamps into "today" in whatever timezone this machine is set to.

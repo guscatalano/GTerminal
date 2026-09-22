@@ -16,6 +16,7 @@ import {
   remoteOn,
   remotePairing,
   remotePort,
+  remoteTls,
   remoteUrl,
   pairingConsequence,
   describePending,
@@ -61,6 +62,17 @@ check("pairing is off by default", remotePairing({ remote_enabled: true }), fals
 check("a truthy string does not turn pairing on", remotePairing({ remote_pairing: "yes" }), false);
 check("nor does 1", remotePairing({ remote_pairing: 1 }), false);
 check("on when it says on", remotePairing({ remote_pairing: true }), true);
+
+// ── HTTPS is the one switch that is on by default ──────────────────────
+// Every other switch here fails closed: absent means off. This one is a
+// security default the other way — absent means encrypted — so a shell is
+// never published in the clear by an install that simply never set it.
+check("https is on when nothing says otherwise", remoteTls({ remote_enabled: true }), true);
+check("only an explicit false serves in the clear", remoteTls({ remote_tls: false }), false);
+check("a truthy string does not turn encryption off", remoteTls({ remote_tls: "no" }), true);
+check("null is not off either", remoteTls({ remote_tls: null }), true);
+check("on when it says on", remoteTls({ remote_tls: true }), true);
+
 // The sentence under the switch changes with it, and both states say
 // something true rather than one being blank.
 check("the on sentence mentions the code", /code/.test(pairingConsequence(true)), true);
@@ -101,9 +113,18 @@ check("a real port is kept", remotePort({ remote_port: 9000 }), 9000);
 check("the default matches the server's", DEFAULT_PORT, 8722);
 
 // ── the link ───────────────────────────────────────────────────────────
+// HTTPS is the default now, so a bare link is https. A phone opening an
+// http:// link against the TLS port is exactly the "bad request" the
+// encryption exists to end, so the builder must not mint one by default.
 check(
-  "the link carries the token",
+  "the link carries the token, over https by default",
   remoteUrl("10.44.0.3", 8722, "abc123"),
+  "https://10.44.0.3:8722/?t=abc123"
+);
+// The plaintext escape hatch still builds an http link when asked.
+check(
+  "the plaintext escape hatch is http",
+  remoteUrl("10.44.0.3", 8722, "abc123", false),
   "http://10.44.0.3:8722/?t=abc123"
 );
 // A token is generated from a fixed alphabet, but the URL builder must
@@ -112,25 +133,37 @@ check(
 check(
   "a token with awkward characters is escaped",
   remoteUrl("127.0.0.1", 9000, "a b&c"),
-  "http://127.0.0.1:9000/?t=a%20b%26c"
+  "https://127.0.0.1:9000/?t=a%20b%26c"
 );
 // A WireGuard address can be IPv6, and an unbracketed one makes the port
 // part of the address.
 check(
   "an IPv6 host is bracketed",
   remoteUrl("fd00::1", 8722, "t"),
-  "http://[fd00::1]:8722/?t=t"
+  "https://[fd00::1]:8722/?t=t"
 );
 
+// addressesFor reads the scheme off the status. Default (no `tls` field,
+// or `tls: true`) is https; a status that reports plaintext gives http.
 check(
-  "every address the server reports gets a link",
+  "every address the server reports gets an https link by default",
   addressesFor({ port: 8722, hosts: ["192.168.1.9", "127.0.0.1"] }, "tok"),
-  ["http://192.168.1.9:8722/?t=tok", "http://127.0.0.1:8722/?t=tok"]
+  ["https://192.168.1.9:8722/?t=tok", "https://127.0.0.1:8722/?t=tok"]
+);
+check(
+  "a plaintext server yields http links",
+  addressesFor({ port: 8722, hosts: ["192.168.1.9"], tls: false }, "tok"),
+  ["http://192.168.1.9:8722/?t=tok"]
+);
+check(
+  "an explicit tls:true is https",
+  addressesFor({ port: 8722, hosts: ["192.168.1.9"], tls: true }, "tok"),
+  ["https://192.168.1.9:8722/?t=tok"]
 );
 check(
   "and loopback is the answer when it reports none",
   addressesFor({ port: 8722, hosts: [] }, "tok"),
-  ["http://127.0.0.1:8722/?t=tok"]
+  ["https://127.0.0.1:8722/?t=tok"]
 );
 
 // ── what the page says ─────────────────────────────────────────────────

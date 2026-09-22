@@ -33,10 +33,12 @@
 use crate::mux;
 use crate::mux::Request;
 use serde_json::{json, Value};
+use rustls::{ServerConfig, ServerConnection, StreamOwned};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
-use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// The page, and everything it needs. Embedded rather than read from
@@ -83,6 +85,11 @@ const MAX_BODY_BYTES: usize = 64 * 1024;
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 static LIVE_CONNS: AtomicUsize = AtomicUsize::new(0);
 static RUNNING_PORT: AtomicU32 = AtomicU32::new(0);
+/// Whether the running server is speaking HTTPS. Read by `status` so the
+/// window builds `https://` links and QR codes, since a phone opening an
+/// `http://` link against a TLS port is exactly the "bad request" this
+/// whole change is here to stop.
+static RUNNING_TLS: AtomicBool = AtomicBool::new(false);
 
 static FAILURES: AtomicU32 = AtomicU32::new(0);
 /// Connections that got past the token, ever, and when the last one did.
@@ -540,7 +547,7 @@ pub fn presented_token(req: &Req) -> String {
     req.param("t").unwrap_or_default().to_string()
 }
 
-fn read_request(reader: &mut BufReader<TcpStream>) -> Option<Req> {
+fn read_request(reader: &mut BufReader<Conn>) -> Option<Req> {
     let mut line = String::new();
     if reader.read_line(&mut line).ok()? == 0 {
         return None;
@@ -605,7 +612,7 @@ const COMMON_HEADERS: &str = "Cache-Control: no-store\r\n\
      script-src 'self' 'unsafe-inline'; img-src data:; connect-src 'self'; form-action 'none'; \
      frame-ancestors 'none'\r\n";
 
-fn respond(out: &mut TcpStream, status: &str, content_type: &str, body: &str) {
+fn respond(out: &mut Conn, status: &str, content_type: &str, body: &str) {
     let head = format!(
         "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n{COMMON_HEADERS}Connection: close\r\n\r\n",
         body.len()
@@ -615,7 +622,7 @@ fn respond(out: &mut TcpStream, status: &str, content_type: &str, body: &str) {
     let _ = out.flush();
 }
 
-fn respond_json(out: &mut TcpStream, status: &str, body: &Value) {
+fn respond_json(out: &mut Conn, status: &str, body: &Value) {
     respond(out, status, "application/json; charset=utf-8", &body.to_string());
 }
 
@@ -861,25 +868,158 @@ struct Ctx {
     pairing: bool,
 }
 
-fn serve(stream: TcpStream, ctx: Arc<Ctx>) {
-    let addr = stream
-        .peer_addr()
-        .map(|a| a.ip().to_string())
-        .unwrap_or_else(|_| "unknown address".to_string());
-    let _ = stream.set_nodelay(true);
-    // A connection that opens and says nothing must not hold a thread
-    // for the life of the process; once a stream is running it never
-    // reads again, so this only ever bites the silent case.
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(20)));
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(20)));
-    let Ok(read_half) = stream.try_clone() else { return };
-    let mut reader = BufReader::new(read_half);
-    let mut out = stream;
+/// One accepted connection, HTTPS or plain. Remote control speaks TLS by
+/// default; the `remote_tls: false` escape hatch drops to plain HTTP for
+/// someone who already has TLS in front (a reverse proxy) or who cannot
+/// get a self-signed cert past their client. The whole server is written
+/// once against this, and neither the request parser nor the responders
+/// know which they hold.
+///
+/// A TLS stream cannot be `try_clone`d — the cipher state is one shared
+/// thing — so, unlike the old plain-only server, there is a single stream
+/// per connection: read through a `BufReader`, written through the same
+/// handle. That is safe here because a response is written only after the
+/// request is fully read, and a live event stream only ever writes, so
+/// the two directions are never in flight at once.
+enum Conn {
+    Plain(TcpStream),
+    Tls(Box<StreamOwned<ServerConnection, TcpStream>>),
+}
+
+impl Conn {
+    fn inner(&self) -> &TcpStream {
+        match self {
+            Conn::Plain(s) => s,
+            Conn::Tls(s) => &s.sock,
+        }
+    }
+    fn peer_ip(&self) -> String {
+        self.inner()
+            .peer_addr()
+            .map(|a| a.ip().to_string())
+            .unwrap_or_else(|_| "unknown address".to_string())
+    }
+}
+
+impl Read for Conn {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Conn::Plain(s) => s.read(buf),
+            Conn::Tls(s) => s.read(buf),
+        }
+    }
+}
+
+impl Write for Conn {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            Conn::Plain(s) => s.write(buf),
+            Conn::Tls(s) => s.write(buf),
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Conn::Plain(s) => s.flush(),
+            Conn::Tls(s) => s.flush(),
+        }
+    }
+}
+
+/// The TLS server config, built once from a self-signed certificate that
+/// is generated on first use and kept. Returns `None` only if the cert
+/// can neither be read nor made — sync treats that as "cannot serve
+/// HTTPS" rather than quietly dropping to plaintext, because a downgrade
+/// to HTTP that the user did not choose is the one outcome worse than an
+/// error message.
+fn tls_config() -> Option<Arc<ServerConfig>> {
+    static TLS: OnceLock<Option<Arc<ServerConfig>>> = OnceLock::new();
+    TLS.get_or_init(build_tls_config).clone()
+}
+
+fn cert_paths() -> Option<(PathBuf, PathBuf)> {
+    let base = PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("GTerminal");
+    Some((base.join("remote-cert.pem"), base.join("remote-key.pem")))
+}
+
+fn build_tls_config() -> Option<Arc<ServerConfig>> {
+    let (cert_path, key_path) = cert_paths()?;
+    let (cert_pem, key_pem) = load_or_make_cert(&cert_path, &key_path)?;
+
+    let certs: Vec<_> = rustls_pemfile::certs(&mut cert_pem.as_bytes())
+        .collect::<Result<_, _>>()
+        .ok()?;
+    let key = rustls_pemfile::private_key(&mut key_pem.as_bytes()).ok()??;
+
+    // The ring provider explicitly: it is the one already in the build
+    // (ureq links it), so this does not pull a second crypto library, and
+    // being explicit means the choice does not ride on a process-wide
+    // default that some other crate might install first.
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let cfg = ServerConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .ok()?
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .ok()?;
+    Some(Arc::new(cfg))
+}
+
+/// Read the stored certificate, or make one and store it. A cert that
+/// will not parse — a truncated write, a hand-edit — is replaced rather
+/// than fought, so a bad file on disk cannot wedge the feature shut.
+fn load_or_make_cert(cert_path: &Path, key_path: &Path) -> Option<(String, String)> {
+    if let (Ok(c), Ok(k)) = (
+        std::fs::read_to_string(cert_path),
+        std::fs::read_to_string(key_path),
+    ) {
+        if c.contains("BEGIN CERTIFICATE") && k.contains("PRIVATE KEY") {
+            return Some((c, k));
+        }
+    }
+    let made = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).ok()?;
+    let cert_pem = made.cert.pem();
+    let key_pem = made.key_pair.serialize_pem();
+    if let Some(dir) = cert_path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(cert_path, &cert_pem);
+    let _ = std::fs::write(key_path, &key_pem);
+    Some((cert_pem, key_pem))
+}
+
+/// Wrap an accepted socket in the transport it will speak. With a config
+/// present the connection is TLS; the handshake itself is lazy and
+/// happens on the first read inside `serve`, under the timeouts already
+/// set on the socket.
+fn accept_conn(tcp: TcpStream, tls: Option<Arc<ServerConfig>>) -> Option<Conn> {
+    match tls {
+        None => Some(Conn::Plain(tcp)),
+        Some(cfg) => {
+            let conn = ServerConnection::new(cfg).ok()?;
+            Some(Conn::Tls(Box::new(StreamOwned::new(conn, tcp))))
+        }
+    }
+}
+
+/// HTTPS unless the config explicitly says otherwise. Absent, null, or a
+/// non-boolean all mean on — the fail-safe direction for a setting that
+/// decides whether a shell is published in the clear.
+fn tls_on(config: &Value) -> bool {
+    config.get("remote_tls").and_then(Value::as_bool) != Some(false)
+}
+
+fn serve(stream: Conn, ctx: Arc<Ctx>) {
+    let addr = stream.peer_ip();
+    // A single stream now, read and written through one BufReader: a TLS
+    // connection has no second clonable handle. The response is written
+    // through `reader.get_mut()` once the request has been fully read.
+    let mut reader = BufReader::new(stream);
 
     let Some(req) = read_request(&mut reader) else {
-        respond(&mut out, "400 Bad Request", "text/plain; charset=utf-8", "bad request\n");
+        respond(reader.get_mut(), "400 Bad Request", "text/plain; charset=utf-8", "bad request\n");
         return;
     };
+    let out = reader.get_mut();
 
     let r = route(&req.method, &req.path);
     // Pairing is answered before the token gate - a device that has not
@@ -896,13 +1036,13 @@ fn serve(stream: TcpStream, ctx: Arc<Ctx>) {
                 // nuisance caps in start_pair count against.
                 match start_pair(device, addr.clone()) {
                     Some((id, code)) => {
-                        respond_json(&mut out, "200 OK", &json!({ "id": id, "code": code }))
+                        respond_json(out, "200 OK", &json!({ "id": id, "code": code }))
                     }
                     // One 429 for every limit - global cap, per-IP cap, or
                     // denial cooldown - so a refusal never says which wall
                     // was hit or how close anything is to it.
                     None => respond_json(
-                        &mut out,
+                        out,
                         "429 Too Many Requests",
                         &json!({ "error": "too many pairing requests; wait a moment and try again" }),
                     ),
@@ -912,18 +1052,18 @@ fn serve(stream: TcpStream, ctx: Arc<Ctx>) {
                 let id = req.param("id").unwrap_or_default();
                 match pair_state(id) {
                     Some(PairState::Approved) => respond_json(
-                        &mut out,
+                        out,
                         "200 OK",
                         &json!({ "state": "approved", "token": ctx.token.as_str() }),
                     ),
                     Some(PairState::Rejected) => {
-                        respond_json(&mut out, "200 OK", &json!({ "state": "rejected" }))
+                        respond_json(out, "200 OK", &json!({ "state": "rejected" }))
                     }
                     Some(PairState::Waiting) => {
-                        respond_json(&mut out, "200 OK", &json!({ "state": "waiting" }))
+                        respond_json(out, "200 OK", &json!({ "state": "waiting" }))
                     }
                     None => {
-                        respond_json(&mut out, "404 Not Found", &json!({ "error": "no such pairing" }))
+                        respond_json(out, "404 Not Found", &json!({ "error": "no such pairing" }))
                     }
                 }
             }
@@ -942,7 +1082,7 @@ fn serve(stream: TcpStream, ctx: Arc<Ctx>) {
         // token — neither the one expected nor the one presented — is
         // written anywhere, here or in a log line.
         respond(
-            &mut out,
+            out,
             "401 Unauthorized",
             "text/plain; charset=utf-8",
             "GTerminal remote control: this link needs its access token.\n",
@@ -957,29 +1097,29 @@ fn serve(stream: TcpStream, ctx: Arc<Ctx>) {
     let who = viewer_join(addr, req.header("user-agent").unwrap_or_default().to_string());
 
     match r {
-        Route::Page => respond(&mut out, "200 OK", "text/html; charset=utf-8", PAGE),
-        Route::Sessions => respond_json(&mut out, "200 OK", &sessions_json()),
+        Route::Page => respond(out, "200 OK", "text/html; charset=utf-8", PAGE),
+        Route::Sessions => respond_json(out, "200 OK", &sessions_json()),
         Route::Peek => {
             let id = req.param("id").and_then(|s| s.parse::<u32>().ok());
             match id {
                 Some(id) => match peek_text(id) {
-                    Ok(text) => respond_json(&mut out, "200 OK", &json!({"id": id, "text": text})),
-                    Err(e) => respond_json(&mut out, "404 Not Found", &json!({"error": e})),
+                    Ok(text) => respond_json(out, "200 OK", &json!({"id": id, "text": text})),
+                    Err(e) => respond_json(out, "404 Not Found", &json!({"error": e})),
                 },
-                None => respond_json(&mut out, "400 Bad Request", &json!({"error": "no id"})),
+                None => respond_json(out, "400 Bad Request", &json!({"error": "no id"})),
             }
         }
-        Route::Stream => stream_session(&mut out, &req, &ctx, who),
-        Route::Input => handle_input(&mut out, &req, who),
+        Route::Stream => stream_session(out, &req, &ctx, who),
+        Route::Input => handle_input(out, &req, who),
         // Behind the token like everything else. There is nothing secret
         // in a copy of xterm.js, but a route that answers without one is
         // a route that says the server is here.
-        Route::Engine => respond(&mut out, "200 OK", "application/javascript; charset=utf-8", ENGINE_JS),
-        Route::EngineCss => respond(&mut out, "200 OK", "text/css; charset=utf-8", ENGINE_CSS),
+        Route::Engine => respond(out, "200 OK", "application/javascript; charset=utf-8", ENGINE_JS),
+        Route::EngineCss => respond(out, "200 OK", "text/css; charset=utf-8", ENGINE_CSS),
         // Pairing routes are served pre-auth above when it is enabled; if
         // one reaches here, pairing is off, so it simply does not exist.
         Route::PairStart | Route::PairStatus | Route::NotFound => {
-            respond(&mut out, "404 Not Found", "text/plain; charset=utf-8", "no\n")
+            respond(out, "404 Not Found", "text/plain; charset=utf-8", "no\n")
         }
     }
     viewer_leave(who);
@@ -999,7 +1139,7 @@ fn serve(stream: TcpStream, ctx: Arc<Ctx>) {
 /// The cost is that `EventSource` cannot set a header, so the stream's
 /// token travels in the query string. That is the same place the page
 /// load's token was, so it is not a new exposure.
-fn stream_session(out: &mut TcpStream, req: &Req, ctx: &Ctx, who: u64) {
+fn stream_session(out: &mut Conn, req: &Req, ctx: &Ctx, who: u64) {
     let id = req.param("id").and_then(|s| s.parse::<u32>().ok());
     let head = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\n{COMMON_HEADERS}Connection: close\r\n\r\n"
@@ -1218,7 +1358,7 @@ impl Watch {
     }
 }
 
-fn send_event(out: &mut TcpStream, event: &str, data: &str) -> std::io::Result<()> {
+fn send_event(out: &mut Conn, event: &str, data: &str) -> std::io::Result<()> {
     // The payload is always one line of JSON, so it never needs splitting
     // across several `data:` lines — but a stray newline in it would end
     // the event early and the page would see truncated JSON, so this
@@ -1234,7 +1374,7 @@ fn send_event(out: &mut TcpStream, event: &str, data: &str) -> std::io::Result<(
 /// browser tab that can *see* your shell and one that can *drive* it are
 /// different things to have published, and the second should never arrive
 /// as a side effect of wanting the first.
-fn handle_input(out: &mut TcpStream, req: &Req, who: u64) {
+fn handle_input(out: &mut Conn, req: &Req, who: u64) {
     if !input_allowed() {
         respond_json(
             out,
@@ -1283,6 +1423,7 @@ pub fn sync(config: &Value) -> Value {
             "paused": true,
             "port": port(config),
             "bind": bind_addr(config),
+            "tls": tls_on(config),
             "hosts": [],
         });
     }
@@ -1295,11 +1436,36 @@ pub fn sync(config: &Value) -> Value {
             "error": "no access token — generate one first",
             "port": port(config),
             "bind": bind_addr(config),
+            "tls": tls_on(config),
             "hosts": [],
         });
     }
     let bind = bind_addr(config);
     let p = port(config);
+    // HTTPS by default. The one way to serve plaintext is to ask for it
+    // (`remote_tls: false`), for someone who already terminates TLS in
+    // front or whose client will not take a self-signed cert. If HTTPS is
+    // wanted but the certificate can be neither read nor made, say so and
+    // start nothing — a silent drop to HTTP would publish a shell in the
+    // clear that the user believed was encrypted.
+    let secure = tls_on(config);
+    let tls = if secure {
+        match tls_config() {
+            Some(cfg) => Some(cfg),
+            None => {
+                return json!({
+                    "running": false,
+                    "error": "could not prepare the HTTPS certificate — turn off \"Encrypt with HTTPS\" to serve without it",
+                    "port": p,
+                    "bind": bind,
+                    "tls": true,
+                    "hosts": [],
+                })
+            }
+        }
+    } else {
+        None
+    };
     // The previous generation's server is very likely still holding this
     // port. It stops at the top of its accept loop — which it reaches only
     // within its poll interval, then drops the listener — so a config change
@@ -1324,6 +1490,7 @@ pub fn sync(config: &Value) -> Value {
                 "error": format!("could not listen on {bind}:{p} — {e}"),
                 "port": p,
                 "bind": bind,
+                "tls": secure,
                 "hosts": [],
             })
         }
@@ -1346,15 +1513,33 @@ pub fn sync(config: &Value) -> Value {
                 return;
             }
             match listener.accept() {
-                Ok((stream, _peer)) => {
+                Ok((tcp, _peer)) => {
                     if LIVE_CONNS.load(Ordering::Relaxed) >= MAX_CONNS {
-                        drop(stream);
+                        drop(tcp);
                         continue;
                     }
                     LIVE_CONNS.fetch_add(1, Ordering::Relaxed);
                     let ctx = ctx.clone();
+                    let tls = tls.clone();
                     std::thread::spawn(move || {
-                        serve(stream, ctx);
+                        // The listener is non-blocking so the accept loop
+                        // can poll the generation and let go on "turn it
+                        // off"; on Windows the accepted socket inherits that
+                        // flag. A blocking read is exactly what the rest
+                        // wants — a TLS handshake is several round trips, and
+                        // a non-blocking read returns WouldBlock the instant
+                        // it waits for the client's next flight, which reads
+                        // as a broken request and kills the handshake. So put
+                        // this socket back to blocking, then bound it with a
+                        // timeout: a client that opens and says nothing, or
+                        // stalls mid-handshake, still cannot hold the thread.
+                        let _ = tcp.set_nonblocking(false);
+                        let _ = tcp.set_nodelay(true);
+                        let _ = tcp.set_read_timeout(Some(Duration::from_secs(20)));
+                        let _ = tcp.set_write_timeout(Some(Duration::from_secs(20)));
+                        if let Some(conn) = accept_conn(tcp, tls) {
+                            serve(conn, ctx);
+                        }
                         LIVE_CONNS.fetch_sub(1, Ordering::Relaxed);
                     });
                 }
@@ -1365,6 +1550,7 @@ pub fn sync(config: &Value) -> Value {
             }
         }
     });
+    RUNNING_TLS.store(secure, Ordering::SeqCst);
     RUNNING_PORT.store(p as u32, Ordering::SeqCst);
     status_for(bind, p)
 }
@@ -1412,6 +1598,9 @@ fn status_for(bind: &str, p: u16) -> Value {
         "running": true,
         "port": p,
         "bind": bind,
+        // The scheme the links must use. A phone opening http:// against
+        // a TLS port is the "bad request" this whole change exists to end.
+        "tls": RUNNING_TLS.load(Ordering::SeqCst),
         "hosts": hosts,
         // What the window shows. `viewers` counts connections that are
         // open now, which for this page means a phone with the stream
@@ -1476,6 +1665,7 @@ pub fn status() -> Value {
             "paused": enabled(&config) && !windows_open(),
             "port": port(&config),
             "bind": bind_addr(&config),
+            "tls": tls_on(&config),
             "hosts": [],
             "viewers": 0,
             "served": SERVED.load(Ordering::Relaxed),
@@ -1490,6 +1680,47 @@ pub fn status() -> Value {
 #[cfg(test)]
 mod remote_tests {
     use super::*;
+
+    /// A client-side verifier that accepts the server's self-signed cert
+    /// without checking it — the "trust this certificate" a phone taps
+    /// once, expressed in code so a test handshake completes. It is only
+    /// ever built inside a test; it lets the handshake succeed so the
+    /// token gate on the other side is what the test actually measures.
+    #[derive(Debug)]
+    struct AcceptAnyCert;
+    impl rustls::client::danger::ServerCertVerifier for AcceptAnyCert {
+        fn verify_server_cert(
+            &self,
+            _end_entity: &rustls::pki_types::CertificateDer<'_>,
+            _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+            _server_name: &rustls::pki_types::ServerName<'_>,
+            _ocsp: &[u8],
+            _now: rustls::pki_types::UnixTime,
+        ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+            Ok(rustls::client::danger::ServerCertVerified::assertion())
+        }
+        fn verify_tls12_signature(
+            &self,
+            _message: &[u8],
+            _cert: &rustls::pki_types::CertificateDer<'_>,
+            _dss: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+        }
+        fn verify_tls13_signature(
+            &self,
+            _message: &[u8],
+            _cert: &rustls::pki_types::CertificateDer<'_>,
+            _dss: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+        }
+        fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+            rustls::crypto::ring::default_provider()
+                .signature_verification_algorithms
+                .supported_schemes()
+        }
+    }
 
     /// The one that decides whether an existing install changes
     /// behaviour. Every config.json written before this feature existed
@@ -1748,6 +1979,10 @@ mod remote_tests {
                 "remote_bind": "local",
                 "remote_port": candidate,
                 "remote_token": token,
+                // This test drives raw HTTP sockets by hand, so it asks for
+                // the plaintext transport. HTTPS gets its own test with a
+                // real handshake below.
+                "remote_tls": false,
             }));
             if reported.get("running").and_then(Value::as_bool) == Some(true) {
                 chosen = candidate;
@@ -1767,6 +2002,7 @@ mod remote_tests {
             "remote_bind": "local",
             "remote_port": chosen,
             "remote_token": token,
+            "remote_tls": false,
         }));
         assert_eq!(
             resync.get("running").and_then(Value::as_bool),
@@ -1843,12 +2079,13 @@ mod remote_tests {
         assert!(!typed.starts_with("HTTP/1.1 401"), "a good token was refused on input");
 
         // A phone browser doing "HTTPS-First" - the modern default - tries
-        // TLS against this plain-HTTP port before falling back to http. The
+        // TLS against a plain-HTTP port before falling back to http. The
         // server reads the TLS ClientHello, which is binary and not valid
         // UTF-8, fails to parse it as a request line, and answers 400. That
-        // 400 is the "bad request" a phone shows, and this pins the cause:
-        // it is TLS arriving on an HTTP port, not a broken page - which is
-        // the argument for the server learning to speak HTTPS.
+        // 400 is the "bad request" a phone shows on the plaintext escape
+        // hatch; HTTPS (the default, exercised just below) is what stops it.
+        // The behaviour is still worth pinning: a plaintext port must answer
+        // a TLS probe cleanly, not hang or crash.
         let mut tls = TcpStream::connect(("127.0.0.1", chosen)).expect("connect");
         tls.set_read_timeout(Some(Duration::from_secs(10))).ok();
         // A TLS record header (0x16 handshake, 0x0301) and a ClientHello
@@ -1866,6 +2103,81 @@ mod remote_tests {
             "TLS bytes on the HTTP port must read as a bad request - this is the phone's \"bad request\": {}",
             &tls_reply[..tls_reply.len().min(60)]
         );
+
+        // ---- and now the real thing: HTTPS -----------------------------
+        //
+        // Flip the same server to TLS (the default; the plaintext runs
+        // above only because this test drives raw sockets) and complete an
+        // actual handshake, then prove the token gate holds over it exactly
+        // as it did in the clear: no token is 401, the right token is 200.
+        // A gate that only held on the plaintext path would be no gate at
+        // all once HTTPS became the default a phone actually uses.
+        let tls_report = sync(&json!({
+            "remote_enabled": true,
+            "remote_bind": "local",
+            "remote_port": chosen,
+            "remote_token": token,
+            "remote_tls": true,
+        }));
+        assert_eq!(
+            tls_report.get("running").and_then(Value::as_bool),
+            Some(true),
+            "the TLS server did not come up: {tls_report}"
+        );
+        assert_eq!(
+            tls_report.get("tls").and_then(Value::as_bool),
+            Some(true),
+            "the status must say TLS so the page builds https:// links: {tls_report}"
+        );
+
+        // A client that accepts the self-signed cert — the phone's "trust
+        // this certificate" tap, done in code so the handshake completes.
+        let client_cfg = rustls::ClientConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .expect("client versions")
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(AcceptAnyCert))
+        .with_no_client_auth();
+        let name = rustls::pki_types::ServerName::try_from("localhost").expect("name");
+
+        let https = |bearer: Option<&str>| -> String {
+            let mut client =
+                rustls::ClientConnection::new(Arc::new(client_cfg.clone()), name.clone())
+                    .expect("client conn");
+            let mut sock = TcpStream::connect(("127.0.0.1", chosen)).expect("connect");
+            sock.set_read_timeout(Some(Duration::from_secs(10))).ok();
+            let mut tls = rustls::Stream::new(&mut client, &mut sock);
+            let auth = match bearer {
+                Some(b) => format!("Authorization: Bearer {b}\r\n"),
+                None => String::new(),
+            };
+            tls.write_all(format!("GET / HTTP/1.1\r\nHost: localhost\r\n{auth}\r\n").as_bytes())
+                .expect("tls write");
+            tls.flush().expect("tls flush");
+            let mut out = Vec::new();
+            // read_to_end returns an error on the server's unclean close
+            // (no TLS close_notify), by which point the response is already
+            // decoded into `out`; the status line is all this test reads.
+            let _ = tls.read_to_end(&mut out);
+            String::from_utf8_lossy(&out).into_owned()
+        };
+
+        let bare = https(None);
+        assert!(
+            bare.starts_with("HTTP/1.1 401"),
+            "over HTTPS a request with no token was answered: {}",
+            &bare[..bare.len().min(60)]
+        );
+        assert!(!bare.contains(&token), "the HTTPS refusal leaked the token");
+        let good = https(Some(&token));
+        assert!(
+            good.starts_with("HTTP/1.1 200"),
+            "over HTTPS the right token was refused: {}",
+            &good[..good.len().min(60)]
+        );
+        assert!(good.contains("GTerminal Pocket"), "the page did not come back over HTTPS");
 
         // And off means off: the port has to actually close, or "turn it
         // off" is a label rather than a change.

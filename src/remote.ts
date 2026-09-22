@@ -25,6 +25,11 @@ export interface RemoteSettings {
   /// code and the device is handed the token. Off unless turned on, and
   /// like the rest, absent has to keep meaning off.
   remote_pairing?: boolean;
+  /// Encrypt with HTTPS. Unlike everything else here, absent means ON:
+  /// this is a security default, so only an explicit `false` — the escape
+  /// hatch for someone already behind TLS or whose client will not take a
+  /// self-signed cert — serves in the clear.
+  remote_tls?: boolean;
 }
 
 /// The port the Rust side falls back to. Kept in step by the test below
@@ -49,6 +54,13 @@ export function remotePort(c: RemoteSettings): number {
 
 export function remoteInput(c: RemoteSettings): boolean {
   return c.remote_input === true;
+}
+
+/// HTTPS is on unless the config explicitly says false — the mirror of
+/// `tls_on` on the Rust side, and the one switch here whose default is on,
+/// because it is what keeps a published shell off the wire in the clear.
+export function remoteTls(c: RemoteSettings): boolean {
+  return c.remote_tls !== false;
 }
 
 /// Whether a device with no token may ask to be let in. Like every other
@@ -106,9 +118,10 @@ export const PUBLISHING_WARNING =
 /// The token is in the query string because the first thing that happens
 /// is somebody opening a URL, and there is nowhere else to put it. The
 /// page takes it out of the address bar as soon as it has read it.
-export function remoteUrl(host: string, port: number, token: string): string {
+export function remoteUrl(host: string, port: number, token: string, secure = true): string {
   const h = host.includes(":") ? `[${host}]` : host;
-  return `http://${h}:${port}/?t=${encodeURIComponent(token)}`;
+  const scheme = secure ? "https" : "http";
+  return `${scheme}://${h}:${port}/?t=${encodeURIComponent(token)}`;
 }
 
 /// A token, shown in a way that can be checked against a phone without
@@ -129,6 +142,10 @@ export interface RemoteStatus {
   port?: number;
   bind?: string;
   hosts?: string[];
+  /// Whether the running server speaks HTTPS. Default on; the links and
+  /// QR use it to pick the scheme, since a phone opening http:// against
+  /// a TLS port is the "bad request" the encryption is here to end.
+  tls?: boolean;
   error?: string;
 }
 
@@ -157,7 +174,10 @@ export function statusLine(c: RemoteSettings, st: RemoteStatus): string {
 export function addressesFor(st: RemoteStatus, token: string): string[] {
   const port = st.port ?? DEFAULT_PORT;
   const hosts = st.hosts && st.hosts.length ? st.hosts : ["127.0.0.1"];
-  return hosts.map((h) => remoteUrl(h, port, token));
+  // Default to HTTPS when the status is silent: the server's default is
+  // on, so an old status that predates the field must not mint http links.
+  const secure = st.tls !== false;
+  return hosts.map((h) => remoteUrl(h, port, token, secure));
 }
 
 /// One connection, as the server can honestly describe it.
