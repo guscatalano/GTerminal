@@ -1824,6 +1824,31 @@ mod remote_tests {
         assert!(!typed.starts_with("HTTP/1.1 404"), "input was not routed: {typed}");
         assert!(!typed.starts_with("HTTP/1.1 401"), "a good token was refused on input");
 
+        // A phone browser doing "HTTPS-First" - the modern default - tries
+        // TLS against this plain-HTTP port before falling back to http. The
+        // server reads the TLS ClientHello, which is binary and not valid
+        // UTF-8, fails to parse it as a request line, and answers 400. That
+        // 400 is the "bad request" a phone shows, and this pins the cause:
+        // it is TLS arriving on an HTTP port, not a broken page - which is
+        // the argument for the server learning to speak HTTPS.
+        let mut tls = TcpStream::connect(("127.0.0.1", chosen)).expect("connect");
+        tls.set_read_timeout(Some(Duration::from_secs(10))).ok();
+        // A TLS record header (0x16 handshake, 0x0301) and a ClientHello
+        // prefix, then filler - the kind of bytes a browser opens TLS with.
+        let mut hello = vec![0x16u8, 0x03, 0x01, 0x00, 0x30, 0x01, 0x00, 0x00, 0x2c, 0x03, 0x03];
+        hello.extend(std::iter::repeat(0xAAu8).take(40));
+        tls.write_all(&hello).expect("write");
+        // Half-close, so the server's read reaches EOF and judges what it
+        // has rather than waiting for a newline a handshake never sends.
+        tls.shutdown(std::net::Shutdown::Write).ok();
+        let mut tls_reply = String::new();
+        let _ = tls.read_to_string(&mut tls_reply);
+        assert!(
+            tls_reply.starts_with("HTTP/1.1 400"),
+            "TLS bytes on the HTTP port must read as a bad request - this is the phone's \"bad request\": {}",
+            &tls_reply[..tls_reply.len().min(60)]
+        );
+
         // And off means off: the port has to actually close, or "turn it
         // off" is a label rather than a change.
         sync(&json!({}));
