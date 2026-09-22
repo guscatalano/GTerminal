@@ -1,6 +1,6 @@
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, getAllWindows } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl, openPath } from "@tauri-apps/plugin-opener";
@@ -266,7 +266,18 @@ interface AppConfig {
   clickable_links?: boolean;
   summon_hotkey?: string;
   bell?: string;
+  /// What the × does to your terminals. "hide" keeps the app in the tray
+  /// (nothing detaches). The other three quit the app: "keep" leaves the
+  /// shells running in the daemon to reattach next time; "remember" ends
+  /// them but reopens the same folders next launch; "close" ends and
+  /// forgets. Legacy value "quit" is read as "close". Default is "remember".
   close_action?: string;
+  /// Whether closing with live terminals asks first. On by default —
+  /// losing running work to a misclick is what a confirmation is for.
+  close_confirm?: boolean;
+  /// The folders + shells of the tabs open when you last closed with
+  /// "remember", reopened as fresh shells on next launch, then cleared.
+  workspace_restore?: Array<{ cwd?: string; shell?: string; title?: string }>;
   summon_animation?: string;
   restore_prompt?: boolean;
   /// Copy whatever is selected, the moment it is selected. The other
@@ -4655,6 +4666,186 @@ function confirmPaste(id: number, text: string) {
   ov.appendChild(panel);
   document.body.appendChild(ov);
   go.focus();
+}
+
+type CloseMode = "hide" | "keep" | "remember" | "close";
+
+/// The normalized close behaviour. Legacy "quit" reads as "close"; an
+/// install with nothing set gets "remember" — closing then genuinely
+/// closes, and the folders come back next launch, rather than shells
+/// running on unseen forever.
+function closeMode(): CloseMode {
+  const v = config.close_action;
+  if (v === "hide" || v === "keep" || v === "remember" || v === "close") return v;
+  if (v === "quit") return "close";
+  return "remember";
+}
+
+function confirmOnClose(): boolean {
+  return config.close_confirm !== false;
+}
+
+async function hideToTray() {
+  await getCurrentWindow().hide().catch(() => {});
+  void invoke("refresh_tray").catch(() => {});
+}
+
+/// The open terminals as folders to reopen — fresh shells next launch, in
+/// the same places. The "remember" bargain, captured where it is made.
+function openWorkspace(): Array<{ cwd?: string; shell?: string; title?: string }> {
+  return [...tabs.keys()].map((id) => ({
+    cwd: lastInfo.get(id)?.cwd || undefined,
+    shell: lastInfo.get(id)?.shell || undefined,
+    title: titleOf(id),
+  }));
+}
+
+/// Set true only just before our own destroy(), so the close-requested
+/// handler lets that final close through instead of re-opening the prompt.
+let closingForReal = false;
+
+const CLOSE_CHOICES: Array<{ mode: "keep" | "remember" | "close"; label: string; desc: string }> = [
+  {
+    mode: "keep",
+    label: "Keep them running",
+    desc: "Your terminals and anything running in them stay alive in the background. Reopen GTerminal any time and they're back, exactly where you left them.",
+  },
+  {
+    mode: "remember",
+    label: "Close but remember",
+    desc: "Ends the terminals and anything running in them, but reopens the same ones — in the same folders — next time.",
+  },
+  {
+    mode: "close",
+    label: "Close them",
+    desc: "Ends everything and forgets it. A clean slate next launch.",
+  },
+];
+
+/// Ask what happens to the live terminals. Resolves to the chosen mode, or
+/// "cancel". The default mode is the one highlighted, so it is one Enter to
+/// confirm; ticking "do this from now on" makes that mode the default —
+/// which the settings page can still change, as the line under it says.
+function confirmCloseDialog(count: number, def: CloseMode): Promise<"keep" | "remember" | "close" | "cancel"> {
+  return new Promise((resolve) => {
+    const defMode: "keep" | "remember" | "close" = def === "hide" ? "remember" : def;
+    const ov = document.createElement("div");
+    ov.className = "overlay";
+    ov.id = "close-overlay";
+    const panel = document.createElement("div");
+    panel.className = "close-panel";
+
+    const title = document.createElement("div");
+    title.className = "close-title";
+    title.textContent = count === 1 ? "1 terminal is still running." : `${count} terminals are still running.`;
+
+    const opts = document.createElement("div");
+    opts.className = "close-opts";
+    let done = false;
+    const finish = (v: "keep" | "remember" | "close" | "cancel", remember: boolean) => {
+      if (done) return;
+      done = true;
+      if (remember && v !== "cancel") {
+        config.close_action = v;
+        saveConfig();
+      }
+      ov.remove();
+      window.removeEventListener("keydown", onKey, true);
+      resolve(v);
+    };
+    const rememberBox = document.createElement("input");
+    rememberBox.type = "checkbox";
+    for (const c of CLOSE_CHOICES) {
+      const b = document.createElement("button");
+      b.className = "close-opt" + (c.mode === defMode ? " close-default" : "");
+      const l = document.createElement("div");
+      l.className = "close-opt-label";
+      l.textContent = c.label;
+      const d = document.createElement("div");
+      d.className = "close-opt-desc";
+      d.textContent = c.desc;
+      b.append(l, d);
+      b.addEventListener("click", () => finish(c.mode, rememberBox.checked));
+      opts.appendChild(b);
+    }
+
+    const foot = document.createElement("div");
+    foot.className = "close-foot";
+    const remember = document.createElement("label");
+    remember.className = "close-remember";
+    const rememberText = document.createElement("span");
+    rememberText.textContent = "Do this from now on — change it any time in Settings → Window.";
+    remember.append(rememberBox, rememberText);
+    const cancel = document.createElement("button");
+    cancel.className = "set-control";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => finish("cancel", false));
+    foot.append(remember, cancel);
+
+    const onKey = (e: KeyboardEvent) => {
+      e.stopPropagation();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        finish("cancel", false);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        finish(defMode, rememberBox.checked);
+      }
+    };
+    ov.addEventListener("mousedown", (e) => {
+      if (e.target === ov) finish("cancel", false);
+    });
+    window.addEventListener("keydown", onKey, true);
+
+    panel.append(title, opts, foot);
+    ov.appendChild(panel);
+    document.body.appendChild(ov);
+    (opts.querySelector(".close-default") as HTMLElement | null)?.focus();
+  });
+}
+
+/// The whole close flow: hide, or — for a quit with live shells — confirm
+/// what becomes of them, then do it. Only the last window quits the app;
+/// closing one of several just closes it, its sessions detaching as always.
+async function runCloseFlow() {
+  if (closeMode() === "hide") {
+    await hideToTray();
+    return;
+  }
+  const windows = await getAllWindows().catch(() => [] as unknown[]);
+  const live = [...tabs.keys()];
+  // A non-last window, or one with nothing running, has nothing to warn
+  // about: closing it detaches its sessions, which is never a loss.
+  if (windows.length > 1 || live.length === 0) {
+    closingForReal = true;
+    await getCurrentWindow().destroy().catch(() => {});
+    return;
+  }
+  const chosen = confirmOnClose() ? await confirmCloseDialog(live.length, closeMode()) : closeMode();
+  if (chosen === "cancel" || chosen === "hide") {
+    if (chosen === "hide") await hideToTray();
+    return;
+  }
+  await applyClose(chosen);
+}
+
+async function applyClose(mode: "keep" | "remember" | "close") {
+  if (mode === "remember") {
+    config.workspace_restore = openWorkspace();
+    saveConfig();
+  } else if (config.workspace_restore) {
+    config.workspace_restore = undefined;
+    saveConfig();
+  }
+  if (mode === "remember" || mode === "close") {
+    // End the live shells this window holds. Detached sessions are left
+    // alone — they belong to no window and stay in the daemon.
+    await Promise.all([...tabs.keys()].map((id) => invoke("kill_session", { id }).catch(() => {})));
+  }
+  // "keep": nothing to do — quitting detaches the shells, and they reattach
+  // next launch.
+  closingForReal = true;
+  await getCurrentWindow().destroy().catch(() => {});
 }
 
 /// Paste the system clipboard into a session.
@@ -9590,16 +9781,29 @@ function buildSettingsPage() {
 
   settingsSection("Window");
   settingRow(
-    "Close button",
-    "What the window's × does. Hiding to the tray keeps the summon hotkey working — a hotkey that stops the moment you close the window is not much use. Either way your sessions are untouched: they live in the background daemon, not in the window. The tray icon summons the window on click, and its menu has Quit.",
+    "When you close",
+    "What the × does with your terminals. Hide to tray keeps the app running (nothing stops) and keeps the summon hotkey working. The others quit the app: Keep them running leaves the shells alive in the background to reattach next launch; Close but remember ends them but reopens the same folders next time; Close them ends and forgets. This is the default only — you are asked each time unless you turn that off below.",
     mkSelect(
-      [["hide", "Hide to tray"], ["quit", "Quit"]],
-      config.close_action ?? "hide",
+      [
+        ["hide", "Hide to tray"],
+        ["keep", "Keep them running"],
+        ["remember", "Close but remember"],
+        ["close", "Close them"],
+      ],
+      closeMode(),
       (v) => {
         config.close_action = v;
         changed();
       }
     )
+  );
+  settingRow(
+    "Confirm before closing",
+    "Ask what to do with running terminals before the window closes, so a misclick cannot end a build you are watching. The choice above is the one pre-selected — one Enter to confirm. Turn this off for a silent close that just does the default.",
+    mkSelect([["on", "On"], ["off", "Off"]], config.close_confirm !== false ? "on" : "off", (v) => {
+      config.close_confirm = v === "on";
+      changed();
+    })
   );
   settingRow(
     "Ask which terminals to restore",
@@ -11796,13 +12000,24 @@ async function main() {
   // window does not come back, and the summon hotkey has nothing left to
   // summon. The first window has nothing to clear anyway; its keys are
   // what start-up reads.
-  if (WINDOW_LABEL !== FIRST_WINDOW) {
-    void getCurrentWindow().onCloseRequested(() => {
+  void getCurrentWindow().onCloseRequested((e) => {
+    // Extra windows clear their per-window keys on the way out; the first
+    // window's are what start-up reads, so it keeps them.
+    if (WINDOW_LABEL !== FIRST_WINDOW) {
       for (const key of keysToClear(Object.keys(localStorage), WINDOW_LABEL)) {
         localStorage.removeItem(key);
       }
-    });
-  }
+    }
+    // Our own destroy() at the end of the flow — let that final close go.
+    if (closingForReal) return;
+    // Hide-to-tray stays the Rust handler's job (the CloseRequested arm in
+    // lib.rs): taking it over here and destroying the window would override
+    // the hide and leave the summon hotkey nothing to summon. Only the quit
+    // modes are confirmed and carried out here.
+    if (closeMode() === "hide") return;
+    e.preventDefault();
+    void runCloseFlow();
+  });
 
   // Another window asking this one to take a session. Attaching is the
   // whole of it: the daemon hands it over and tells the window that had
@@ -12069,6 +12284,18 @@ async function main() {
   // named workspace lists, on top of whatever sessions were adopted.
   await openWorkspaceFromArgs(launchInfo?.args ?? []);
   await takeHandoff();
+  // "Close but remember" left a set of folders to reopen as fresh shells.
+  // The sessions it ended read as closed, so the restore above skipped
+  // them and none of these is a duplicate. Cleared once reopened, so it is
+  // a one-shot: a later plain close does not resurrect an old workspace.
+  if (config.workspace_restore?.length) {
+    const ws = config.workspace_restore;
+    config.workspace_restore = undefined;
+    saveConfig();
+    for (const t of ws) {
+      await createTab(undefined, t.shell, t.cwd, t.title);
+    }
+  }
   if (tabCount() === 0) await createTab();
   refreshChrome();
   // Last, and never blocking: the window works, one thing in it may not.

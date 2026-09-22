@@ -2621,6 +2621,74 @@ input.set-control {
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
 }
 
+/* The close-with-live-terminals confirmation. */
+.close-panel {
+  width: min(560px, 90vw);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px 22px 18px;
+  border-radius: 11px;
+  background: var(--panel);
+  border: 1px solid var(--border2);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+}
+.close-title {
+  font: 600 16px "Segoe UI", sans-serif;
+  color: var(--text);
+}
+.close-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.close-opt {
+  text-align: left;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 11px 14px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--text);
+}
+.close-opt:hover {
+  border-color: var(--border2);
+  background: var(--panel2);
+}
+.close-opt.close-default {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.close-opt:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.close-opt-label {
+  font: 600 13.5px "Segoe UI", sans-serif;
+}
+.close-opt-desc {
+  font: 12px "Segoe UI", sans-serif;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.close-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.close-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 12px "Segoe UI", sans-serif;
+  color: var(--muted);
+  cursor: pointer;
+}
+
 .restore-title {
   font: 600 16px "Segoe UI", sans-serif;
   color: var(--text);
