@@ -201,6 +201,37 @@ fn replay_for(ring: &[u8], undelivered: bool) -> String {
     }
 }
 
+/// Everything a reattaching window is handed at once: the scrollback
+/// replay, a reset to a known state, and — when a full-screen program is
+/// running right now — its screen rebuilt from `alt`.
+///
+/// That last part is the whole reason this is a function. `alt` is every
+/// byte the program has drawn since it took over, which carries the modes
+/// it turned on (mouse reporting, the alternate screen) as much as the
+/// picture. Without replaying it, a reattach onto a live TUI runs the
+/// reset — mouse reporting off, alternate screen off — and never puts them
+/// back, because a program enables mouse reporting once at startup and a
+/// redraw never repeats it. The window comes back looking right and the
+/// wheel silently stops scrolling it: reported after reattaching to a
+/// full-screen `gh` view. Replaying `alt` after the reset re-runs the
+/// program's own `?1049h`/`?1000h`, so the mode comes back with the frame.
+///
+/// A session at a shell prompt has no `alt` (it is cleared the moment the
+/// alternate screen is left), so the reset stands — which is what keeps a
+/// program that left mouse reporting on from making the prompt unclickable.
+fn build_attach_replay(ring: &[u8], alt: &[u8], in_alt: bool, undelivered: bool) -> String {
+    let mut replay = replay_for(ring_tail(ring), undelivered);
+    // Whatever the last program left switched on, the window attaching now
+    // did not ask for — clear to a known state first.
+    replay.push_str(MODE_RESET_INLINE);
+    // A live full-screen program's screen, and the modes it set, are
+    // reconstructed from the bytes it has drawn since it took over.
+    if in_alt {
+        replay.push_str(&String::from_utf8_lossy(alt));
+    }
+    replay
+}
+
 fn strip_queries(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = String::with_capacity(s.len());
@@ -1335,7 +1366,7 @@ mod daemon_binary_tests {
 
 #[cfg(test)]
 mod mode_reset_tests {
-    use super::{MODE_RESET, MODE_RESET_INLINE};
+    use super::{build_attach_replay, MODE_RESET, MODE_RESET_INLINE};
 
     /// What a restored session has to be handed back clean.
     ///
@@ -1377,6 +1408,58 @@ mod mode_reset_tests {
     fn only_the_line_form_ends_a_line() {
         assert!(MODE_RESET.ends_with("\r\n"));
         assert!(!MODE_RESET_INLINE.contains('\n'));
+    }
+
+    /// Where in a string a byte-sequence last appears, or -1 for never, so
+    /// two of them can be ordered. `None` for "absent" would sort *before*
+    /// any present one, which is exactly the ordering wanted here — a mode
+    /// never turned on is as good as turned off — but spelling it as a
+    /// number makes the assertions read the way the terminal behaves: the
+    /// switch that comes last is the one in effect.
+    fn last(hay: &str, needle: &str) -> isize {
+        hay.rfind(needle).map(|i| i as isize).unwrap_or(-1)
+    }
+
+    /// The bug this whole thing exists for. Reattaching to a live
+    /// full-screen program — a `gh` view, mouse reporting on, on the
+    /// alternate screen — must hand the window back a stream that leaves
+    /// mouse reporting *on*. The window is fresh and defaults to off; the
+    /// reset turns it off again; only replaying the program's own screen
+    /// turns it back on. Get this wrong and the program is still there but
+    /// the wheel no longer scrolls it, because the program enabled the mode
+    /// once at startup and a redraw never repeats it.
+    #[test]
+    fn a_live_tui_keeps_its_mouse_mode_across_a_reattach() {
+        // Scrollback from before it took over, then the program's own bytes
+        // as `alt` holds them: enter the alternate screen, turn mouse
+        // reporting on, draw.
+        let ring = b"$ gh dash\r\n";
+        let alt = b"\x1b[?1049h\x1b[?1000h\x1b[?1006h\x1b[2J\x1b[Hdashboard";
+        let replay = build_attach_replay(ring, alt, true, false);
+        assert!(
+            last(&replay, "\x1b[?1000h") > last(&replay, "\x1b[?1000l"),
+            "mouse reporting is left off after a reattach to a live TUI: {replay:?}"
+        );
+        assert!(
+            last(&replay, "\x1b[?1049h") > last(&replay, "\x1b[?1049l"),
+            "the alternate screen is left off after a reattach to a live TUI"
+        );
+        assert!(replay.contains("dashboard"), "the program's screen was not rebuilt");
+    }
+
+    /// The other side, and the reason the reset is there at all: a program
+    /// that turned mouse reporting on and *exited* leaves it on at the
+    /// shell prompt, where it turns selecting text into clicks the shell
+    /// eats. Not on the alternate screen any more (so no `alt`), the reset
+    /// stands and the prompt is clickable again.
+    #[test]
+    fn a_shell_prompt_still_clears_a_stale_mouse_mode() {
+        let ring = b"\x1b[?1000h$ ";
+        let replay = build_attach_replay(ring, b"", false, false);
+        assert!(
+            last(&replay, "\x1b[?1000l") > last(&replay, "\x1b[?1000h"),
+            "a mouse mode left on at the prompt was not cleared: {replay:?}"
+        );
     }
 }
 
@@ -2709,11 +2792,19 @@ fn conn_loop(
                         // terminal answer into a shell sitting at its prompt,
                         // which shows up as "random characters in every new
                         // window". See strip_queries.
-                        let mut replay = replay_for(ring_tail(&s.ring), s.undelivered);
+                        // The scrollback, a reset, and — if a full-screen
+                        // program is running right now — its screen and the
+                        // modes it set, rebuilt from `alt`. Without that last
+                        // part a reattach onto a live TUI turns its mouse
+                        // reporting off and never restores it, so the wheel
+                        // stops scrolling it. See build_attach_replay.
+                        let replay = build_attach_replay(
+                            &s.ring,
+                            &s.alt,
+                            s.ring_filter.in_alt,
+                            s.undelivered,
+                        );
                         s.undelivered = false;
-                        // Whatever the last program left switched on, the
-                        // window attaching now did not ask for.
-                        replay.push_str(MODE_RESET_INLINE);
                         write_line(&mut out, &json!({"ev": "data", "data": replay}))?;
                         // One attacher at a time, and the newest wins - a
                         // session moves between windows rather than being
