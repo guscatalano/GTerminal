@@ -256,6 +256,10 @@ interface AppConfig {
   update_auto?: boolean;
   update_pin?: string;
   update_prerelease?: boolean;
+  /// The version whose "an update is available" dot the user cleared. The
+  /// dot stays gone until a version newer than this one ships — dismissing
+  /// silences this update, not every future one.
+  update_dismissed?: string;
   cursor_style?: CursorStyle;
   cursor_blink?: boolean;
   ctrl_v_paste?: boolean;
@@ -9469,10 +9473,16 @@ async function announceUpdate() {
     return; // offline, rate-limited, or not an updatable build
   }
   if (!found) return;
+  // A dot the user cleared stays cleared until something newer than what
+  // they cleared shows up — dismissing silences this update, not updating.
+  if (found.version === config.update_dismissed) return;
   const btn = document.getElementById("settingsbtn");
   if (!btn) return;
   btn.classList.add("has-update");
   btn.title = `Version ${found.version} is available — Settings → Updates`;
+  // Kept on the button so the "clear the reminder" control in Settings can
+  // silence this exact version without a second network check.
+  btn.dataset.updateVersion = found.version;
   logUi("update.available", { version: found.version, tag: found.tag });
 }
 
@@ -9490,6 +9500,34 @@ async function buildUpdatesSection() {
   const chan = status.channel ? ` (${status.channel} channel)` : "";
   where.textContent = `Running ${status.version}${chan}.`;
   settingRow("This build", "", where);
+
+  // Clear the update reminder — the dot on the gear. Only offered while it
+  // is actually showing. Dismissing silences this version; the dot comes
+  // back only when something newer than it ships, so it never means "never
+  // tell me about updates".
+  const updBtn = document.getElementById("settingsbtn");
+  if (updBtn?.classList.contains("has-update")) {
+    const dwrap = document.createElement("div");
+    dwrap.className = "setting-stack";
+    const dbtn = document.createElement("button");
+    dbtn.className = "set-control";
+    dbtn.textContent = "Clear the reminder";
+    const dnote = document.createElement("div");
+    dnote.className = "setting-status";
+    dnote.textContent = "Removes the dot until a version newer than this one is out.";
+    dbtn.addEventListener("click", () => {
+      config.update_dismissed = updBtn.dataset.updateVersion || status.version;
+      saveConfig();
+      updBtn.classList.remove("has-update");
+      updBtn.title = "Settings";
+      delete updBtn.dataset.updateVersion;
+      dbtn.textContent = "Cleared";
+      dbtn.disabled = true;
+      dnote.textContent = "The dot is gone until a newer version ships.";
+    });
+    dwrap.append(dbtn, dnote);
+    settingRow("Update reminder", "The dot on the gear when a newer version is out.", dwrap);
+  }
 
   if (!status.supported) {
     // A packaged install cannot run an MSI over itself - that is a second

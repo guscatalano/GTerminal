@@ -63,6 +63,26 @@ check(
   "the packaged Updates note should say sessions survive a close-to-update"
 );
 
+// ── the reminder dot can be cleared ────────────────────────────────────
+// The "an update is available" dot on the gear had no off switch, which is
+// nagging. It can be dismissed now: the dot is skipped for a version the
+// user cleared, and Settings → Updates offers the clear.
+check(
+  "the dot is skipped for a dismissed version",
+  /found\.version === config\.update_dismissed/.test(main),
+  "announceUpdate must not raise the dot for a version the user cleared"
+);
+check(
+  "clearing the reminder records the version",
+  /config\.update_dismissed = updBtn\.dataset\.updateVersion/.test(main),
+  "the clear button must remember which version was dismissed"
+);
+check(
+  "and takes the dot down",
+  /updBtn\.classList\.remove\("has-update"\)/.test(main),
+  "clearing must remove the has-update dot then and there"
+);
+
 if (failed) {
   console.log(`${failed} update test(s) failed`);
   process.exit(1);
