@@ -158,6 +158,35 @@ check(
   "the ended section has to include exited sessions; under a Closing soon header they read as something closing work nobody closed"
 );
 
+// Every top-bar icon button must be sized in the stylesheet. The
+// keyboard-shortcuts button shipped wired up in HTML and JS but left out
+// of the CSS id-lists, so its SVG got no width or height and collapsed to
+// a two-pixel sliver — a blank spot in the toolbar. The failure is
+// invisible at build time and easy to repeat: add a button, forget the
+// stylesheet. So pin it — an icon button whose SVG the CSS never sizes is
+// a button nobody can see.
+const html = readFileSync(join(here, "..", "index.html"), "utf8");
+// Each <button ...>…<svg…>…</button> that carries an inline SVG icon.
+for (const m of html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)) {
+  const attrs = m[1];
+  const body = m[2];
+  if (!/<svg\b/.test(body)) continue; // only icon buttons
+  const id = (attrs.match(/id="([^"]+)"/) || [])[1];
+  const classes = ((attrs.match(/class="([^"]+)"/) || [])[1] || "").split(/\s+/).filter(Boolean);
+  // The button's SVG is sized if some rule selects `#id svg` or `.class
+  // svg` and gives it a width. Checking the selector token is enough: the
+  // sizing rules are the only place these appear.
+  const selectors = [];
+  if (id) selectors.push(`#${id} svg`);
+  for (const c of classes) selectors.push(`.${c} svg`);
+  const sized = selectors.some((s) => css.includes(s));
+  check(
+    `the ${id || classes.join(".") || "unnamed"} button's icon is sized in CSS`,
+    sized,
+    `no rule sizes its SVG (tried ${selectors.join(", ")}) — without a width the icon collapses to a sliver`
+  );
+}
+
 if (failed) {
   console.log(`${failed} style test(s) failed`);
   process.exit(1);
