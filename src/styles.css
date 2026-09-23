@@ -609,6 +609,7 @@ body,
 #splitbtn,
 #restore,
 #historybtn,
+#shortcutsbtn,
 #settingsbtn {
   border: none;
   background: none;
@@ -627,6 +628,7 @@ body,
 #splitbtn svg,
 #restore svg,
 #historybtn svg,
+#shortcutsbtn svg,
 #settingsbtn svg {
   width: 15px;
   height: 15px;
@@ -649,6 +651,7 @@ body,
 #splitbtn:hover,
 #restore:hover,
 #historybtn:hover,
+#shortcutsbtn:hover,
 #settingsbtn:hover {
   background: var(--panel);
   color: var(--text);
