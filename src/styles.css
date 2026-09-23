@@ -1395,6 +1395,59 @@ input.set-control {
   }
 }
 
+/* Five group tabs above the list — a map of the page and a way to jump.
+   Sticky under the search box (its own sticky top:0), so both stay put
+   while the settings scroll under them. */
+.settings-tabs {
+  position: sticky;
+  top: 52px;
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 2px 0 10px;
+  background: color-mix(in srgb, var(--bg) var(--chrome-wash, 100%), transparent);
+  backdrop-filter: blur(10px);
+}
+.settings-tab {
+  border: 1px solid var(--border2);
+  background: var(--panel2);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font: 12px "Segoe UI", sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.settings-tab:hover {
+  color: var(--text);
+  border-color: var(--border);
+}
+.settings-tab.active {
+  color: var(--accent, #d98c3f);
+  border-color: var(--accent, #d98c3f);
+  background: color-mix(in srgb, var(--accent, #d98c3f) 14%, transparent);
+}
+/* Dimmed while a search leaves the group with nothing to show. */
+.settings-tab.dim {
+  opacity: 0.38;
+}
+
+/* A group heading — the tab's destination, and larger than the section
+   sub-headings under it. scroll-margin clears the sticky search + tabs so
+   a keyboard jump lands below them, not beneath them. */
+.settings-group-title {
+  font: 600 15px "Segoe UI", sans-serif;
+  color: var(--text);
+  margin: 24px 0 8px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--border2);
+  scroll-margin-top: 104px;
+}
+.settings-group-title:first-child {
+  margin-top: 4px;
+}
+
 .settings-searchbar {
   position: sticky;
   top: 0;

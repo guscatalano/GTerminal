@@ -6764,18 +6764,38 @@ function settingsOpen(): boolean {
 const settingsSearch = document.getElementById("settings-search") as HTMLInputElement;
 
 // Live filter: a row stays visible when the query matches its title,
-// description, or section heading; headings hide when every row under
-// them is hidden. The About block only matches on its own text.
+// description, section heading, or its group's name; a section heading
+// hides when every row under it is hidden, and a group heading when every
+// section under it is. A group tab dims when its group has nothing left,
+// so the map above the list agrees with what is below it. The About block
+// only matches on its own text.
 function filterSettings() {
   const q = settingsSearch.value.trim().toLowerCase();
   const kids = Array.from(settingsList.children) as HTMLElement[];
   let section = "";
+  let group = "";
   let sectionEl: HTMLElement | null = null;
+  let groupEl: HTMLElement | null = null;
   let sectionHasHit = false;
+  let groupHasHit = false;
   const closeSection = () => {
     if (sectionEl) sectionEl.hidden = !sectionHasHit;
   };
+  const closeGroup = () => {
+    if (groupEl) groupEl.hidden = !groupHasHit;
+  };
   for (const el of kids) {
+    if (el.classList.contains("settings-group-title")) {
+      closeSection();
+      closeGroup();
+      group = (el.textContent ?? "").toLowerCase();
+      groupEl = el;
+      groupHasHit = false;
+      section = "";
+      sectionEl = null;
+      sectionHasHit = false;
+      continue;
+    }
     if (el.classList.contains("settings-section-title")) {
       closeSection();
       section = (el.textContent ?? "").toLowerCase();
@@ -6783,12 +6803,24 @@ function filterSettings() {
       sectionHasHit = false;
       continue;
     }
-    const text = ((el.textContent ?? "") + " " + section).toLowerCase();
+    const text = ((el.textContent ?? "") + " " + section + " " + group).toLowerCase();
     const hit = !q || text.includes(q);
     el.hidden = !hit;
-    if (hit) sectionHasHit = true;
+    if (hit) {
+      sectionHasHit = true;
+      groupHasHit = true;
+    }
   }
   closeSection();
+  closeGroup();
+  // Keep the tabs in step: a group with nothing left to show dims its tab.
+  const tabbar = document.getElementById("settings-tabs");
+  if (tabbar) {
+    for (const tab of Array.from(tabbar.children) as HTMLElement[]) {
+      const g = document.getElementById(groupAnchor(tab.textContent ?? ""));
+      tab.classList.toggle("dim", !!g && g.hidden);
+    }
+  }
 }
 
 settingsSearch.addEventListener("input", filterSettings);
@@ -8646,6 +8678,135 @@ function settingsSection(title: string): HTMLElement {
 /// two ends of a jump cannot disagree about it.
 function sectionAnchor(title: string): string {
   return "settings-at-" + title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+/// The settings page in five groups instead of thirteen sections in one
+/// wall. Each group is a tab across the top; clicking one jumps to it, and
+/// the active tab follows the scroll. The sections are still built in their
+/// own order below — this only says which group each lands in, so a section
+/// added without a home here still appears (in an "Other" group at the end)
+/// rather than vanishing. Keep the names matching the settingsSection()
+/// titles exactly; the reorder matches on them.
+const SETTINGS_GROUPS: Array<{ name: string; sections: string[] }> = [
+  { name: "Appearance", sections: ["Appearance", "Tab titles", "AI titles", "Status bar", "Weather"] },
+  { name: "Terminal", sections: ["Keyboard and input", "Sessions"] },
+  { name: "Window", sections: ["Window"] },
+  { name: "Remote control", sections: ["Remote control"] },
+  { name: "System", sections: ["Updates", "Keyboard shortcuts", "Diagnostics", "About"] },
+];
+
+function groupAnchor(name: string): string {
+  return "settings-group-" + name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+/// Reorder the flat settings list into the five groups, inserting a group
+/// heading before each. Runs once after the page is built, over whatever
+/// settingsSection() left behind: a run of a section title and the rows
+/// under it, up to the next title. A section named the same as its group
+/// (Window, Remote control) drops its own sub-title, so the group heading
+/// does not say the same word twice.
+function groupSettingsList() {
+  const kids = Array.from(settingsList.children) as HTMLElement[];
+  // Split into chunks keyed by section title: [titleEl, ...rows].
+  const chunks = new Map<string, HTMLElement[]>();
+  const seen: string[] = [];
+  const leading: HTMLElement[] = []; // anything before the first title
+  let cur: HTMLElement[] | null = null;
+  let curTitle = "";
+  for (const el of kids) {
+    if (el.classList.contains("settings-section-title")) {
+      curTitle = (el.textContent ?? "").trim();
+      cur = [el];
+      chunks.set(curTitle.toLowerCase(), cur);
+      seen.push(curTitle);
+    } else if (cur) {
+      cur.push(el);
+    } else {
+      leading.push(el);
+    }
+  }
+
+  const frag = document.createDocumentFragment();
+  for (const el of leading) frag.appendChild(el);
+  const placed = new Set<string>();
+  const addGroup = (name: string, sections: string[]) => {
+    const present = sections.filter((s) => chunks.has(s.toLowerCase()));
+    if (!present.length) return;
+    const head = document.createElement("div");
+    head.className = "settings-group-title";
+    head.textContent = name;
+    head.id = groupAnchor(name);
+    frag.appendChild(head);
+    for (const sec of present) {
+      const key = sec.toLowerCase();
+      placed.add(key);
+      const [title, ...rows] = chunks.get(key)!;
+      // Don't repeat the group's own name as a sub-heading under it.
+      if (key !== name.toLowerCase()) frag.appendChild(title);
+      for (const r of rows) frag.appendChild(r);
+    }
+  };
+  for (const g of SETTINGS_GROUPS) addGroup(g.name, g.sections);
+  // A section nobody claimed still gets shown, under a catch-all, so
+  // forgetting to file a new one here is a visible slip, not a lost row.
+  const orphans = seen.filter((t) => !placed.has(t.toLowerCase()));
+  if (orphans.length) addGroup("Other", orphans);
+
+  settingsList.replaceChildren(frag);
+}
+
+/// The row of group tabs above the list. Each jumps to its group, and the
+/// one whose group is at the top of the scroll is the one highlighted, so
+/// scrolling and clicking agree about where you are. Positions are read
+/// from getBoundingClientRect rather than offsetTop so the maths does not
+/// depend on which ancestor happens to be the offset parent, and the sticky
+/// search box plus the tab bar are subtracted so a jumped-to heading lands
+/// below them rather than under them.
+function buildSettingsTabs() {
+  const bar = document.getElementById("settings-tabs");
+  const scroller = document.getElementById("settings-page");
+  if (!bar || !scroller) return;
+  bar.innerHTML = "";
+  const searchbar = document.querySelector("#settings-page .settings-searchbar") as HTMLElement | null;
+  // Stick the tabs right under the search box, measured rather than
+  // guessed: a hard-coded offset drifts the moment the box's font or
+  // padding changes and leaves a gap or an overlap. Only when it has a
+  // real height — a settings page built while hidden measures as zero, and
+  // the CSS fallback covers that.
+  if (searchbar && searchbar.offsetHeight > 0) bar.style.top = `${searchbar.offsetHeight}px`;
+  const headerH = () => (searchbar?.offsetHeight ?? 0) + bar.offsetHeight;
+  const groupTop = (anchor: string) => {
+    const el = document.getElementById(anchor);
+    if (!el) return Infinity;
+    return el.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+  };
+  const tabs: Array<{ el: HTMLButtonElement; anchor: string }> = [];
+  for (const g of SETTINGS_GROUPS) {
+    const anchor = groupAnchor(g.name);
+    if (!document.getElementById(anchor)) continue; // group had no sections
+    const tab = document.createElement("button");
+    tab.className = "settings-tab";
+    tab.type = "button";
+    tab.textContent = g.name;
+    tab.addEventListener("click", () => {
+      const at = groupTop(anchor);
+      if (Number.isFinite(at)) {
+        scroller.scrollTo({ top: Math.max(0, scroller.scrollTop + at - headerH() - 6), behavior: "smooth" });
+      }
+    });
+    bar.appendChild(tab);
+    tabs.push({ el: tab, anchor });
+  }
+  const spy = () => {
+    const cutoff = headerH() + 14;
+    let active = 0;
+    tabs.forEach((t, i) => {
+      if (groupTop(t.anchor) <= cutoff) active = i;
+    });
+    tabs.forEach((t, i) => t.el.classList.toggle("active", i === active));
+  };
+  scroller.onscroll = spy;
+  spy();
 }
 
 /// "Is the – button even there?" — a question the settings page can
@@ -10655,6 +10816,11 @@ function buildSettingsPage() {
   mkLink("Source on GitHub", "https://github.com/guscatalano/GTerminal");
   about.append(aboutApp, aboutBy, aboutLinks);
   settingsList.appendChild(about);
+  // Regroup the flat sections into the five tabs, then draw the tab bar
+  // over the result. Order matters: the tabs read the group anchors the
+  // reorder just laid down.
+  groupSettingsList();
+  buildSettingsTabs();
   filterSettings(); // rebuilds (e.g. theme change) keep the active query
   scroller.scrollTop = scrollAt;
 }
