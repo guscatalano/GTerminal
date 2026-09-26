@@ -232,6 +232,33 @@ fn build_attach_replay(ring: &[u8], alt: &[u8], in_alt: bool, undelivered: bool)
     replay
 }
 
+/// The scrollback a resurrected (cold → live) session is preloaded with:
+/// the saved ring, a reset to a known mode state, a clear of the stale
+/// lower frame, then the "session restored" divider.
+///
+/// The clear (ESC[J) is the point, and it is why this is a function rather
+/// than three pushes inline. A saved ring is a raw byte stream that ends
+/// wherever the pre-reboot shell left the cursor — a prompt with no
+/// trailing newline, a half-drawn frame, a progress bar — which is almost
+/// never the bottom row. Replaying it reconstructs that frame with the
+/// cursor parked mid-screen and painted cells still below it. MODE_RESET
+/// only puts the modes back and adds a newline; it does not clear. So
+/// without the erase the divider and the fresh prompt are inserted into the
+/// middle of that frame, and every cell the new prompt never repaints stays
+/// on screen as a ghost that typing does not clear — reported after a
+/// reboot. ESC[J erases from the insertion point to the end of the screen:
+/// the history scrolled above stays, the stale lower frame goes, and the
+/// fresh shell draws onto a clean slate. It must sit *after* the replayed
+/// ring (clearing before it would only wipe the reset) and *before* the
+/// divider (so the divider itself is not what a ghost overwrites).
+fn build_restore_preload(disk_ring: &[u8], divider: &str) -> Vec<u8> {
+    let mut ring = disk_ring.to_vec();
+    ring.extend_from_slice(MODE_RESET.as_bytes());
+    ring.extend_from_slice(b"\x1b[J");
+    ring.extend_from_slice(divider.as_bytes());
+    ring
+}
+
 fn strip_queries(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = String::with_capacity(s.len());
@@ -1366,7 +1393,7 @@ mod daemon_binary_tests {
 
 #[cfg(test)]
 mod mode_reset_tests {
-    use super::{build_attach_replay, MODE_RESET, MODE_RESET_INLINE};
+    use super::{build_attach_replay, build_restore_preload, MODE_RESET, MODE_RESET_INLINE};
 
     /// What a restored session has to be handed back clean.
     ///
@@ -1460,6 +1487,46 @@ mod mode_reset_tests {
             last(&replay, "\x1b[?1000l") > last(&replay, "\x1b[?1000h"),
             "a mouse mode left on at the prompt was not cleared: {replay:?}"
         );
+    }
+
+    /// The ghost-after-reboot bug. A saved ring ends wherever the shell
+    /// left the cursor, which is almost never the bottom row: here it moves
+    /// the cursor up two lines over content that is still painted below it,
+    /// with no trailing newline — the shape a real reboot leaves. When the
+    /// session is resurrected, the divider and the fresh prompt draw from
+    /// that mid-screen point, and anything the new prompt does not repaint
+    /// stays on screen as a ghost that typing never clears. The preload has
+    /// to erase to the end of the screen first, and the erase only works if
+    /// it lands after the replayed scrollback and before the divider.
+    #[test]
+    fn a_resurrected_session_clears_the_stale_frame_before_the_divider() {
+        let disk = b"kept history line\r\nstale ghost line\r\n\x1b[2A\x1b[?25h";
+        let out = build_restore_preload(disk, "\r\n-- restored --\r\n");
+        let s = String::from_utf8(out).unwrap();
+        let scrollback = last(&s, "stale ghost line");
+        let clear = last(&s, "\x1b[J");
+        let divider = last(&s, "-- restored --");
+        assert!(clear >= 0, "the restore preload must erase to end of screen: {s:?}");
+        assert!(
+            scrollback < clear,
+            "the erase must follow the replayed scrollback, or it clears nothing: {s:?}"
+        );
+        assert!(
+            clear < divider,
+            "the erase must precede the divider, or the divider is what a ghost overwrites: {s:?}"
+        );
+    }
+
+    /// The erase must not cost the history: the saved scrollback still has
+    /// to be handed over in full (it becomes the scrollback the user can
+    /// page back through), and the modes still have to be reset.
+    #[test]
+    fn a_resurrected_session_still_keeps_its_history_and_reset() {
+        let disk = b"line one\r\nline two\r\n";
+        let out = build_restore_preload(disk, "\r\n-- restored --\r\n");
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("line one") && s.contains("line two"), "history was dropped");
+        assert!(s.contains(MODE_RESET), "the mode reset was dropped");
     }
 }
 
@@ -2732,9 +2799,8 @@ fn conn_loop(
                         divider += &format!(" · was running: {}", cold.running.join(", "));
                     }
                     divider += " ──\x1b[0m\r\n";
-                    let mut ring = std::fs::read(ring_path(id)).unwrap_or_default();
-                    ring.extend_from_slice(MODE_RESET.as_bytes());
-                    ring.extend_from_slice(divider.as_bytes());
+                    let disk_ring = std::fs::read(ring_path(id)).unwrap_or_default();
+                    let ring = build_restore_preload(&disk_ring, &divider);
                     if let Err(e) = start_session(
                         sessions,
                         id,
