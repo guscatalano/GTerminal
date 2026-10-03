@@ -64,6 +64,16 @@ check(
   true
 );
 
+// ── the album art is not zoomed in to fill the window ──────────────────
+// A square cover scaled with `cover` to fill a widescreen terminal crops
+// most of it away and reads as "zoomed in too much". The live background
+// must size the art with `contain` (whole cover, centred) and lay it over
+// the Spotify theme's ground so the margins are filled rather than cropped.
+const npBg = main.match(/if \(themeKey === "now-playing"\)[\s\S]{0,400}?nowPlayingArt\s*\?[\s\S]{0,200}?;/);
+check("the live album-art background sizes with contain", !!npBg && /\/ contain /.test(npBg[0]), true);
+check("and never with cover", !!npBg && !/\/ cover /.test(npBg[0]), true);
+check("and mixes in the Spotify theme ground", !!npBg && /THEMES\.spotify\.bgArt/.test(npBg[0]), true);
+
 if (failed) {
   console.log(`${failed} now-playing test(s) failed`);
   process.exit(1);

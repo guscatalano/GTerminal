@@ -439,9 +439,17 @@ function resolvedBgCss(): string {
   if (style === "theme") {
     // The live theme: the current album art, or its flat dark ground when
     // nothing is playing.
+    //
+    // `contain`, not `cover`: album art is square and a terminal window is
+    // not, so `cover` scales a 640px cover up to fill the width and crops
+    // most of it away — "zoomed in too much". `contain` shows the whole
+    // cover centred at a sane size, and the Spotify theme's own ground
+    // (dark gradient + texture) fills the margins beside it, so the live
+    // art and the Spotify look are mixed rather than one swallowing the
+    // other. The readability overlay is still added in applyBackground.
     if (themeKey === "now-playing") {
       return nowPlayingArt
-        ? `url("${nowPlayingArt.replace(/"/g, "%22")}") center / cover no-repeat fixed`
+        ? `url("${nowPlayingArt.replace(/"/g, "%22")}") center / contain no-repeat fixed, ${THEMES.spotify.bgArt}`
         : currentTheme().bgArt;
     }
     return currentTheme().bgArt;
