@@ -80,6 +80,38 @@ function probe(scenario) {
   }
 }
 
+// The DOM fallback above is only half the story: nothing used to climb
+// back onto WebGL once the GPU returned, so a transient loss (killing DWM,
+// an RDP reconnect) left every affected tab on the slow DOM renderer until
+// the window reloaded — the "high CPU after I killed DWM" report. The
+// recovery is real-GPU territory the headless probe cannot force, so its
+// wiring is pinned at the source: a loss schedules a recovery, which
+// re-creates the addon under a bounded backoff.
+{
+  const { readFileSync } = await import("fs");
+  const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  check(
+    "a context loss schedules a WebGL recovery",
+    /onContextLoss\([\s\S]{0,800}scheduleWebglRecovery\(tab\)/.test(main),
+    "guardWebglContext must try to recover after a loss"
+  );
+  check(
+    "the recovery re-creates the WebGL addon",
+    /function scheduleWebglRecovery[\s\S]{0,600}new WebglAddon\(\)/.test(main),
+    "scheduleWebglRecovery must attempt a fresh WebglAddon"
+  );
+  check(
+    "and it is bounded, so a dead GPU cannot spin",
+    /WEBGL_RECOVERY_MAX_TRIES/.test(main) && /tries >= WEBGL_RECOVERY_MAX_TRIES/.test(main),
+    "the recovery must cap its attempts"
+  );
+  check(
+    "with a backoff that grows the wait",
+    /Math\.min\(2000 \* 2 \*\* tries/.test(main),
+    "each attempt must wait longer than the last"
+  );
+}
+
 if (failed) {
   console.log("");
   console.log(`${failed} context-loss test(s) failed`);

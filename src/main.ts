@@ -132,6 +132,11 @@ interface Tab {
   icon: HTMLElement;
   shellB: HTMLElement;
   webgl?: WebglAddon;
+  /// Recovery back onto WebGL after a context loss: how many attempts the
+  /// current run of losses has made (for backoff), and the pending retry
+  /// timer. See guardWebglContext / scheduleWebglRecovery.
+  webglTries?: number;
+  webglRetryTimer?: number;
   /// When output last changed this terminal's buffer, and when the
   /// renderer last drew - see the render-stall watch in main().
   wroteAt?: number;
@@ -2864,7 +2869,55 @@ function guardWebglContext(tab: Tab) {
     if (tab.webgl === addon) tab.webgl = undefined; // xterm falls back to DOM.
     // Draw now, so recovery is immediate rather than waiting on new output.
     if (tab.id === activeId) tab.term.refresh(0, tab.term.rows - 1);
+    // The DOM renderer keeps drawing, but it is the slow one — and nothing
+    // used to climb back onto WebGL once the GPU returned, so a transient
+    // loss (killing DWM, an RDP reconnect, a driver recycle) left every
+    // affected tab stuck on it. With many busy tabs that is the "high CPU
+    // after I killed DWM" report. Try to recover.
+    scheduleWebglRecovery(tab);
   });
+}
+
+/// The most attempts a single run of losses gets before the tab is left on
+/// the DOM renderer. A GPU that is genuinely gone must not be retried
+/// forever; a transient one is back within the first attempt or two.
+const WEBGL_RECOVERY_MAX_TRIES = 6;
+
+/// Climb back onto WebGL after a context loss, backing off so a GPU that
+/// stays gone cannot spin. Each failed attempt doubles the wait (2s, 4s, …
+/// capped at a minute); after `WEBGL_RECOVERY_MAX_TRIES` we give up and
+/// stay on DOM, which is drawing, just slowly. A context that then survives
+/// a cooldown resets the budget, so a later unrelated loss gets a fresh one.
+function scheduleWebglRecovery(tab: Tab) {
+  window.clearTimeout(tab.webglRetryTimer);
+  const tries = tab.webglTries ?? 0;
+  if (tries >= WEBGL_RECOVERY_MAX_TRIES) return;
+  const delay = Math.min(2000 * 2 ** tries, 60_000);
+  tab.webglRetryTimer = window.setTimeout(() => {
+    // Gone, switched to DOM on purpose, or already back: nothing to do.
+    if (!tabs.has(tab.id) || effRenderer() === "dom" || tab.webgl) return;
+    tab.webglTries = tries + 1;
+    try {
+      const addon = new WebglAddon();
+      tab.term.loadAddon(addon);
+      tab.webgl = addon;
+      guardWebglContext(tab); // a fresh loss re-enters this same recovery
+      if (tab.id === activeId) tab.term.refresh(0, tab.term.rows - 1);
+      logUi("render.webgl.recovered", { id: tab.id, tries: tab.webglTries });
+      // Only call it a real recovery once the context has held for a while:
+      // a GPU still settling can accept the addon and drop it a frame later,
+      // and resetting the budget then would let that loop. Reset only if
+      // this very addon is still the tab's after the cooldown.
+      window.setTimeout(() => {
+        if (tabs.has(tab.id) && tab.webgl === addon) tab.webglTries = 0;
+      }, 30_000);
+    } catch {
+      // The context still is not there — back off and try again; the
+      // doubling delay and the attempt cap bound the cost.
+      tab.webgl = undefined;
+      scheduleWebglRecovery(tab);
+    }
+  }, delay);
 }
 
 /// renderers live when the renderer setting changes.
