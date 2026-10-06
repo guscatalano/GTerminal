@@ -789,6 +789,13 @@ pub struct SessionInfo {
     pub cols: u16,
     #[serde(default)]
     pub rows: u16,
+    /// The shell process's PID. A tab maps to a process tree through this:
+    /// whatever is running inside the session (a `claude`, say) is a
+    /// descendant of this pid, so surfacing it is how a person tells which
+    /// of several identical processes belongs to which tab. None for a cold
+    /// session, whose process is gone.
+    #[serde(default)]
+    pub pid: Option<u32>,
 }
 
 /// The "oops I screwed up" window: killed sessions keep their process
@@ -2663,6 +2670,7 @@ fn conn_loop(
                                 shell: s.shell.clone(),
                                 cols: s.cols,
                                 rows: s.rows,
+                                pid: s.child_pid,
                             },
                             s.child_pid,
                         )
@@ -2680,6 +2688,7 @@ fn conn_loop(
                                 shell: s.shell.clone(),
                                 cols: 0,
                                 rows: 0,
+                                pid: None,
                             },
                             None,
                         )

@@ -88,6 +88,18 @@ check("the tab menu exists to be checked", tabMenu.length > 0, true);
 check("reopening elevated is a tab action", tabMenu.includes('label: "Reopen elevated'), true);
 check("so is duplicating", tabMenu.includes('label: "Duplicate tab'), true);
 
+// The shell PID, so a tab can be matched to the process tree inside it
+// (which `claude` belongs to which tab). Clicking copies it, for a
+// taskkill/Get-Process. The same fact is offered on the status bar.
+check("the tab menu shows the shell PID", tabMenu.includes("Shell PID ${info.pid}"), true);
+check("and clicking it copies the PID", tabMenu.includes("clipWrite(String(info.pid))"), true);
+check("there is a shell-PID status item", src.includes("shellpid: {"), true);
+check(
+  "which reads the pid of the focused tab",
+  /shellpid:[\s\S]{0,400}lastInfo\.get\(activeId\)/.test(src),
+  true
+);
+
 // And the terminal's own menu, which is everything between the
 // contextmenu listener and the end of the items it builds.
 const paneMenu = src.slice(

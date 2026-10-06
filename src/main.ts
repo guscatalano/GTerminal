@@ -150,6 +150,10 @@ interface SessionInfo {
   running: string[];
   cwd?: string;
   shell?: string;
+  /// The shell's process id. Whatever runs inside the tab (a `claude`,
+  /// say) is a descendant of this, so it is how a tab is matched to the
+  /// process tree in Task Manager. Absent for a cold session.
+  pid?: number;
 }
 
 // Latest per-session info from the daemon (cwd, running), for labels.
@@ -3131,6 +3135,9 @@ function focusPane(id: number) {
   tabs.get(id)?.term.focus();
   saveLayouts();
   refreshChrome();
+  // The shell-PID status item is about the focused tab, so it has to
+  // redraw when focus moves rather than waiting for the next stats tick.
+  renderStatusBar();
 }
 
 /// Split the focused pane, giving the new session the same folder — the
@@ -7447,6 +7454,22 @@ function renameTabAnywhere(id: number) {
 function showTabContextMenu(x: number, y: number, id: number) {
   const current = groupState.assign[id];
   const items: CtxItem[] = [{ label: "Rename tab", action: () => renameTabAnywhere(id) }];
+  // Which process tree is this tab? The shell's PID is the root of it, so
+  // whatever is running inside (a `claude`, say) is a descendant of this
+  // number — the way to tell two identical processes apart in Task Manager
+  // by the tab they belong to. Clicking copies it, for a taskkill/Get-Process.
+  const info = lastInfo.get(id);
+  if (info?.pid) {
+    const progs = (info.running ?? []).filter((n) => !SHELLS.test(n));
+    const what = progs.length ? ` · ${progs.join(", ")}` : "";
+    items.unshift(
+      {
+        label: `Shell PID ${info.pid}${what} — copy`,
+        action: () => void clipWrite(String(info.pid)),
+      },
+      "sep"
+    );
+  }
   items.push({ label: "Suggest title…", action: () => suggestTitles(id) });
   // Moving a tab to another window. A drag would be the obvious gesture
   // and is not available: two webviews share no drag context, so nothing
@@ -11043,6 +11066,30 @@ interface StatusItemDef {
 
 
 const STATUS_BUILTINS: Record<string, StatusItemDef> = {
+  // The active tab's shell PID. Unlike every other item here it is about
+  // the tab in focus rather than the machine, so it reads `activeId`
+  // directly; the bar is refreshed on focus (focusPane) so it keeps up as
+  // tabs change. It is how a person tells which process tree — which
+  // `claude`, say — belongs to the tab they are looking at.
+  shellpid: {
+    label: "Shell PID",
+    render: () => {
+      const info = activeId !== null ? lastInfo.get(activeId) : undefined;
+      return info?.pid ? `PID ${info.pid}` : "PID —";
+    },
+    detail: () => {
+      const info = activeId !== null ? lastInfo.get(activeId) : undefined;
+      const progs = (info?.running ?? []).filter((n) => !SHELLS.test(n));
+      return {
+        rows: [
+          ["Shell PID", info?.pid ? String(info.pid) : "—"],
+          ["Running inside", progs.length ? progs.join(", ") : "just the shell"],
+          ["Working dir", info?.cwd || "—"],
+          ["", "Anything running here is a child of this PID — match it in Task Manager by its parent."],
+        ],
+      };
+    },
+  },
   nowplaying: {
     label: "Now playing",
     render: (c) => formatNowPlaying(c.nowplaying, c.nowplayingFetched),
