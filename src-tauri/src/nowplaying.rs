@@ -46,7 +46,8 @@ fn data_uri(mime: &str, bytes: &[u8]) -> String {
 #[cfg(windows)]
 mod imp {
     use serde_json::{json, Value};
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
+    use std::time::{Duration, Instant};
     use windows::Media::Control::{
         GlobalSystemMediaTransportControlsSessionManager as Manager,
         GlobalSystemMediaTransportControlsSessionMediaProperties as MediaProperties,
@@ -60,11 +61,26 @@ mod imp {
     // handing us an arbitrary allocation to base64 into the UI.
     const MAX_ART_BYTES: u64 = 2 * 1024 * 1024;
 
+    // How long a dry read is allowed to go before the cached manager is
+    // suspected and replaced. See `current`.
+    const MANAGER_RETRY_AFTER: Duration = Duration::from_secs(30);
+
     thread_local! {
         // WinRT will not talk to a thread that is not in an apartment.
         // Worker threads are reused, so init once each and never uninit —
         // the poll runs on whichever thread the pool hands it.
         static COM_READY: Cell<bool> = const { Cell::new(false) };
+        // The SMTC session manager, acquired once and reused. `RequestAsync`
+        // is a COM/RPC round-trip to the Now Playing Session Manager service
+        // (NPSMSvc), and calling it on every poll — every few seconds, for
+        // as long as the feature is on — ran that service's CPU up for
+        // nothing. The manager is a long-lived system object that raises its
+        // own change events, so it is held and reused; `GetCurrentSession`
+        // is called on it each time instead.
+        static MANAGER: RefCell<Option<Manager>> = const { RefCell::new(None) };
+        // When the cached manager was last (re)acquired, to bound how often
+        // a run of empty reads is allowed to replace it.
+        static ACQUIRED_AT: Cell<Option<Instant>> = const { Cell::new(None) };
     }
 
     fn ensure_com() {
@@ -80,10 +96,49 @@ mod imp {
         });
     }
 
+    /// The cached session manager, acquiring it the first time (and after an
+    /// invalidation). The one place `RequestAsync` is allowed to run.
+    fn manager() -> Option<Manager> {
+        MANAGER.with(|slot| {
+            if let Some(m) = slot.borrow().as_ref() {
+                return Some(m.clone());
+            }
+            let m = Manager::RequestAsync().ok()?.get().ok()?;
+            *slot.borrow_mut() = Some(m.clone());
+            ACQUIRED_AT.with(|t| t.set(Some(Instant::now())));
+            Some(m)
+        })
+    }
+
+    fn invalidate_manager() {
+        MANAGER.with(|slot| *slot.borrow_mut() = None);
+    }
+
     pub fn current(want_art: bool) -> Option<Value> {
         ensure_com();
+        if let Some(v) = read_once(want_art) {
+            return Some(v);
+        }
+        // Nothing came back. Almost always that just means nothing is
+        // playing and the long-lived manager is perfectly fine — so it must
+        // NOT be re-requested, since that per-poll round-trip to NPSMSvc is
+        // the whole cost this change removes. But an empty read can also be a
+        // manager left stale by a reset media stack, which only a fresh one
+        // fixes. Split the difference: replace it at most once every
+        // `MANAGER_RETRY_AFTER`, so a quiet player is free and a broken
+        // manager still recovers within the half-minute.
+        let stale = ACQUIRED_AT
+            .with(|t| t.get())
+            .map_or(true, |at| at.elapsed() >= MANAGER_RETRY_AFTER);
+        if stale {
+            invalidate_manager();
+            return read_once(want_art);
+        }
+        None
+    }
 
-        let manager = Manager::RequestAsync().ok()?.get().ok()?;
+    fn read_once(want_art: bool) -> Option<Value> {
+        let manager = manager()?;
         // No current session means nothing has claimed the media controls —
         // no player open, or none playing. Not an error, just quiet.
         let session = manager.GetCurrentSession().ok()?;
@@ -160,7 +215,12 @@ mod tests {
         // Off Windows there is no media API; the call must be a quiet None
         // rather than a crash — the same shape the frontend treats as "not
         // playing". On Windows this just exercises that the call returns.
-        let _ = super::current(false);
+        // Called several times over: the manager is cached and reused across
+        // polls now, so this walks the reuse path, not just a cold first
+        // call, and must still be a clean no-panic None when idle.
+        for _ in 0..5 {
+            let _ = super::current(false);
+        }
         #[cfg(not(windows))]
         assert!(super::current(true).is_none());
     }
