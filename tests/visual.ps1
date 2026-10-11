@@ -129,19 +129,32 @@ if (-not $Yes) {
 # five theories, and scenes are independent by nature anyway.
 $scenes = @("pwsh", "paste", "cmd", "switch", "restore", "restore-none", "restore-zero", "restore-again", "copy", "hover", "clipboard", "cliphist", "tui", "multiwindow", "twowindows", "preview", "movetab", "lastfocused", "vim", "copilot", "copilot-mcp", "ctrlc", "altscreen", "tui-bg", "tui-dom", "tui-fast", "reboot", "decrqm", "closeall", "newwindow", "replayquery", "ghost", "pasteonce", "pastecontent", "selectionlives", "selectright", "selectmax", "pasteboth", "tabkeys", "maxtop", "tray", "tuicopy", "notify", "copyselect", "opensearch")
 if (-not $Only) {
-  $bad = 0
+  $badScenes = @()
   foreach ($s in $scenes) {
     Write-Host ""
     Write-Host "── scene: $s ──" -ForegroundColor Cyan
     # -Force on the child: the idle check already ran here, and by now the
     # only thing touching the keyboard is this test.
     & pwsh -NoProfile -File $PSCommandPath -Yes -Force -Only $s -Exe $exe
-    if ($LASTEXITCODE -ne 0) { $bad++ }
+    if ($LASTEXITCODE -ne 0) { $badScenes += $s }
   }
   Write-Host ""
   Get-ChildItem (Join-Path $repo "docs\visual") -Filter *.avi -ErrorAction SilentlyContinue |
     ForEach-Object { "  {0,-14} {1,6:n1} MB" -f $_.Name, ($_.Length / 1MB) }
-  if ($bad) { Write-Host "$bad scene(s) failed" -ForegroundColor Red; exit 1 }
+  # Own the retry file here, from the exit codes of the whole run. Each
+  # failing child writes this same file from its own view, so the last one
+  # to fail used to win and the workflow retried only that one scene — on a
+  # busy runner, where several timing-sensitive scenes tip over at once,
+  # that left most of them unretried and the suite red for a flake that a
+  # second isolated pass clears. The parent sees every failure, so it writes
+  # the full list (after the children, so its write is the one that stands).
+  $failedFile = Join-Path $env:TEMP "gt-visual-failed.txt"
+  Remove-Item $failedFile -Force -ErrorAction SilentlyContinue
+  if ($badScenes.Count) { Set-Content -Path $failedFile -Value $badScenes }
+  if ($badScenes.Count) {
+    Write-Host "$($badScenes.Count) scene(s) failed: $($badScenes -join ', ')" -ForegroundColor Red
+    exit 1
+  }
   "all visual tests passed"
   exit 0
 }
