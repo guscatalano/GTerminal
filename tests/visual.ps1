@@ -2387,7 +2387,7 @@ if (-not $Only -or $Only -eq "preview") {
 # The assertion is that the session survives the journey and is still
 # usable at the other end, which is the only part that matters.
 if (-not $Only -or $Only -eq "movetab") {
-  $ctx14 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7}"
+  $ctx14 = Start-App "{$baseCfg,`"default_shell`":`"pwsh`",`"history_days`":7,`"ui_log`":`"full`"}"
   $h14 = $ctx14.Hwnd
   Record-Scene "movetab" 40 $ctx14 {
     Run-Cmd 'echo MOVER-13579' 3
@@ -2402,15 +2402,28 @@ if (-not $Only -or $Only -eq "movetab") {
     Right-Click ($h14) 120 33                       # the tab itself
     Start-Sleep -Seconds 1
     $script:tabMenuShot = Capture-Window $h14
-    # Rename tab, Suggest title…, Move to Window 2 - measured from a
-    # capture of the menu rather than counted from the source, which is
-    # how the click landed on Set badge… the first time.
-    Click ($h14) 200 108
+    # Click "Move to Window 2" where the menu reports its row landed, not
+    # at a memorised pixel. A new item above it (the Shell PID row) shifts
+    # it down, and a fixed coordinate then chooses the wrong row — the same
+    # trap the cliphist scene documents and avoids by reading the log.
+    # (ui_log:full on ctx14 is what makes menu.open carry row positions.)
+    $menuOpen = @(Ui-Events "menu.open")
+    $script:moveRows = if ($menuOpen.Count) { @($menuOpen[-1].rows) } else { @() }
+    $script:moveRow = @($script:moveRows | Where-Object { $_.label -like "Move to *" })
+    if ($script:moveRow.Count) { Click-Client ($h14) ([int]$script:moveRow[0].x) ([int]$script:moveRow[0].y) }
     Start-Sleep -Seconds 5
     $script:afterMove = Daemon-Sessions
     $script:windowsNow = App-Windows $ctx14.App.Id
   }
   Write-Host ("  moved id {0}; daemon: {1}" -f $moverId, (($afterMove | ForEach-Object { "$($_.id)(att=$($_.attached))" }) -join " ")) -ForegroundColor DarkGray
+  # Say why a move never happened before judging its result: a menu that
+  # did not open, or had no "Move to …" item, is a different fault from a
+  # move that was clicked and did not take.
+  if (-not $moveRows.Count) {
+    Fail "movetab" "the tab menu logged no rows - it may not have opened, or ui_log full did not take"
+  } elseif (-not $moveRow.Count) {
+    Fail "movetab" "the tab menu has no 'Move to …' item; it offered: $(($moveRows | ForEach-Object { $_.label }) -join ' | ')"
+  }
   $moved = @($afterMove | Where-Object { $_.id -eq $moverId -and $_.attached -and $_.alive })
   if ($moved.Count -eq 1) { Pass "the moved session is still alive and open" }
   else { Fail "movetab" "the session did not survive being moved" }
