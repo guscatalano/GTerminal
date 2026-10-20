@@ -27,7 +27,12 @@ permissions:
 jobs:
   mutate:
     runs-on: windows-latest
-    timeout-minutes: 90
+    # Each applied mutation rebuilds the app, so the ceiling tracks how many
+    # actually apply. It used to finish inside 90 only because a line-ending
+    # bug silently skipped every multi-line anchor; with those fixed (and
+    # the full set now really building) a complete run needs more room. This
+    # is a weekly, off-the-release-path job, so the wider budget is free.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v7
 
