@@ -55,8 +55,13 @@ $mutations = @(
     Name = "replay-answers-questions"
     What = "replay a scrollback with its questions left in"
     File = "src-tauri/src/mux.rs"
-    Find = 'let replay = strip_queries(&String::from_utf8_lossy(&s.ring));'
-    With = 'let replay = String::from_utf8_lossy(&s.ring).into_owned();'
+    # The stripping moved into replay_for when the reattach path was
+    # factored into build_attach_replay; this bypasses it there. `text` is
+    # a Cow<str>, so .to_string() leaves the questions in while keeping the
+    # line compiling and `stripped` used. lifecycle's replay-queries check
+    # fails on a replay that still carries ESC[6n / ESC[c.
+    Find = '    let stripped = strip_queries(&text);'
+    With = '    let stripped = text.to_string();'
     Check = "lifecycle"
   },
   @{
@@ -383,7 +388,15 @@ $uncaught = @()
 foreach ($m in $mutations) {
   $path = Join-Path $repo $m.File
   $original = Get-Content $path -Raw
-  $hits = ([regex]::Matches($original, [regex]::Escape($m.Find))).Count
+  # Match and replace against an LF-normalised copy. The Find/With anchors
+  # here join their lines with `n (LF), but a Windows checkout gives the
+  # source CRLF — so every *multi-line* anchor matched zero times and was
+  # reported as drifted when the code was in fact unchanged. (This is why
+  # this suite had been red for months.) Normalise for the search and the
+  # edit; the mutated build compiles the same under either newline, and the
+  # untouched $original is what gets restored at the end, byte for byte.
+  $norm = $original -replace "`r`n", "`n"
+  $hits = ([regex]::Matches($norm, [regex]::Escape($m.Find))).Count
   if ($hits -ne 1) {
     Write-Host "SKIP $($m.Name): its anchor appears $hits times in $($m.File), so the mutation would land somewhere unintended" -ForegroundColor Yellow
     $uncaught += "$($m.Name) (anchor no longer unique)"
@@ -391,7 +404,7 @@ foreach ($m in $mutations) {
   }
   Write-Host "── $($m.Name): $($m.What)" -ForegroundColor Cyan
   try {
-    Set-Content -Path $path -Value ($original.Replace($m.Find, $m.With)) -NoNewline
+    Set-Content -Path $path -Value ($norm.Replace($m.Find, $m.With)) -NoNewline
     $exe = $null
     # Neither of these needs the app built: the bundle check reads dist,
     # and cargo test compiles what it runs. Sending them through Build-For
